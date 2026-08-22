@@ -149,6 +149,26 @@ jobs:
           go-version: ${{ matrix.compatible == true && '1.20.x' || '1.25.x' }}
           cache-dependency-path: core/go.sum
 
+      - name: Build CorpLink helper (Windows amd64)
+        if: matrix.platform == 'windows' && matrix.arch == 'amd64'
+        shell: pwsh
+        run: |
+          $helperRoot = Join-Path $env:RUNNER_TEMP 'corplink-rs'
+          git clone --depth 1 https://github.com/luantu/corplink-rs.git $helperRoot
+          Push-Location (Join-Path $helperRoot 'libwg')
+          & .\build.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'libwg build failed' }
+          Pop-Location
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+          rustup default stable-x86_64-pc-windows-msvc
+          Push-Location $helperRoot
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw 'corplink-rs build failed' }
+          Pop-Location
+          $target = 'tools/corplink-rs/windows/x64'
+          New-Item -ItemType Directory -Force $target | Out-Null
+          Copy-Item (Join-Path $helperRoot 'target/release/corplink-rs.exe') (Join-Path $target 'corplink-rs.exe')
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:

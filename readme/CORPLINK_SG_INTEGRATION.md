@@ -102,8 +102,9 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 
 ## 构建与发布
 
-先在 `tools/corplink-rs/windows/x64/`（或 `arm64/`）放置对应架构的
-`corplink-rs.exe`，再执行：
+GitHub Actions 的 Windows amd64 构建会自动从 `luantu/corplink-rs` 编译并放置
+`corplink-rs.exe`。本地构建时，需要先在 `tools/corplink-rs/windows/x64/`（或
+`arm64/`）放置对应架构的 helper，再执行：
 
 ```powershell
 flutter pub get
