@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,26 +18,17 @@ import (
 	"github.com/metacubex/mihomo/component/resolver"
 	"github.com/metacubex/mihomo/component/slowdown"
 	C "github.com/metacubex/mihomo/constant"
-	"github.com/metacubex/mihomo/constant/features"
 	"github.com/metacubex/mihomo/dns"
 	"github.com/metacubex/mihomo/log"
 
-	amneziav3 "github.com/metacubex/amneziawg-go/device"
-	amnezia "github.com/metacubex/amneziawg-go/device_v1"
-	"github.com/metacubex/mipstack"
+	amnezia "github.com/metacubex/amneziawg-go/device"
 	wireguard "github.com/metacubex/sing-wireguard"
+	wgconn "github.com/metacubex/wireguard-go/conn"
 	"github.com/metacubex/wireguard-go/device"
-	"github.com/metacubex/wireguard-go/tun"
 
 	"github.com/metacubex/sing/common/debug"
 	E "github.com/metacubex/sing/common/exceptions"
 	M "github.com/metacubex/sing/common/metadata"
-)
-
-const (
-	ipStackAuto   = "auto"
-	ipStackGVisor = "gvisor"
-	ipStackMips   = "mips"
 )
 
 type wireguardGoDevice interface {
@@ -47,11 +36,21 @@ type wireguardGoDevice interface {
 	IpcSet(uapiConf string) error
 }
 
+// wireGuardBind 抽象 UDP（sing ClientBind）与 TCP（自定义）两种 transport，
+// 统一暴露 wireguard-go conn.Bind 及 ClientBind 的附加方法。
+type wireGuardBind interface {
+	wgconn.Bind
+	SetConnectAddr(netip.AddrPort)
+	SetReservedForEndpoint(netip.AddrPort, [3]byte)
+	ResetReservedForEndpoint()
+	SetParseReserved(bool)
+}
+
 type WireGuard struct {
 	*Base
-	bind      *wireguard.ClientBind
+	bind      wireGuardBind
 	device    wireguardGoDevice
-	tunDevice wireguardDevice
+	tunDevice wireguard.Device
 	resolver  resolver.Resolver
 
 	initOk        atomic.Bool
@@ -64,21 +63,199 @@ type WireGuard struct {
 	serverAddrMap   map[M.Socksaddr]netip.AddrPort
 	serverAddrTime  atomic.TypedValue[time.Time]
 	serverAddrMutex sync.Mutex
+
+	// busyFail 记录连续业务失败（业务 dial 超时/隧道内连接失败）次数。
+	// 达到阈值（busyFailThreshold）时视为隧道 unhealthy，主动失效底层
+	// TCP 连接并触发受控重连，解决"连接看似存在但数据面无响应"的静默断链。
+	busyFail           atomic.Int32
+	busyFailResetAt    atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
+	corplinkRecoveryAt atomic.Int64 // unix nano，限制故障风暴期间的会话刷新频率
+}
+
+// busyFailThreshold 为业务连续失败触发重建的阈值。
+const busyFailThreshold = 3
+
+// busyFailWindow 为业务失败计数窗口：窗口内累计达到阈值才触发重建，
+// 超过窗口未失败则重置，避免瞬时抖动误触发。
+const busyFailWindow = 30 * time.Second
+
+// tunnelFailureDialTimeout bounds the tunnel establishment portion of a
+// business dial. The normal mihomo TCP timeout is too long when the TCP
+// wrapper is connected but WireGuard never completes its handshake.
+const tunnelFailureDialTimeoutValue = 3 * time.Second
+
+func tunnelFailureDialTimeout() time.Duration { return tunnelFailureDialTimeoutValue }
+
+// isTunnelFailure 判断业务错误是否属于"隧道数据面失败"（应触发重建）。
+// DNS 解析失败/超时属于外部解析问题，不应误判为隧道不可用而反复重建。
+func isTunnelFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// DNS 相关失败不计入隧道健康
+	if strings.Contains(msg, "dns") || strings.Contains(msg, "resolve") ||
+		strings.Contains(msg, "dns-query") || strings.Contains(msg, "no such host") {
+		return false
+	}
+	// Do not classify every dial timeout as a tunnel failure. A target site can
+	// be slow/unreachable while the shared WireGuard transport is healthy;
+	// invalidating the transport after three unrelated target failures creates
+	// the observed self-inflicted reconnect storm. Only explicit transport
+	// failure markers are allowed to tear down the shared TCP-WireGuard link.
+	for _, marker := range []string{
+		"tunnel unavailable",
+		"tunnel not ready",
+		"handshake timeout",
+		"use of closed network connection",
+		"broken pipe",
+		"connection reset by peer",
+		"connection refused",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// waitTunnelReady 等待当前 TCP 连接完成 WireGuard 握手（隧道 ready）。
+// 返回 true 表示就绪；false 表示超时或连接不存在。仅 TCP 模式使用。
+func (w *WireGuard) waitTunnelReady(ctx context.Context) bool {
+	if !w.option.TCP {
+		return true
+	}
+	tcpBind, ok := w.bind.(interface {
+		IsConnReady(string) bool
+	})
+	if !ok {
+		return true
+	}
+	ep := w.connectAddr.String()
+	// 连接不存在（尚未建立）时直接放行，让 Send 触发建连
+	if !tcpBind.IsConnReady(ep) {
+		if waiter, ok := w.bind.(interface {
+			WaitConnReady(string, time.Duration) bool
+		}); ok {
+			return waiter.WaitConnReady(ep, tunnelFailureDialTimeout())
+		}
+		// 等待 ready 或超时
+		deadline := time.NewTimer(tunnelFailureDialTimeout())
+		defer deadline.Stop()
+		for {
+			if tcpBind.IsConnReady(ep) {
+				return true
+			}
+			select {
+			case <-ctx.Done():
+				return false
+			case <-deadline.C:
+				return false
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
+	return true
+}
+
+// registerBusyFailure 登记一次业务失败；达到阈值时返回 true（调用方触发重建）。
+func (w *WireGuard) registerBusyFailure() bool {
+	now := time.Now().UnixNano()
+	last := w.busyFailResetAt.Load()
+	if now-last > int64(busyFailWindow) {
+		w.busyFailResetAt.Store(now)
+		w.busyFail.Store(0)
+	}
+	n := w.busyFail.Add(1)
+	if n >= busyFailThreshold {
+		// 达到阈值：重置计数，下次成功后从 0 开始
+		w.busyFail.Store(0)
+		return true
+	}
+	return false
+}
+
+// recordBusySuccess 业务成功时清零失败计数。
+func (w *WireGuard) recordBusySuccess() {
+	w.busyFail.Store(0)
+	w.busyFailResetAt.Store(time.Now().UnixNano())
+}
+
+// invalidateTunnelForBusyFailure 业务连续失败时失效隧道底层连接并触发重建。
+func (w *WireGuard) invalidateTunnelForBusyFailure() {
+	if w.option.TCP {
+		if tcpBind, ok := w.bind.(interface {
+			InvalidateEndpoint(string)
+		}); ok {
+			ep := w.connectAddr.String()
+			log.Warnln("[WG](%s) tunnel unhealthy: %d consecutive business failures, invalidating TCP connection %s",
+				w.option.Name, busyFailThreshold, ep)
+			tcpBind.InvalidateEndpoint(ep)
+			// Corplink can rotate the assigned tunnel IP/server peer while the
+			// process is alive. Re-dialing TCP with the old wg_info repeatedly
+			// produces the misleading pattern "TCP connected, handshake timeout".
+			// Refresh the session parameters before the next connection attempt.
+			w.refreshCorplinkAfterTunnelFailure()
+		}
+	}
+}
+
+func (w *WireGuard) refreshCorplinkAfterTunnelFailure() {
+	if w.option.Corplink.APIServer == "" || w.device == nil {
+		return
+	}
+	now := time.Now().UnixNano()
+	last := w.corplinkRecoveryAt.Load()
+	if last != 0 && now-last < int64(15*time.Second) {
+		return
+	}
+	if !w.serverAddrMutex.TryLock() {
+		return
+	}
+	defer w.serverAddrMutex.Unlock()
+	// Re-check after acquiring the lock so concurrent failed dials coalesce
+	// into one refresh instead of repeatedly rewriting the live WG device.
+	now = time.Now().UnixNano()
+	last = w.corplinkRecoveryAt.Load()
+	if last != 0 && now-last < int64(15*time.Second) {
+		return
+	}
+	w.corplinkRecoveryAt.Store(now)
+	if err := refreshCorplinkOption(&w.option); err != nil {
+		log.Warnln("[WG](%s) corplink refresh after tunnel failure failed: %v", w.option.Name, err)
+		return
+	}
+	ipcConf, err := w.genIpcConf(context.Background(), true)
+	if err != nil {
+		log.Warnln("[WG](%s) failed to rebuild peer config after corplink refresh: %v", w.option.Name, err)
+		return
+	}
+	if err := w.device.IpcSet(ipcConf); err != nil {
+		log.Warnln("[WG](%s) failed to apply refreshed peer config: %v", w.option.Name, err)
+		return
+	}
+	w.serverAddrTime.Store(time.Now())
+	log.Infoln("[WG](%s) applied refreshed corplink peer parameters after tunnel failure", w.option.Name)
 }
 
 type WireGuardOption struct {
 	BasicOption
 	WireGuardPeerOption
-	Name                string `proxy:"name"`
-	Ip                  string `proxy:"ip,omitempty"`
-	Ipv6                string `proxy:"ipv6,omitempty"`
-	PrivateKey          string `proxy:"private-key"`
-	Workers             int    `proxy:"workers,omitempty"`
-	MTU                 int    `proxy:"mtu,omitempty"`
-	UDP                 bool   `proxy:"udp,omitempty"`
-	PersistentKeepalive int    `proxy:"persistent-keepalive,omitempty"`
+	Name       string `proxy:"name"`
+	Ip         string `proxy:"ip,omitempty"`
+	Ipv6       string `proxy:"ipv6,omitempty"`
+	PrivateKey string `proxy:"private-key"`
+	Workers    int    `proxy:"workers,omitempty"`
+	MTU        int    `proxy:"mtu,omitempty"`
+	UDP        bool   `proxy:"udp,omitempty"`
+	// TCP 使 wireguard 走 TCP transport（兼容 corplink-rs 的 TCP 封装），
+	// 用于公司内部仅开放 TCP 的节点。默认 false（标准 UDP）。
+	TCP                 bool `proxy:"tcp,omitempty"`
+	PersistentKeepalive int  `proxy:"persistent-keepalive,omitempty"`
 
-	IPStack IPStackOption `proxy:"ip-stack,omitempty"`
+	// Corplink 认证（可选）：启用后启动时调用 corplink /vpn/conn API
+	// 获取当前会话分配的隧道 IP 与服务器公钥，自动覆盖 ip/public-key。
+	Corplink CorplinkOption `proxy:"corplink,omitempty"`
 
 	AmneziaWGOption *AmneziaWGOption `proxy:"amnezia-wg-option,omitempty"`
 
@@ -100,192 +277,26 @@ type WireGuardPeerOption struct {
 }
 
 type AmneziaWGOption struct {
-	Version int `proxy:"version,omitempty"` // Only version 3 uses the v3 implementation; all other values use the legacy implementation.
-
-	JC   int `proxy:"jc,omitempty"`
-	JMin int `proxy:"jmin,omitempty"`
-	JMax int `proxy:"jmax,omitempty"`
-	S1   int `proxy:"s1,omitempty"`
-	S2   int `proxy:"s2,omitempty"`
-	S3   int `proxy:"s3,omitempty"` // AmneziaWG v1.5+
-	S4   int `proxy:"s4,omitempty"` // AmneziaWG v1.5+
-
-	// H1-H4 accept uint32 values in v1.x and uint32 values or ranges in v2+.
-	// WeaklyTypedInput accepts both numeric and string representations.
-	H1 string `proxy:"h1,omitempty"`
-	H2 string `proxy:"h2,omitempty"`
-	H3 string `proxy:"h3,omitempty"`
-	H4 string `proxy:"h4,omitempty"`
-
-	I1 string `proxy:"i1,omitempty"` // AmneziaWG v1.5+
-	I2 string `proxy:"i2,omitempty"` // AmneziaWG v1.5+
-	I3 string `proxy:"i3,omitempty"` // AmneziaWG v1.5+
-	I4 string `proxy:"i4,omitempty"` // AmneziaWG v1.5+
-	I5 string `proxy:"i5,omitempty"` // AmneziaWG v1.5+
-
-	J1    string `proxy:"j1,omitempty"`    // AmneziaWG v1.5 only (removed in v2+)
-	J2    string `proxy:"j2,omitempty"`    // AmneziaWG v1.5 only (removed in v2+)
-	J3    string `proxy:"j3,omitempty"`    // AmneziaWG v1.5 only (removed in v2+)
-	Itime int64  `proxy:"itime,omitempty"` // AmneziaWG v1.5 only (removed in v2+)
-
-	// AmneziaWG v3+ only. Version must be 3, and these options cannot be combined with the v1.5-only options above.
-	HeaderProtectionKey    string `proxy:"header-protection-key,omitempty"`
-	ContentPaddingAddition string `proxy:"content-padding-addition,omitempty"`
-	RekeyAfterTime         string `proxy:"rekey-after-time,omitempty"`
-	RekeyTimeout           string `proxy:"rekey-timeout,omitempty"`
-	RejectAfterTime        string `proxy:"reject-after-time,omitempty"`
-	KeepaliveTimeout       string `proxy:"keepalive-timeout,omitempty"`
-	MaxHandshakeAttempts   string `proxy:"max-handshake-attempts,omitempty"`
-	RandomTrailers         bool   `proxy:"random-trailers,omitempty"` // AmneziaWG v3.1+
-	DisableCookies         bool   `proxy:"disable-cookies,omitempty"` // AmneziaWG v3.1+
-}
-
-type IPStackOption struct {
-	Mode                 string `proxy:"mode,omitempty"`
-	CongestionController string `proxy:"congestion-controller,omitempty"`
-}
-
-func (o *IPStackOption) normalize() {
-	o.Mode = strings.ToLower(o.Mode)
-	if o.Mode == "" {
-		o.Mode = ipStackAuto
-	}
-	o.CongestionController = strings.ToLower(o.CongestionController)
-}
-
-func (o IPStackOption) validate() error {
-	switch o.Mode {
-	case ipStackAuto, ipStackMips:
-	case ipStackGVisor:
-		if !features.WithGVisor {
-			return errors.New("gVisor IP stack requires the with_gvisor build tag")
-		}
-	default:
-		return fmt.Errorf("invalid IP stack mode %q; expected auto, gvisor, or mips", o.Mode)
-	}
-	switch mipstack.CongestionControl(o.CongestionController) {
-	case "", mipstack.CongestionControlCUBIC, mipstack.CongestionControlReno, mipstack.CongestionControlBBR, mipstack.CongestionControlBBR3:
-		return nil
-	default:
-		return fmt.Errorf("invalid IP stack congestion controller %q; expected cubic, reno, bbr, or bbr3", o.CongestionController)
-	}
-}
-
-// ipStack is the mihomo IP stack's packet and socket surface, adapted from
-// sing-wireguard only for gVisor.
-type ipStack interface {
-	Start() error
-	DialTCP(ctx context.Context, network string, source, destination netip.AddrPort) (net.Conn, error)
-	DialUDP(ctx context.Context, network string, source, destination netip.AddrPort) (net.Conn, error)
-	ListenUDP(ctx context.Context, network string, local netip.AddrPort) (net.PacketConn, error)
-	Read(buffers [][]byte, sizes []int, offset int) (int, error)
-	Write(buffers [][]byte, offset int) (int, error)
-	MTU() (int, error)
-	Name() (string, error)
-	BatchSize() int
-	Close() error
-}
-
-// newIPStack constructs the selected userspace IP stack.
-func newIPStack(option IPStackOption, localAddresses []netip.Prefix, mtu uint32) (ipStack, error) {
-	mode := option.Mode
-	if mode == ipStackAuto {
-		if features.WithGVisor {
-			mode = ipStackGVisor
-		} else {
-			mode = ipStackMips
-		}
-	}
-	switch mode {
-	case ipStackGVisor:
-		return wireguard.NewStackDevice(localAddresses, mtu)
-	case ipStackMips:
-		return mipstack.New(mipstack.Config{
-			LocalAddresses: localAddresses,
-			MTU:            mtu,
-			TCP: mipstack.TCPSocketDefaults{
-				CongestionControl: mipstack.CongestionControl(option.CongestionController),
-				// Align with sing-wireguard: enable keepalive with 15-second
-				// idle/interval timing and gVisor's default probe count.
-				KeepAlive: true,
-				KeepAliveConfig: mipstack.KeepAliveConfig{
-					Idle: 15 * time.Second, Interval: 15 * time.Second, Count: 9,
-				},
-			},
-		})
-	default:
-		return nil, errors.New("invalid IP stack mode")
-	}
-}
-
-var _ ipStack = (*mipstack.Stack)(nil)
-var _ ipStack = (wireguard.Device)(nil)
-
-type ipStackNetDialer struct {
-	stack ipStack
-}
-
-var _ dialer.NetDialer = (*ipStackNetDialer)(nil)
-
-func (d ipStackNetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	dst, err := netip.ParseAddrPort(address)
-	if err != nil {
-		return nil, fmt.Errorf("invalid address %q: %w", address, err)
-	}
-	switch {
-	case strings.HasPrefix(network, "tcp"):
-		return d.stack.DialTCP(ctx, network, netip.AddrPort{}, dst)
-	case strings.HasPrefix(network, "udp"):
-		return d.stack.DialUDP(ctx, network, netip.AddrPort{}, dst)
-	default:
-		return nil, fmt.Errorf("invalid network %q", network)
-	}
-}
-
-type wireguardDevice interface {
-	ipStack
-	tun.Device
-}
-
-type ipStackWireguardDevice struct {
-	ipStack
-	events    chan tun.Event
-	closeOnce sync.Once
-}
-
-func (d *ipStackWireguardDevice) File() *os.File {
-	return nil
-}
-
-func (d *ipStackWireguardDevice) Events() <-chan tun.Event {
-	return d.events
-}
-
-func (d *ipStackWireguardDevice) Start() error {
-	d.events <- tun.EventUp
-	return nil
-}
-
-func (d *ipStackWireguardDevice) Close() error {
-	d.closeOnce.Do(func() {
-		close(d.events)
-	})
-	return d.ipStack.Close()
-}
-
-func newWireguardDevice(stack ipStack) (wireguardDevice, error) {
-	if wgDevice, ok := stack.(wireguardDevice); ok {
-		return wgDevice, nil
-	}
-	// mipstack must start at here
-	err := stack.Start()
-	if err != nil {
-		return nil, err
-	}
-	return &ipStackWireguardDevice{
-		ipStack: stack,
-		events:  make(chan tun.Event, 1),
-	}, nil
+	JC    int    `proxy:"jc,omitempty"`
+	JMin  int    `proxy:"jmin,omitempty"`
+	JMax  int    `proxy:"jmax,omitempty"`
+	S1    int    `proxy:"s1,omitempty"`
+	S2    int    `proxy:"s2,omitempty"`
+	S3    int    `proxy:"s3,omitempty"`    // AmneziaWG v1.5 and v2
+	S4    int    `proxy:"s4,omitempty"`    // AmneziaWG v1.5 and v2
+	H1    string `proxy:"h1,omitempty"`    // In AmneziaWG v1.x, it was uint32, but our WeaklyTypedInput can handle this situation
+	H2    string `proxy:"h2,omitempty"`    // In AmneziaWG v1.x, it was uint32, but our WeaklyTypedInput can handle this situation
+	H3    string `proxy:"h3,omitempty"`    // In AmneziaWG v1.x, it was uint32, but our WeaklyTypedInput can handle this situation
+	H4    string `proxy:"h4,omitempty"`    // In AmneziaWG v1.x, it was uint32, but our WeaklyTypedInput can handle this situation
+	I1    string `proxy:"i1,omitempty"`    // AmneziaWG v1.5 and v2
+	I2    string `proxy:"i2,omitempty"`    // AmneziaWG v1.5 and v2
+	I3    string `proxy:"i3,omitempty"`    // AmneziaWG v1.5 and v2
+	I4    string `proxy:"i4,omitempty"`    // AmneziaWG v1.5 and v2
+	I5    string `proxy:"i5,omitempty"`    // AmneziaWG v1.5 and v2
+	J1    string `proxy:"j1,omitempty"`    // AmneziaWG v1.5 only (removed in v2)
+	J2    string `proxy:"j2,omitempty"`    // AmneziaWG v1.5 only (removed in v2)
+	J3    string `proxy:"j3,omitempty"`    // AmneziaWG v1.5 only (removed in v2)
+	Itime int64  `proxy:"itime,omitempty"` // AmneziaWG v1.5 only (removed in v2)
 }
 
 type wgSingErrorHandler struct {
@@ -376,7 +387,26 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 			outbound.connectAddr = option.Addr()
 		}
 	}
-	outbound.bind = wireguard.NewClientBind(context.Background(), wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
+	if option.TCP {
+		// TCP transport：直接连服务器（不依赖 sing dialer），兼容 corplink-rs 的 TCP 封装
+		target := outbound.connectAddr
+		log.Infoln("[WG](%s) using TCP transport, target=%s", option.Name, target)
+		if option.Corplink.APIServer != "" {
+			log.Infoln("[WG](%s) corplink auth enabled: api=%s cookie=%s", option.Name, option.Corplink.APIServer, option.Corplink.CookieFile)
+		} else {
+			log.Infoln("[WG](%s) corplink auth NOT enabled", option.Name)
+		}
+		outbound.bind = newTCPWireGuardBind(context.Background(), func(ctx context.Context) (net.Conn, error) {
+			d := net.Dialer{}
+			nc, err := d.DialContext(ctx, "tcp", target.String())
+			if err != nil {
+				return nil, err
+			}
+			return nc, nil
+		})
+	} else {
+		outbound.bind = wireguard.NewClientBind(context.Background(), wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
+	}
 
 	var err error
 	outbound.localPrefixes, err = option.Prefixes()
@@ -435,12 +465,20 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 			option.PreSharedKey = hex.EncodeToString(bytes)
 		}
 	}
-	if option.AmneziaWGOption != nil && option.AmneziaWGOption.HeaderProtectionKey != "" {
-		bytes, err := base64.StdEncoding.DecodeString(option.AmneziaWGOption.HeaderProtectionKey)
-		if err != nil {
-			return nil, E.Cause(err, "decode header protection key")
+
+	// corplink 认证：在创建 wireguard 栈设备前调用 corplink /vpn/conn API
+	// 获取当前会话分配的隧道 IP 与服务器公钥，覆盖节点配置。
+	// 此时 option.PublicKey 已统一为 hex 格式，fetch 返回的 hex 直接可用。
+	if option.Corplink.APIServer != "" {
+		if err := refreshCorplinkOption(&option); err != nil {
+			return nil, err
 		}
-		option.AmneziaWGOption.HeaderProtectionKey = hex.EncodeToString(bytes)
+		outbound.localPrefixes, err = option.Prefixes()
+		if err != nil {
+			return nil, err
+		}
+		// 启动 cookie 过期检测：即将过期时自动执行 corplink --refresh-cookie
+		corplinkCookieWatchdog(option.Corplink)
 	}
 	outbound.option = option
 
@@ -448,24 +486,13 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	if mtu == 0 {
 		mtu = 1408
 	}
-	option.IPStack.normalize()
-	if err = option.IPStack.validate(); err != nil {
-		return nil, err
-	}
 	if len(outbound.localPrefixes) == 0 {
 		return nil, E.New("missing local address")
 	}
-
-	stack, err := newIPStack(option.IPStack, outbound.localPrefixes, uint32(mtu))
+	outbound.tunDevice, err = wireguard.NewStackDevice(outbound.localPrefixes, uint32(mtu))
 	if err != nil {
-		return nil, E.Cause(err, "create WireGuard stack")
-	}
-	outbound.tunDevice, err = newWireguardDevice(stack)
-	if err != nil {
-		_ = stack.Close()
 		return nil, E.Cause(err, "create WireGuard device")
 	}
-
 	logger := &device.Logger{
 		Verbosef: func(format string, args ...interface{}) {
 			log.SingLogger.Debug(fmt.Sprintf("[WG](%s) %s", option.Name, fmt.Sprintf(format, args...)))
@@ -476,13 +503,32 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	}
 	if option.AmneziaWGOption != nil {
 		outbound.bind.SetParseReserved(false) // AmneziaWG don't need parse reserved
-		if option.AmneziaWGOption.Version == 3 {
-			outbound.device = amneziav3.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		} else {
-			outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		}
+		outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
 	} else {
 		outbound.device = device.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
+		// 握手监听：握手永久失败时主动失效底层 TCP 连接（仅 wg-fork device 支持）。
+		// 解决"TCP 连接仍在但 WireGuard 数据面无响应"导致的静默断链。
+		if option.TCP {
+			if wd, ok := outbound.device.(interface {
+				SetHandshakeListener(func(string))
+				SetHandshakeCompleteListener(func(string))
+			}); ok {
+				if tcpBind, ok := outbound.bind.(interface {
+					InvalidateEndpoint(string)
+					MarkConnReady(string)
+				}); ok {
+					wd.SetHandshakeListener(func(endpoint string) {
+						log.Warnln("[WG](%s) handshake failed for %s, invalidating TCP connection", option.Name, endpoint)
+						tcpBind.InvalidateEndpoint(endpoint)
+					})
+					// 握手完成：标记隧道 ready。TCP connected 不等于隧道可用，
+					// 业务只有在握手完成后才允许放行。
+					wd.SetHandshakeCompleteListener(func(endpoint string) {
+						tcpBind.MarkConnReady(endpoint)
+					})
+				}
+			}
+		}
 	}
 
 	var has6 bool
@@ -498,8 +544,18 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		if err != nil {
 			return nil, err
 		}
+		// DoH 通道策略：
+		// - 海外 DoH (1.1.1.1/8.8.8.8) 走 SG-Node 隧道：本机直连被墙，但隧道内
+		//   能拿到 chatgpt.com 等域名的真实 IP（国内 DoH 会返回污染 IP）。
+		// - 国内 DoH (223.5.5.5 等) 直连：解析国内域名快，作为兜底避免隧道
+		//   抖动时全部超时。
+		// 通过 server 地址区分：1.1.1.1 / 8.8.8.8 走隧道，其余直连。
 		for i := range nss {
-			nss[i].ProxyAdapter = outbound
+			addr := nss[i].Addr
+			if strings.Contains(addr, "1.1.1.1") || strings.Contains(addr, "8.8.8.8") ||
+				strings.Contains(addr, "1.0.0.1") {
+				nss[i].ProxyAdapter = outbound
+			}
 		}
 		outbound.resolver = dns.NewResolver(dns.Config{
 			Main: nss,
@@ -526,6 +582,7 @@ func (w *WireGuard) resolve(ctx context.Context, address M.Socksaddr) (netip.Add
 func (w *WireGuard) init(ctx context.Context) error {
 	err := w.init0(ctx)
 	if err != nil {
+		log.Warnln("[WG](%s) init0 error: %v", w.option.Name, err)
 		return err
 	}
 	w.updateServerAddr(ctx)
@@ -545,6 +602,7 @@ func (w *WireGuard) init0(ctx context.Context) error {
 	if w.initErr != nil {
 		return w.initErr
 	}
+	log.Debugln("[WG](%s) initializing", w.option.Name)
 
 	w.bind.ResetReservedForEndpoint()
 	w.serverAddrMap = make(map[M.Socksaddr]netip.AddrPort)
@@ -560,6 +618,7 @@ func (w *WireGuard) init0(ctx context.Context) error {
 	}
 	err = w.device.IpcSet(ipcConf)
 	if err != nil {
+		log.Warnln("[WG](%s) IpcSet error: %v", w.option.Name, err)
 		w.initErr = E.Cause(err, "setup wireguard")
 		return w.initErr
 	}
@@ -567,9 +626,11 @@ func (w *WireGuard) init0(ctx context.Context) error {
 
 	err = w.tunDevice.Start()
 	if err != nil {
+		log.Warnln("[WG](%s) tunDevice.Start error: %v", w.option.Name, err)
 		w.initErr = err
 		return w.initErr
 	}
+	log.Infoln("[WG](%s) tunDevice started", w.option.Name)
 
 	w.initOk.Store(true)
 	return nil
@@ -592,6 +653,43 @@ func (w *WireGuard) updateServerAddr(ctx context.Context) {
 			w.serverAddrTime.Store(time.Now())
 		}
 	}
+}
+
+// refreshCorplinkOption 调用 corplink /vpn/conn API 获取当前会话分配的隧道 IP
+// 与服务器公钥，并覆盖节点配置（ip / public-key / mtu）。在创建 wireguard
+// 栈设备前调用，保证 local prefixes 与 MTU 使用服务器下发的正确值。
+// 若首次 fetch 失败且配置了 corplink-refresh-command，会先执行刷新命令
+// 再重试一次，使 cookie 过期场景可以自愈。
+func refreshCorplinkOption(option *WireGuardOption) error {
+	opt := option.Corplink
+	if opt.PublicKey == "" {
+		opt.PublicKey = option.PublicKey
+	}
+	info, err := fetchCorplinkWgInfo(opt)
+	if err != nil && opt.RefreshCommand != "" {
+		log.Warnln("[WG-Corplink] fetch failed (%v), trying refresh command: %s", err, opt.RefreshCommand)
+		if rerr := runCorplinkRefresh(opt.RefreshCommand); rerr != nil {
+			log.Warnln("[WG-Corplink] refresh command failed: %v", rerr)
+			return E.Cause(err, "corplink fetch peer info")
+		}
+		info, err = fetchCorplinkWgInfo(opt)
+	}
+	if err != nil {
+		return E.Cause(err, "corplink fetch peer info")
+	}
+	if info.IP != "" {
+		option.Ip = info.IP
+	}
+	if info.ServerPubKeyHex != "" {
+		option.PublicKey = info.ServerPubKeyHex
+	}
+	if info.MTU != 0 {
+		// Use the MTU negotiated by CorpLink. corplink-rs applies this value
+		// directly; keeping the same value is required for payload parity.
+		option.MTU = info.MTU
+	}
+	log.Infoln("[WG](%s) corplink refreshed: ip=%s public_key=%s mtu=%d", option.Name, option.Ip, option.PublicKey, option.MTU)
+	return nil
 }
 
 func (w *WireGuard) genIpcConf(ctx context.Context, updateOnly bool) (string, error) {
@@ -658,33 +756,6 @@ func (w *WireGuard) genIpcConf(ctx context.Context, updateOnly bool) (string, er
 			}
 			if w.option.AmneziaWGOption.Itime != 0 {
 				ipcConf += "itime=" + strconv.FormatInt(int64(w.option.AmneziaWGOption.Itime), 10) + "\n"
-			}
-			if w.option.AmneziaWGOption.HeaderProtectionKey != "" {
-				ipcConf += "header_protection_key=" + w.option.AmneziaWGOption.HeaderProtectionKey + "\n"
-			}
-			if w.option.AmneziaWGOption.ContentPaddingAddition != "" {
-				ipcConf += "content_padding_addition=" + w.option.AmneziaWGOption.ContentPaddingAddition + "\n"
-			}
-			if w.option.AmneziaWGOption.RekeyAfterTime != "" {
-				ipcConf += "rekey_after_time=" + w.option.AmneziaWGOption.RekeyAfterTime + "\n"
-			}
-			if w.option.AmneziaWGOption.RekeyTimeout != "" {
-				ipcConf += "rekey_timeout=" + w.option.AmneziaWGOption.RekeyTimeout + "\n"
-			}
-			if w.option.AmneziaWGOption.RejectAfterTime != "" {
-				ipcConf += "reject_after_time=" + w.option.AmneziaWGOption.RejectAfterTime + "\n"
-			}
-			if w.option.AmneziaWGOption.KeepaliveTimeout != "" {
-				ipcConf += "keepalive_timeout=" + w.option.AmneziaWGOption.KeepaliveTimeout + "\n"
-			}
-			if w.option.AmneziaWGOption.MaxHandshakeAttempts != "" {
-				ipcConf += "max_handshake_attempts=" + w.option.AmneziaWGOption.MaxHandshakeAttempts + "\n"
-			}
-			if w.option.AmneziaWGOption.RandomTrailers {
-				ipcConf += "random_trailers=1\n"
-			}
-			if w.option.AmneziaWGOption.DisableCookies {
-				ipcConf += "disable_cookies=1\n"
 			}
 		}
 	}
@@ -782,6 +853,9 @@ func (w *WireGuard) Close() error {
 func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
 	var conn net.Conn
 	if err = w.init(ctx); err != nil {
+		if isTunnelFailure(err) && w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
 		return nil, err
 	}
 	if !metadata.Resolved() || w.resolver != nil {
@@ -791,36 +865,75 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 		}
 		options := w.DialOptions()
 		options = append(options, dialer.WithResolver(r))
-		options = append(options, dialer.WithNetDialer(ipStackNetDialer{stack: w.tunDevice}))
-		conn, err = dialer.NewDialer(options...).DialContext(ctx, "tcp", metadata.RemoteAddress())
+		options = append(options, dialer.WithNetDialer(wgNetDialer{tunDevice: w.tunDevice}))
+		dialCtx, cancel := w.tunnelDialContext(ctx)
+		conn, err = dialer.NewDialer(options...).DialContext(dialCtx, "tcp", metadata.RemoteAddress())
+		cancel()
 	} else {
-		conn, err = w.tunDevice.DialTCP(ctx, "tcp", netip.AddrPort{}, metadata.AddrPort())
+		dialCtx, cancel := w.tunnelDialContext(ctx)
+		conn, err = w.tunDevice.DialContext(dialCtx, "tcp", M.SocksaddrFrom(metadata.DstIP, metadata.DstPort).Unwrap())
+		cancel()
 	}
 	if err != nil {
+		// 业务 dial 失败：区分 DNS 失败与隧道数据面失败。
+		// 仅隧道数据面失败累计到阈值才触发重建，避免 DNS 抖动反复重建。
+		if isTunnelFailure(err) && w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
 		return nil, err
 	}
 	if conn == nil {
+		if w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
 		return nil, E.New("conn is nil")
 	}
+	// TCP 建连成功，但需等待 WireGuard 握手完成（隧道 ready）业务才可用
+	if !w.waitTunnelReady(ctx) {
+		log.Warnln("[WG](%s) tunnel not ready within %v after TCP connect, treating as failure", w.option.Name, tunnelFailureDialTimeout())
+		_ = conn.Close()
+		if w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
+		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
+	}
+	w.recordBusySuccess()
 	return NewConn(conn, w), nil
+}
+
+func (w *WireGuard) tunnelDialContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if !w.option.TCP {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, tunnelFailureDialTimeout())
 }
 
 func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (_ C.PacketConn, err error) {
 	var pc net.PacketConn
 	if err = w.init(ctx); err != nil {
+		if isTunnelFailure(err) && w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
 		return nil, err
 	}
 	if err = w.ResolveUDP(ctx, metadata); err != nil {
+		// DNS 解析失败不计入隧道健康
 		return nil, err
 	}
-	// The ipStack contract guarantees that a generic UDP wildcard supports both address families.
-	pc, err = w.tunDevice.ListenUDP(ctx, "udp", netip.AddrPort{})
+	pc, err = w.tunDevice.ListenPacket(ctx, M.SocksaddrFrom(metadata.DstIP, metadata.DstPort).Unwrap())
 	if err != nil {
+		if isTunnelFailure(err) && w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
 		return nil, err
 	}
 	if pc == nil {
+		if w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
 		return nil, E.New("packetConn is nil")
 	}
+	w.recordBusySuccess()
 	return NewPacketConn(pc, w), nil
 }
 

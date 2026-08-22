@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgUsernameKey = 'corplinkSg.username';
-const corplinkSgPasswordKey = 'corplinkSg.password';
 const corplinkSgServerKey = 'corplinkSg.server';
 const corplinkSgPasswordSecureKey = 'corplinkSg.password';
 const _secureStorage = FlutterSecureStorage();
@@ -102,8 +101,16 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
   final result = await Process.run(command, [configPath]);
   if (result.exitCode != 0) return false;
   final updated = await loadCorplinkConfig();
-  return updated?['private_key'] is String &&
+  final authorized = updated?['private_key'] is String &&
       (updated?['private_key'] as String).isNotEmpty;
+  if (authorized) {
+    // The generated config is retained for non-secret authorization material,
+    // but the password is not left on disk after the bootstrap process.
+    final sanitized = Map<String, dynamic>.from(updated!);
+    sanitized.remove('password');
+    await File(configPath).writeAsString(jsonEncode(sanitized));
+  }
+  return authorized;
 }
 
 Future<Map<String, dynamic>?> loadCorplinkConfig() async {
