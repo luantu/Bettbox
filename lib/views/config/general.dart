@@ -3,6 +3,7 @@ import 'package:bett_box/enum/enum.dart';
 import 'package:bett_box/models/models.dart';
 import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
+import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/widgets/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -63,7 +64,9 @@ class _UaItemState extends ConsumerState<UaItem> {
     return ListItem(
       leading: const Icon(Icons.computer_outlined),
       title: const Text('UA'),
-      subtitle: Text(isCustom ? appLocalizations.custom : appLocalizations.defaultText),
+      subtitle: Text(
+        isCustom ? appLocalizations.custom : appLocalizations.defaultText,
+      ),
       onTap: () async {
         final notifier = ref.read(patchClashConfigProvider.notifier);
         final result = await globalState.showCommonDialog<_UaOption>(
@@ -90,7 +93,9 @@ class _UaItemState extends ConsumerState<UaItem> {
               ),
             );
             if (customUa != null && customUa.trim().isNotEmpty) {
-              notifier.updateState((state) => state.copyWith(globalUa: customUa.trim()));
+              notifier.updateState(
+                (state) => state.copyWith(globalUa: customUa.trim()),
+              );
             }
         }
       },
@@ -124,18 +129,28 @@ class _UaDialog extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: () {
-                Navigator.of(context, rootNavigator: true).pop(const _UaOption(_UaOptionType.default_));
+                Navigator.of(
+                  context,
+                  rootNavigator: true,
+                ).pop(const _UaOption(_UaOptionType.default_));
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Icon(
-                      !isCustom ? Icons.check_circle_rounded : Icons.circle_outlined,
+                      !isCustom
+                          ? Icons.check_circle_rounded
+                          : Icons.circle_outlined,
                       size: 21,
                       color: !isCustom
                           ? context.colorScheme.primary
-                          : context.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                          : context.colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.6,
+                            ),
                     ),
                     const SizedBox(width: 12),
                     Text(
@@ -152,18 +167,28 @@ class _UaDialog extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: () {
-                Navigator.of(context, rootNavigator: true).pop(const _UaOption(_UaOptionType.custom));
+                Navigator.of(
+                  context,
+                  rootNavigator: true,
+                ).pop(const _UaOption(_UaOptionType.custom));
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Icon(
-                      isCustom ? Icons.check_circle_rounded : Icons.circle_outlined,
+                      isCustom
+                          ? Icons.check_circle_rounded
+                          : Icons.circle_outlined,
                       size: 21,
                       color: isCustom
                           ? context.colorScheme.primary
-                          : context.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                          : context.colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.6,
+                            ),
                     ),
                     const SizedBox(width: 12),
                     Text(
@@ -279,7 +304,9 @@ class _TestUrlDialog extends ConsumerWidget {
                   value: overrideTestUrl,
                   onChanged: (bool value) async {
                     ref.read(overrideTestUrlProvider.notifier).value = value;
-                    globalState.appController.applyProfileDebounce(silence: true);
+                    globalState.appController.applyProfileDebounce(
+                      silence: true,
+                    );
                   },
                 ),
               ],
@@ -297,7 +324,9 @@ class _TestUrlDialog extends ConsumerWidget {
                       .read(appSettingProvider.notifier)
                       .updateState((state) => state.copyWith(testUrl: url));
                   if (ref.read(overrideTestUrlProvider)) {
-                    globalState.appController.applyProfileDebounce(silence: true);
+                    globalState.appController.applyProfileDebounce(
+                      silence: true,
+                    );
                   }
                   if (context.mounted) {
                     Navigator.of(context, rootNavigator: true).pop();
@@ -359,10 +388,14 @@ class _TestUrlDialog extends ConsumerWidget {
                     resetValue: defaultTestUrl,
                     validator: (String? inputValue) {
                       if (inputValue == null || inputValue.isEmpty) {
-                        return appLocalizations.emptyTip(appLocalizations.testUrl);
+                        return appLocalizations.emptyTip(
+                          appLocalizations.testUrl,
+                        );
                       }
                       if (!inputValue.isUrl) {
-                        return appLocalizations.urlTip(appLocalizations.testUrl);
+                        return appLocalizations.urlTip(
+                          appLocalizations.testUrl,
+                        );
                       }
                       return null;
                     },
@@ -370,9 +403,13 @@ class _TestUrlDialog extends ConsumerWidget {
                 );
 
                 if (customUrl != null) {
-                  notifier.updateState((state) => state.copyWith(testUrl: customUrl));
+                  notifier.updateState(
+                    (state) => state.copyWith(testUrl: customUrl),
+                  );
                   if (overrideTestUrl) {
-                    globalState.appController.applyProfileDebounce(silence: true);
+                    globalState.appController.applyProfileDebounce(
+                      silence: true,
+                    );
                   }
                 }
               },
@@ -610,7 +647,7 @@ class ExternalControllerItem extends ConsumerWidget {
     );
     final secret = hasExternalController
         ? ref.watch(patchClashConfigProvider.select((state) => state.secret)) ??
-            ''
+              ''
         : '';
 
     return Column(
@@ -769,7 +806,104 @@ class _SecretDialogState extends ConsumerState<_SecretDialog> {
   }
 }
 
+class CorplinkSgItem extends ConsumerWidget {
+  const CorplinkSgItem({super.key});
+
+  @override
+  Widget build(BuildContext context, ref) {
+    return ListItem(
+      leading: const Icon(Icons.vpn_key_outlined),
+      title: const Text('SG-Node-Linux'),
+      subtitle: const Text('CorpLink / WireGuard-TCP / tunnel DoH'),
+      onTap: () async {
+        final current = await CorplinkSgSettings.load();
+        final result = await globalState.showCommonDialog<CorplinkSgSettings>(
+          child: _CorplinkSgDialog(current: current),
+        );
+        if (result != null) await result.save();
+      },
+    );
+  }
+}
+
+class _CorplinkSgDialog extends StatefulWidget {
+  final CorplinkSgSettings current;
+
+  const _CorplinkSgDialog({required this.current});
+
+  @override
+  State<_CorplinkSgDialog> createState() => _CorplinkSgDialogState();
+}
+
+class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
+  late final enabled = ValueNotifier(widget.current.enabled);
+  late final username = TextEditingController(text: widget.current.username);
+  late final password = TextEditingController(text: widget.current.password);
+  late final server = TextEditingController(text: widget.current.server);
+
+  @override
+  void dispose() {
+    enabled.dispose();
+    username.dispose();
+    password.dispose();
+    server.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CommonDialog(
+      title: 'SG-Node-Linux',
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
+          child: Text(appLocalizations.cancel),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context, rootNavigator: true).pop(
+            CorplinkSgSettings(
+              enabled: enabled.value,
+              username: username.text.trim(),
+              password: password.text,
+              server: server.text.trim(),
+            ),
+          ),
+          child: Text(appLocalizations.save),
+        ),
+      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ValueListenableBuilder(
+            valueListenable: enabled,
+            builder: (_, value, child) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Enable CorpLink SG node'),
+              value: value,
+              onChanged: (v) => enabled.value = v,
+            ),
+          ),
+          TextField(
+            controller: username,
+            decoration: const InputDecoration(labelText: 'Feilian username'),
+          ),
+          TextField(
+            controller: password,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Feilian password'),
+          ),
+          TextField(
+            controller: server,
+            decoration: const InputDecoration(labelText: 'Upstream server'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 final generalItems = <Widget>[
+  CorplinkSgItem(),
   LogLevelItem(),
   UaItem(),
   if (system.isDesktop) KeepAliveIntervalItem(),

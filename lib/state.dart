@@ -25,6 +25,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'common/common.dart';
 import 'controller.dart';
 import 'models/models.dart';
+import 'services/corplink_sg.dart';
 
 typedef UpdateTasks = List<FutureOr Function()>;
 
@@ -120,7 +121,8 @@ class GlobalState {
 
   Future<void> init() async {
     packageInfo = await PackageInfo.fromPlatform();
-    config = await preferences.getConfig() ??
+    config =
+        await preferences.getConfig() ??
         Config(
           themeProps: defaultThemeProps,
           patchClashConfig: system.isAndroid
@@ -465,10 +467,7 @@ class GlobalState {
                       color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(28),
                       boxShadow: const [
-                        BoxShadow(
-                          blurRadius: 10,
-                          color: Colors.black12,
-                        ),
+                        BoxShadow(blurRadius: 10, color: Colors.black12),
                       ],
                     ),
                     child: const Column(
@@ -574,14 +573,16 @@ class GlobalState {
 
     final realPatchConfig = patchConfig.copyWith(
       dns: patchConfig.dns.copyWith(
-        fakeIpRangeV6:
-            patchConfig.dns.effectiveFakeIpRangeV6(ipv6Enabled: patchConfig.ipv6),
+        fakeIpRangeV6: patchConfig.dns.effectiveFakeIpRangeV6(
+          ipv6Enabled: patchConfig.ipv6,
+        ),
       ),
       tun: patchConfig.tun.getRealTun(
         config.networkProps.bypassPrivateRoute,
         fakeIpRange: patchConfig.dns.fakeIpRange,
-        fakeIpRangeV6:
-            patchConfig.dns.effectiveFakeIpRangeV6(ipv6Enabled: patchConfig.ipv6),
+        fakeIpRangeV6: patchConfig.dns.effectiveFakeIpRangeV6(
+          ipv6Enabled: patchConfig.ipv6,
+        ),
         bypassPrivateRouteAddress:
             config.networkProps.realBypassPrivateRouteAddress,
       ),
@@ -751,10 +752,10 @@ class GlobalState {
       if (listen.endsWith(':53')) {
         rawConfig['dns']['listen'] = listen.replaceAll(':53', ':10053');
       }
-      final noProviders = rawConfig['proxy-providers'] == null &&
+      final noProviders =
+          rawConfig['proxy-providers'] == null &&
           rawConfig['rule-providers'] == null;
-      final proxyServerNameserver =
-          rawConfig['dns']['proxy-server-nameserver'];
+      final proxyServerNameserver = rawConfig['dns']['proxy-server-nameserver'];
       final hasLocalProxyServerNameserver = switch (proxyServerNameserver) {
         List list => list.any((e) => e.toString().startsWith('127.0.0.1')),
         String str => str.startsWith('127.0.0.1'),
@@ -901,7 +902,8 @@ class GlobalState {
       rawConfig.remove('rule');
     }
 
-    final scriptActive = config.scriptProps.currentScript != null &&
+    final scriptActive =
+        config.scriptProps.currentScript != null &&
         targetProfile.useScriptOverride;
 
     final overrideData = targetProfile.overrideData;
@@ -989,6 +991,7 @@ class GlobalState {
     }
 
     rawConfig['rule'] = rules;
+    await applyCorplinkSgNode(rawConfig);
     return rawConfig;
   }
 
@@ -1061,8 +1064,7 @@ class DashboardRefreshManager {
     }
 
     final lifecycleState = WidgetsBinding.instance.lifecycleState;
-    if (lifecycleState != null &&
-        lifecycleState != AppLifecycleState.resumed) {
+    if (lifecycleState != null && lifecycleState != AppLifecycleState.resumed) {
       return false;
     }
     return true;
@@ -1138,9 +1140,7 @@ class DetectionState {
   void toggleIpPrivacy() {
     _isIpMasked = !_isIpMasked;
     if (_rawIpInfo != null) {
-      state.value = state.value.copyWith(
-        ipInfo: _maskIpInfo(_rawIpInfo),
-      );
+      state.value = state.value.copyWith(ipInfo: _maskIpInfo(_rawIpInfo));
     }
   }
 
@@ -1221,8 +1221,9 @@ class DetectionState {
     state.value = state.value.copyWith(
       isLoading: false,
       ipInfo: _maskIpInfo(_rawIpInfo),
-      errorMessage:
-          _rawIpInfo != null ? null : appLocalizations.tryManualRefresh,
+      errorMessage: _rawIpInfo != null
+          ? null
+          : appLocalizations.tryManualRefresh,
     );
   }
 
