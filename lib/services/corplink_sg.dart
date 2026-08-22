@@ -2,12 +2,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:bett_box/common/common.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgUsernameKey = 'corplinkSg.username';
 const corplinkSgPasswordKey = 'corplinkSg.password';
 const corplinkSgServerKey = 'corplinkSg.server';
+const corplinkSgPasswordSecureKey = 'corplinkSg.password';
+const _secureStorage = FlutterSecureStorage();
 
 class CorplinkSgSettings {
   final bool enabled;
@@ -24,10 +27,12 @@ class CorplinkSgSettings {
 
   static Future<CorplinkSgSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
+    final securePassword =
+        await _secureStorage.read(key: corplinkSgPasswordSecureKey) ?? '';
     return CorplinkSgSettings(
       enabled: prefs.getBool(corplinkSgEnabledKey) ?? false,
       username: prefs.getString(corplinkSgUsernameKey) ?? '',
-      password: prefs.getString(corplinkSgPasswordKey) ?? '',
+      password: securePassword,
       server: prefs.getString(corplinkSgServerKey) ?? '',
     );
   }
@@ -36,7 +41,10 @@ class CorplinkSgSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(corplinkSgEnabledKey, enabled);
     await prefs.setString(corplinkSgUsernameKey, username);
-    await prefs.setString(corplinkSgPasswordKey, password);
+    await _secureStorage.write(
+      key: corplinkSgPasswordSecureKey,
+      value: password,
+    );
     await prefs.setString(corplinkSgServerKey, server);
   }
 
@@ -52,6 +60,51 @@ Future<String> corplinkSgHomePath() =>
 
 String joinPath(String base, String child) =>
     '$base${Platform.pathSeparator}$child';
+
+Future<bool>? _authorizationInFlight;
+
+Future<bool> ensureCorplinkAuthorization(CorplinkSgSettings settings) {
+  return _authorizationInFlight ??= _ensureCorplinkAuthorization(
+    settings,
+  ).whenComplete(() => _authorizationInFlight = null);
+}
+
+Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
+  final home = await corplinkSgHomePath();
+  final configPath = joinPath(home, 'config.json');
+  final existing = await loadCorplinkConfig();
+  if (existing?['private_key'] is String &&
+      (existing?['private_key'] as String).isNotEmpty &&
+      existing?['code'] is String &&
+      (existing?['code'] as String).isNotEmpty) {
+    return true;
+  }
+
+  await Directory(home).create(recursive: true);
+  final config = {
+    'username': settings.username,
+    'password': settings.password,
+    'server': settings.server,
+    'platform': 'ldap',
+    'device_name': 'SG-Node-${Platform.localHostname}',
+    'device_id': null,
+    'public_key': null,
+    'private_key': null,
+    'interface_name': 'bettboxsg',
+    'vpn_select_strategy': 'latency',
+    'use_vpn_dns': false,
+  };
+  await File(configPath).writeAsString(jsonEncode(config));
+
+  final executable = Platform.isWindows ? 'corplink-rs.exe' : 'corplink-rs';
+  final bundled = joinPath(appPath.executableDirPath, executable);
+  final command = File(bundled).existsSync() ? bundled : executable;
+  final result = await Process.run(command, [configPath]);
+  if (result.exitCode != 0) return false;
+  final updated = await loadCorplinkConfig();
+  return updated?['private_key'] is String &&
+      (updated?['private_key'] as String).isNotEmpty;
+}
 
 Future<Map<String, dynamic>?> loadCorplinkConfig() async {
   final path = joinPath(await corplinkSgHomePath(), 'config.json');
@@ -69,6 +122,7 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   final settings = await CorplinkSgSettings.load();
   if (!settings.enabled || settings.server.trim().isEmpty) return;
 
+  if (!await ensureCorplinkAuthorization(settings)) return;
   final auth = await loadCorplinkConfig();
   if (auth == null) return;
   final proxies =
