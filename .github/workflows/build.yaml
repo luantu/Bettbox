@@ -207,7 +207,8 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           flutter pub get
-          dart run build_runner build -d
+          # Generated Freezed/FFI files are committed; the current analyzer
+          # cannot regenerate the legacy model set on Dart 3.13.
           dart setup.dart ${{ matrix.platform }} --arch ${{ matrix.arch }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} ${{ matrix.compatible == true && '--compatible' || '' }}
 
       - name: Install SignPath (Windows)
@@ -251,7 +252,7 @@ jobs:
         shell: bash
         run: |
           flutter pub get
-          dart run build_runner build -d
+          # Generated Freezed/FFI files are committed; see the non-Windows job.
           dart setup.dart windows --arch ${{ matrix.arch }} --out core-only ${{ matrix.compatible == true && '--compatible' || '' }}
 
       - name: Upload Unsigned Core
