@@ -98,11 +98,35 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
   final executable = Platform.isWindows ? 'corplink-rs.exe' : 'corplink-rs';
   final bundled = joinPath(appPath.executableDirPath, executable);
   final command = File(bundled).existsSync() ? bundled : executable;
-  final result = await Process.run(command, [configPath]);
-  if (result.exitCode != 0) return false;
-  final updated = await loadCorplinkConfig();
+  // corplink-rs direct mode is a long-running tunnel process. Do not use
+  // Process.run here: it waits for the daemon to exit and would prevent
+  // Bettbox from ever reaching config injection. We only use it as the
+  // bootstrap/login helper, then Mihomo-SG owns the actual tunnel.
+  final process = await Process.start(
+    command,
+    [configPath],
+    mode: ProcessStartMode.detachedWithStdio,
+  );
+  final deadline = DateTime.now().add(const Duration(seconds: 90));
+  Map<String, dynamic>? updated;
+  while (DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    updated = await loadCorplinkConfig();
+    final hasPrivateKey = updated?['private_key'] is String &&
+        (updated?['private_key'] as String).isNotEmpty;
+    final hasCode = updated?['code'] is String &&
+        (updated?['code'] as String).isNotEmpty;
+    if (hasPrivateKey && hasCode) break;
+  }
   final authorized = updated?['private_key'] is String &&
-      (updated?['private_key'] as String).isNotEmpty;
+      (updated?['private_key'] as String).isNotEmpty &&
+      updated?['code'] is String &&
+      (updated?['code'] as String).isNotEmpty;
+  if (!authorized) {
+    process.kill();
+    return false;
+  }
+  process.kill();
   if (authorized) {
     // The generated config is retained for non-secret authorization material,
     // but the password is not left on disk after the bootstrap process.
