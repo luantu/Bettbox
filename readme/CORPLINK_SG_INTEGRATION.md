@@ -57,7 +57,7 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 ## 授权生命周期
 
 1. 用户点击启用 SG 节点。
-2. Bettbox 调用 `corplink-rs` 的库/子进程完成登录和 2FA。
+2. Bettbox 调用随应用发布的 `corplink-rs` 子进程完成登录和 2FA。
 3. 保存 Cookie、device identity 和 private key 到安全存储。
 4. Mihomo 启动或重启前调用 `/vpn/conn`，取得最新隧道 IP、peer public key、endpoint、MTU。
 5. 组装 `wireguard` 出站并追加到最终配置。
@@ -99,3 +99,18 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 5. 将 Mihomo-SG 分支构建产物替换 Bettbox core；
 6. 增加单元测试、配置快照测试和桌面端真实 ChatGPT 验收；
 7. 更新构建脚本和发布说明。
+
+## 构建与发布
+
+先在 `tools/corplink-rs/windows/x64/`（或 `arm64/`）放置对应架构的
+`corplink-rs.exe`，再执行：
+
+```powershell
+flutter pub get
+dart run setup.dart --target windows --arch amd64
+flutter build windows --release
+dart run windows/packaging/exe/package_windows.dart --arch amd64
+```
+
+打包脚本会把 `corplink-rs.exe` 复制到 Bettbox 安装目录，与 `Bettbox.exe` 同级。
+如果未找到该文件，机场功能仍可构建，但 SG 节点登录不会在空白系统上自动工作。

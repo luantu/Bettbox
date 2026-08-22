@@ -56,6 +56,20 @@ void main(List<String> arguments) async {
     exit(1);
   }
 
+  // CorpLink authorization is intentionally a separate native helper. Keep
+  // it beside Bettbox.exe so the Flutter service can launch it without PATH
+  // configuration on a clean machine.
+  final corplinkSource = path.absolute(
+    'tools/corplink-rs/windows/$buildDirName/corplink-rs.exe',
+  );
+  final corplinkTarget = path.join(sourceDir, 'corplink-rs.exe');
+  if (File(corplinkSource).existsSync()) {
+    File(corplinkSource).copySync(corplinkTarget);
+    print('Bundled CorpLink helper: $corplinkTarget');
+  } else {
+    print('Warning: $corplinkSource not found; SG node login will require corplink-rs.exe beside Bettbox.exe.');
+  }
+
   // 4. Map variables for Inno Setup template
   final coreExecutableName = isDev ? 'BettboxDevCore.exe' : 'BettboxCore.exe';
   final helperExecutableName = isDev ? 'BettboxDevHelperService.exe' : 'BettboxHelperService.exe';
