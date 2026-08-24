@@ -116,19 +116,37 @@ class Build {
   static String _getCc(BuildItem buildItem) {
     final environment = Platform.environment;
     if (buildItem.target == Target.android) {
-      final ndk = environment['ANDROID_NDK'];
-      assert(ndk != null);
+      final ndk = environment['ANDROID_NDK'] ??
+          environment['ANDROID_NDK_ROOT'] ??
+          environment['ANDROID_NDK_HOME'];
+      if (ndk == null || ndk.isEmpty) {
+        throw 'Android NDK is not configured; set ANDROID_NDK or ANDROID_NDK_ROOT';
+      }
       final prebuiltDir = Directory(
-        join(ndk!, 'toolchains', 'llvm', 'prebuilt'),
+        join(ndk, 'toolchains', 'llvm', 'prebuilt'),
       );
-      final prebuiltDirList = prebuiltDir.listSync();
+      final prebuiltDirList = prebuiltDir
+          .listSync()
+          .whereType<Directory>()
+          .toList();
+      if (prebuiltDirList.isEmpty) {
+        throw 'Android NDK LLVM toolchain not found under ${prebuiltDir.path}';
+      }
       final map = {
         'armeabi-v7a': 'armv7a-linux-androideabi21-clang',
         'arm64-v8a': 'aarch64-linux-android21-clang',
         'x86': 'i686-linux-android21-clang',
         'x86_64': 'x86_64-linux-android21-clang',
       };
-      return join(prebuiltDirList.first.path, 'bin', map[buildItem.archName]);
+      final compilerName = map[buildItem.archName];
+      if (compilerName == null) {
+        throw 'Unsupported Android ABI: ${buildItem.archName}';
+      }
+      final compiler = join(prebuiltDirList.first.path, 'bin', compilerName);
+      if (!File(compiler).existsSync()) {
+        throw 'Android compiler not found: $compiler';
+      }
+      return compiler;
     }
     return 'gcc';
   }

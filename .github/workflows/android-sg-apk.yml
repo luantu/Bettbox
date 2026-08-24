@@ -41,12 +41,22 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
           echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Build Mihomo-SG Android library
         shell: bash
         run: |
+          set -o pipefail
           flutter pub get
-          dart setup.dart android --arch arm64 --out app
+          dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
+
+      - name: Upload Android build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-sg-build-log
+          path: android-core-build.log
+          if-no-files-found: ignore
 
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
