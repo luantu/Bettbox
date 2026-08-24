@@ -244,12 +244,17 @@ class Build {
 
       final buildTags = getTags(item);
 
-      await exec(
-        ['go', 'mod', 'tidy'],
-        name: 'go mod tidy',
-        environment: env,
-        workingDirectory: _coreDir,
-      );
+      // `go mod tidy` evaluates every platform build tag and is unreliable
+      // with Android CGO/NDK cross builds. The checked-in go.mod/go.sum are
+      // already complete; let `go build` resolve/download the exact modules.
+      if (item.target != Target.android) {
+        await exec(
+          ['go', 'mod', 'tidy'],
+          name: 'go mod tidy',
+          environment: env,
+          workingDirectory: _coreDir,
+        );
+      }
 
       final execLines = [
         'go',
