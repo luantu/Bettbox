@@ -184,15 +184,17 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
     final suffix = '?os=Android&os_version=2';
     final methods = await dio.get('$base/api/login/setting$suffix');
     collect(methods);
+    final methodData = methods.data is Map ? methods.data['data'] : null;
+    final loginOrders = methodData is Map && methodData['login_orders'] is List
+        ? (methodData['login_orders'] as List)
+            .map((e) => e.toString().toLowerCase())
+            .toList()
+        : const <String>[];
     final lookup = await dio.post('$base/api/lookup$suffix',
         data: {'forget_password': false, 'user_name': settings.username},
         options: requestOptions());
     collect(lookup);
-    final lookupData = lookup.data is Map ? lookup.data['data'] : null;
-    final auth = lookupData is Map && lookupData['auth'] is List
-        ? (lookupData['auth'] as List).map((e) => e.toString()).toList()
-        : const <String>[];
-    final platform = auth.contains('ldap') ? 'ldap' : 'feilian';
+    final platform = loginOrders.contains('ldap') ? 'ldap' : 'feilian';
     final password = platform == 'ldap'
         ? settings.password
         : sha256.convert(utf8.encode(settings.password)).toString();
