@@ -32,7 +32,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          # The SG fork has been verified locally with Go 1.24.6. Keep the
+          # Android cross-build on that toolchain until the native dependency
+          # set is independently verified with Go 1.25.
+          go-version: '1.24.6'
           cache-dependency-path: core/go.sum
 
       - name: Setup Android SDK and NDK
@@ -51,6 +54,8 @@ jobs:
           GOFLAGS: -p=2
         run: |
           set -o pipefail
+          go version
+          go env GOOS GOARCH CGO_ENABLED CC ANDROID_NDK ANDROID_NDK_ROOT
           flutter pub get
           timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
 
