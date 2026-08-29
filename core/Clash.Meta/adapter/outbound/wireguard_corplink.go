@@ -342,7 +342,24 @@ func loadCorplinkCookie(path string) (csrf, cookieStr string, err error) {
 		RawCookie string `json:"raw_cookie"`
 	}
 	if err := json.NewDecoder(f).Decode(&cookies); err != nil {
-		return "", "", fmt.Errorf("corplink cookie parse: %v", err)
+		// Android bootstrap may not have Rust's CookieStore serializer. Accept
+		// a plain Cookie header as a portable interchange format as well.
+		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+			return "", "", fmt.Errorf("corplink cookie parse: %v", err)
+		}
+		plain, readErr := io.ReadAll(f)
+		if readErr != nil || strings.TrimSpace(string(plain)) == "" {
+			return "", "", fmt.Errorf("corplink cookie parse: %v", err)
+		}
+		cookieStr = strings.TrimSpace(string(plain))
+		for _, part := range strings.Split(cookieStr, ";") {
+			seg := strings.TrimSpace(part)
+			kv := strings.SplitN(seg, "=", 2)
+			if len(kv) == 2 && kv[0] == "csrf-token" {
+				csrf = kv[1]
+			}
+		}
+		return csrf, cookieStr, nil
 	}
 	var parts []string
 	for _, c := range cookies {
