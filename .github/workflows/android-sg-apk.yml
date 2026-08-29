@@ -6,6 +6,10 @@ on:
     branches:
       - feat/corplink-sg-node
 
+concurrency:
+  group: android-sg-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-android-arm64:
     runs-on: ubuntu-24.04
