@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:bett_box/common/common.dart';
+import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -69,6 +72,9 @@ Future<bool> ensureCorplinkAuthorization(CorplinkSgSettings settings) {
 }
 
 Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
+  if (Platform.isAndroid) {
+    return _ensureAndroidCorplinkAuthorization(settings);
+  }
   final home = await corplinkSgHomePath();
   final configPath = joinPath(home, 'config.json');
   final existing = await loadCorplinkConfig();
@@ -137,6 +143,86 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
   return authorized;
 }
 
+Future<bool> _ensureAndroidCorplinkAuthorization(
+  CorplinkSgSettings settings,
+) async {
+  final home = await corplinkSgHomePath();
+  await Directory(home).create(recursive: true);
+  final configPath = joinPath(home, 'config.json');
+  final current = await loadCorplinkConfig();
+  if (current?['private_key'] is String &&
+      (current?['private_key'] as String).isNotEmpty &&
+      current?['public_key'] is String &&
+      (current?['public_key'] as String).isNotEmpty &&
+      current?['code'] is String &&
+      (current?['code'] as String).isNotEmpty) {
+    return true;
+  }
+  final base = settings.server.trim().replaceFirst(RegExp(r'/$'), '');
+  final deviceName = 'SG-Node-${Platform.localHostname}';
+  final deviceId = md5.convert(utf8.encode(deviceName)).toString();
+  final keyPair = await X25519().newKeyPair();
+  final publicKey = base64Encode((await keyPair.extractPublicKey()).bytes);
+  final privateKey = base64Encode(await keyPair.extractPrivateKeyBytes());
+  final dio = Dio(BaseOptions(
+    validateStatus: (status) => status != null && status < 500,
+    headers: {'User-Agent': 'okhttp/3.14.9', 'Content-Type': 'application/json'},
+  ));
+  final cookies = <String, String>{};
+  void collect(Response<dynamic> response) {
+    for (final raw in response.headers['set-cookie'] ?? const <String>[]) {
+      final part = raw.split(';').first;
+      final pair = part.split('=');
+      if (pair.length >= 2) cookies[pair.first] = pair.sublist(1).join('=');
+    }
+  }
+  Options requestOptions() => Options(headers: {
+        'Cookie': cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
+        if (cookies['csrf-token'] != null) 'csrf-token': cookies['csrf-token'],
+      });
+  try {
+    final suffix = '?os=Android&os_version=2';
+    final methods = await dio.get('$base/api/login/setting$suffix');
+    collect(methods);
+    final lookup = await dio.post('$base/api/lookup$suffix',
+        data: {'forget_password': false, 'user_name': settings.username},
+        options: requestOptions());
+    collect(lookup);
+    final password = sha256.convert(utf8.encode(settings.password)).toString();
+    final login = await dio.post('$base/api/login$suffix',
+        data: {'password': password, 'user_name': settings.username},
+        options: requestOptions());
+    collect(login);
+    var otpUrl = (login.data is Map ? (login.data['data']?['url'] ?? '') : '').toString();
+    if (otpUrl.isEmpty) {
+      final otp = await dio.post('$base/api/v2/p/otp$suffix',
+          data: {}, options: requestOptions());
+      collect(otp);
+      otpUrl = (otp.data is Map ? (otp.data['data']?['url'] ?? '') : '').toString();
+    }
+    final code = Uri.tryParse(otpUrl)?.queryParameters['secret'] ?? '';
+    if (code.isEmpty || cookies.isEmpty) return false;
+    final cookiePath = joinPath(home, 'bettbox_cookies.txt');
+    await File(cookiePath).writeAsString(
+      cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
+    );
+    await File(configPath).writeAsString(jsonEncode({
+      'username': settings.username,
+      'server': base,
+      'platform': 'ldap',
+      'device_name': deviceName,
+      'device_id': deviceId,
+      'public_key': publicKey,
+      'private_key': privateKey,
+      'code': code,
+      'interface_name': 'bettboxsg',
+    }));
+    return true;
+  } on DioException {
+    return false;
+  }
+}
+
 Future<Map<String, dynamic>?> loadCorplinkConfig() async {
   final path = joinPath(await corplinkSgHomePath(), 'config.json');
   final file = File(path);
@@ -162,7 +248,10 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   proxies.removeWhere((item) => item is Map && item['name'] == name);
   final home = await corplinkSgHomePath();
   final interfaceName = auth['interface_name']?.toString() ?? 'wgdevtest22';
-  final cookiePath = joinPath(home, '${interfaceName}_cookies.json');
+  final androidCookiePath = joinPath(home, 'bettbox_cookies.txt');
+  final cookiePath = Platform.isAndroid && File(androidCookiePath).existsSync()
+      ? androidCookiePath
+      : joinPath(home, '${interfaceName}_cookies.json');
   final apiServer = settings.server.trim();
   final privateKey = auth['private_key']?.toString() ?? '';
   final publicKey = auth['public_key']?.toString() ?? '';
