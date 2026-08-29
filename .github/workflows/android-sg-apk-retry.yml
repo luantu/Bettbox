@@ -54,6 +54,16 @@ jobs:
           flutter pub get
           timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
           flutter build apk --release --target-platform android-arm64
+      - name: Publish build diagnostics
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Android build diagnostics'
+            echo '```'
+            if test -f android-core-build.log; then tail -n 300 android-core-build.log; else echo 'log file was not created'; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Android build log
         if: always()
         uses: actions/upload-artifact@v4
