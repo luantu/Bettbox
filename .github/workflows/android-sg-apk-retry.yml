@@ -1,0 +1,69 @@
+name: Android SG APK retry
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/corplink-sg-node
+
+concurrency:
+  group: android-sg-apk-retry-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+          cache: true
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.6'
+          cache-dependency-path: core/go.sum
+      - name: Setup Android SDK and NDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
+          echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Build Android core and APK
+        shell: bash
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -p=2
+        run: |
+          set -euxo pipefail
+          go version
+          flutter pub get
+          timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
+          flutter build apk --release --target-platform android-arm64
+      - name: Upload Android build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-sg-build-log-retry
+          path: android-core-build.log
+          if-no-files-found: ignore
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bettbox-android-arm64-sg-retry
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
