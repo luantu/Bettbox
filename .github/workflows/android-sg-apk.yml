@@ -25,7 +25,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: '3.47.1'
+          flutter-version: '3.44.9'
           cache: true
 
       - name: Setup Go
@@ -49,6 +49,17 @@ jobs:
           set -o pipefail
           flutter pub get
           dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
+
+      - name: Publish Android build diagnostics
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Android core build diagnostics'
+            echo '```'
+            if test -f android-core-build.log; then tail -n 240 android-core-build.log; else echo 'log file was not created'; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Android build log
         if: always()
