@@ -9,6 +9,7 @@ on:
 jobs:
   build-android-arm64:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,10 +46,13 @@ jobs:
 
       - name: Build Mihomo-SG Android library
         shell: bash
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -p=2
         run: |
           set -o pipefail
           flutter pub get
-          dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
+          timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
 
       - name: Publish Android build diagnostics
         if: always()
