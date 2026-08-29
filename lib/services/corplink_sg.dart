@@ -188,9 +188,20 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
         data: {'forget_password': false, 'user_name': settings.username},
         options: requestOptions());
     collect(lookup);
-    final password = sha256.convert(utf8.encode(settings.password)).toString();
+    final lookupData = lookup.data is Map ? lookup.data['data'] : null;
+    final auth = lookupData is Map && lookupData['auth'] is List
+        ? (lookupData['auth'] as List).map((e) => e.toString()).toList()
+        : const <String>[];
+    final platform = auth.contains('ldap') ? 'ldap' : 'feilian';
+    final password = platform == 'ldap'
+        ? settings.password
+        : sha256.convert(utf8.encode(settings.password)).toString();
     final login = await dio.post('$base/api/login$suffix',
-        data: {'password': password, 'user_name': settings.username},
+        data: {
+          'password': password,
+          'user_name': settings.username,
+          if (platform == 'ldap') 'platform': 'ldap',
+        },
         options: requestOptions());
     collect(login);
     var otpUrl = (login.data is Map ? (login.data['data']?['url'] ?? '') : '').toString();
@@ -209,7 +220,7 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
     await File(configPath).writeAsString(jsonEncode({
       'username': settings.username,
       'server': base,
-      'platform': 'ldap',
+      'platform': platform,
       'device_name': deviceName,
       'device_id': deviceId,
       'public_key': publicKey,
