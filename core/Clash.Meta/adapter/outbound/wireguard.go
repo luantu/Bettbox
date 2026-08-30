@@ -75,6 +75,13 @@ type WireGuard struct {
 	corplinkRecoveryAt atomic.Int64 // unix nano，限制故障风暴期间的会话刷新频率
 }
 
+// tcpDialTarget reads the current endpoint instead of retaining the address
+// from before CorpLink /vpn/conn selected the live VPN node.
+func (w *WireGuard) tcpDialTarget() string {
+	return net.JoinHostPort(w.option.WireGuardPeerOption.Server,
+		strconv.Itoa(w.option.WireGuardPeerOption.Port))
+}
+
 // Keep the original Bettbox IP-stack abstraction. The SG TCP transport only
 // changes the WireGuard bind; OpenVPN, Masque and ZeroTier still depend on
 // this shared abstraction.
@@ -323,6 +330,7 @@ func (w *WireGuard) refreshCorplinkAfterTunnelFailure() {
 		log.Warnln("[WG](%s) corplink refresh after tunnel failure failed: %v", w.option.Name, err)
 		return
 	}
+	w.connectAddr = w.option.Addr()
 	ipcConf, err := w.genIpcConf(context.Background(), true)
 	if err != nil {
 		log.Warnln("[WG](%s) failed to rebuild peer config after corplink refresh: %v", w.option.Name, err)
@@ -487,8 +495,7 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	}
 	if option.TCP {
 		// TCP transport：直接连服务器（不依赖 sing dialer），兼容 corplink-rs 的 TCP 封装
-		target := outbound.connectAddr
-		log.Infoln("[WG](%s) using TCP transport, target=%s", option.Name, target)
+		log.Infoln("[WG](%s) using TCP transport, target=%s", option.Name, outbound.connectAddr)
 		if option.Corplink.APIServer != "" {
 			log.Infoln("[WG](%s) corplink auth enabled: api=%s cookie=%s", option.Name, option.Corplink.APIServer, option.Corplink.CookieFile)
 		} else {
@@ -496,7 +503,7 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		}
 		outbound.bind = newTCPWireGuardBind(context.Background(), func(ctx context.Context) (net.Conn, error) {
 			d := net.Dialer{}
-			nc, err := d.DialContext(ctx, "tcp", target.String())
+			nc, err := d.DialContext(ctx, "tcp", outbound.tcpDialTarget())
 			if err != nil {
 				return nil, err
 			}
@@ -571,6 +578,9 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		if err := refreshCorplinkOption(&option); err != nil {
 			return nil, err
 		}
+		// Keep readiness checks aligned with the endpoint selected by
+		// /vpn/conn, not the bootstrap address from the raw config.
+		outbound.connectAddr = option.Addr()
 		outbound.localPrefixes, err = option.Prefixes()
 		if err != nil {
 			return nil, err

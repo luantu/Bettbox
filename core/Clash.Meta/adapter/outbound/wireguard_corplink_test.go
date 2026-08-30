@@ -71,3 +71,23 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 		t.Fatalf("unexpected dynamic info: %+v", got)
 	}
 }
+
+func TestCorplinkTCPDialTargetTracksRefreshedEndpoint(t *testing.T) {
+	w := &WireGuard{option: WireGuardOption{
+		WireGuardPeerOption: WireGuardPeerOption{
+			Server: "initial.example.test",
+			Port:   34080,
+		},
+	}}
+	if got := w.tcpDialTarget(); got != "initial.example.test:34080" {
+		t.Fatalf("unexpected initial TCP target: %q", got)
+	}
+
+	// refreshCorplinkOption updates the live option after /vpn/conn selects
+	// the actual FUZHOU_INTL_node endpoint.
+	w.option.Server = "198.51.100.27"
+	w.option.Port = 35555
+	if got := w.tcpDialTarget(); got != "198.51.100.27:35555" {
+		t.Fatalf("TCP target did not follow refreshed endpoint: %q", got)
+	}
+}
