@@ -61,9 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/luantu/corplink-rs.git tools/corplink-rs-src
-          git -C tools/corplink-rs-src fetch --depth 1 origin e48eaab116d4bc58776a6ce7267d2ca399804f69
-          git -C tools/corplink-rs-src checkout e48eaab116d4bc58776a6ce7267d2ca399804f69
-          python3 tools/corplink-rs/prepare-android.py tools/corplink-rs-src
+          git -C tools/corplink-rs-src fetch --depth 1 origin e65a36c009cd96813b5c0595fe6175f729c1c676
+          git -C tools/corplink-rs-src checkout e65a36c009cd96813b5c0595fe6175f729c1c676
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           cargo build --manifest-path tools/corplink-rs-src/Cargo.toml \
             --release --target aarch64-linux-android \

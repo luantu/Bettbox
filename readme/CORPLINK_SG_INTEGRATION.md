@@ -123,13 +123,13 @@ arm64 交叉编译后生成 `Bettbox-android-arm64-sg` artifact。失败日志�
 可以把它加入 OpenAI/ChatGPT 专用组。海外 DoH 地址固定经 SG 节点 resolver 发起，不能
 把本地系统 DNS 当作成功依据。
 
-### `corplink-rs` Android 边界
+### `corplink-rs` Android 实现
 
-当前 `corplink-rs` 的 machine helper 是面向 Linux/桌面的 JSONL 子进程，机器请求的历史协议
-没有密码字段，且只接受 `lark`/`OIDC` 平台；它不能直接满足 Android 的 `ldap`/`feilian` 密码登录。
-因此 Android 当前实现采用等价的原生 HTTP 流程，避免把 Linux ELF 当作 Android helper 发布。
-若后续要统一为 Rust 授权实现，需要先为 `aarch64-linux-android` 增加受控 JNI/FFI 入口，并扩展
-machine 协议，再替换本节的 Android 流程；在此之前不把 Android 标记为“已接入 corplink-rs”。
+Android 构建固定使用 `luantu/corplink-rs` 的 `codex/android-machine-helper` 分支提交
+`e65a36c009cd96813b5c0595fe6175f729c1c676`，编译 `corplink-rs-login --machine` 为
+`aarch64-linux-android`。该分支的 machine 协议补充了密码字段，并允许自动选择
+`ldap`/`feilian` 登录顺序；helper 以 JSONL 事件报告登录 URL/等待/成功，Android 在成功后
+清理授权配置中的密码字段。若 helper 无法执行，应用保留原生 HTTP 流程作为兼容回退。
 
 ### 验收边界
 
