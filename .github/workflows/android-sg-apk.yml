@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feat/corplink-sg-node
+      - codex/feilian-android
 
 concurrency:
   group: android-sg-apk-${{ github.ref }}
