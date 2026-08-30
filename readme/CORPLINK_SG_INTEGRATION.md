@@ -57,7 +57,8 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 ## 授权生命周期
 
 1. 用户点击启用 SG 节点。
-2. Bettbox 调用随应用发布的 `corplink-rs` 子进程完成登录和 2FA。
+2. Android 端使用 Bettbox 内置的原生 HTTP 授权流程完成密码登录、Cookie 和 OTP；桌面端继续调用
+   `corplink-rs` 子进程。两条路径共用同一组 CorpLink API、设备身份和 WireGuard 配置字段。
 3. 保存 Cookie、device identity 和 private key 到安全存储。
 4. Mihomo 启动或重启前调用 `/vpn/conn`，取得最新隧道 IP、peer public key、endpoint、MTU。
 5. 组装 `wireguard` 出站并追加到最终配置。
@@ -104,7 +105,8 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 
 ### Android arm64
 
-Android 版本不依赖外部 `corplink-rs` 可执行文件。Bettbox 在应用私有目录内生成并保存
+Android 版本不依赖 Linux 版 `corplink-rs` 可执行文件（该 helper 不能直接在 Android linker
+上运行）。Bettbox 在应用私有目录内生成并保存
 本安装实例的 WireGuard 密钥、设备身份和授权材料，Mihomo-SG 负责调用飞连控制面并建立
 WireGuard-TCP 数据面。首次启用时只填写用户名、密码和上游控制面地址；节点选择固定为
 `FUZHOU_INTL_node`，实际 API 端口、VPN 端口、隧道地址、MTU 和备用地址由
@@ -120,6 +122,14 @@ arm64 交叉编译后生成 `Bettbox-android-arm64-sg` artifact。失败日志�
 配置覆写脚本和普通节点仍走原来的配置链；SG 节点会在脚本评估前后各注入一次，保证脚本
 可以把它加入 OpenAI/ChatGPT 专用组。海外 DoH 地址固定经 SG 节点 resolver 发起，不能
 把本地系统 DNS 当作成功依据。
+
+### `corplink-rs` Android 边界
+
+当前 `corplink-rs` 的 machine helper 是面向 Linux/桌面的 JSONL 子进程，机器请求的历史协议
+没有密码字段，且只接受 `lark`/`OIDC` 平台；它不能直接满足 Android 的 `ldap`/`feilian` 密码登录。
+因此 Android 当前实现采用等价的原生 HTTP 流程，避免把 Linux ELF 当作 Android helper 发布。
+若后续要统一为 Rust 授权实现，需要先为 `aarch64-linux-android` 增加受控 JNI/FFI 入口，并扩展
+machine 协议，再替换本节的 Android 流程；在此之前不把 Android 标记为“已接入 corplink-rs”。
 
 ### 验收边界
 
