@@ -6,11 +6,29 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
+func writeCorplinkCookieFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+	if err := os.WriteFile(path, []byte("session=integration-test"), 0o600); err != nil {
+		t.Fatalf("write cookie fixture: %v", err)
+	}
+	return path
+}
+
 func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
+	const deviceID = "android-device-id"
+	const deviceName = "SG-Node-Android-test"
 	data := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie := r.Header.Get("Cookie")
+		if !strings.Contains(cookie, "device_id="+deviceID) || !strings.Contains(cookie, "device_name="+deviceName) {
+			t.Fatalf("device identity missing from data-plane cookie: %q", cookie)
+		}
 		if r.URL.Path == "/vpn/ping" {
 			_, _ = io.WriteString(w, `{"code":0,"data":"ok"}`)
 			return
@@ -27,6 +45,10 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 		if r.URL.Path != "/api/vpn/list" {
 			t.Fatalf("unexpected control-plane request: %s", r.URL.Path)
 		}
+		cookie := r.Header.Get("Cookie")
+		if !strings.Contains(cookie, "device_id="+deviceID) || !strings.Contains(cookie, "device_name="+deviceName) {
+			t.Fatalf("device identity missing from control-plane cookie: %q", cookie)
+		}
 		_, _ = io.WriteString(w, `{"code":0,"data":[{"api_port":`+port+`,"vpn_port":34080,"ip":"127.0.0.1","protocol_mode":1,"name":"FUZHOU_INTL_node"}]}`)
 	}))
 	defer control.Close()
@@ -36,6 +58,9 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 	got, err := fetchCorplinkWgInfo(CorplinkOption{
 		APIServer:     control.URL,
 		Code:          "JBSWY3DPEHPK3PXP",
+		CookieFile:    writeCorplinkCookieFile(t),
+		DeviceID:      deviceID,
+		DeviceName:    deviceName,
 		VPNServerName: "FUZHOU_INTL_node",
 		PublicKey:     base64.StdEncoding.EncodeToString(make([]byte, 32)),
 	})
