@@ -31,7 +31,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.appshub.bettbox"
+        // Keep the SG/CorpLink build installable beside the upstream Bettbox.
+        // The namespace stays unchanged because the Kotlin source packages and
+        // manifest class names are still com.appshub.bettbox.*.
+        applicationId = "com.appshub.bettbox.sg"
         minSdk = 26
         targetSdk = 36
         versionCode = flutter.versionCode
