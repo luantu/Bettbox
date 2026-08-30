@@ -7,6 +7,7 @@ import 'package:bett_box/common/common.dart';
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -271,7 +272,7 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
       }
     }
   }();
-  await process.stdin.write(request);
+  process.stdin.write(request);
   await process.stdin.close();
   final exitCode = await process.exitCode.timeout(
     const Duration(minutes: 6),
