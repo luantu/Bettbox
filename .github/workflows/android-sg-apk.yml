@@ -63,7 +63,11 @@ jobs:
           git clone --depth 1 https://github.com/luantu/corplink-rs.git tools/corplink-rs-src
           git -C tools/corplink-rs-src fetch --depth 1 origin e65a36c009cd96813b5c0595fe6175f729c1c676
           git -C tools/corplink-rs-src checkout e65a36c009cd96813b5c0595fe6175f729c1c676
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          export ANDROID_CLANG="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          export ANDROID_AR="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_CLANG"
+          export CC_aarch64_linux_android="$ANDROID_CLANG"
+          export AR_aarch64_linux_android="$ANDROID_AR"
           cargo build --manifest-path tools/corplink-rs-src/Cargo.toml \
             --release --target aarch64-linux-android \
             --no-default-features --features login-helper \
