@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -6,8 +7,10 @@ import 'package:bett_box/common/common.dart';
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgUsernameKey = 'corplinkSg.username';
@@ -176,6 +179,122 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
 }
 
 Future<bool> _ensureAndroidCorplinkAuthorization(
+  CorplinkSgSettings settings,
+) async {
+  final helperResult = await _ensureAndroidCorplinkRsAuthorization(settings);
+  if (helperResult != null) return helperResult;
+  return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+}
+
+Future<bool?> _ensureAndroidCorplinkRsAuthorization(
+  CorplinkSgSettings settings,
+) async {
+  final home = await corplinkSgHomePath();
+  await Directory(home).create(recursive: true);
+  final helperPath = joinPath(home, 'corplink-rs-login');
+  try {
+    if (!File(helperPath).existsSync()) {
+      final bytes = await rootBundle.load(
+        'assets/bin/android-arm64-v8a/corplink-rs-login',
+      );
+      await File(helperPath).writeAsBytes(
+        bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
+        flush: true,
+      );
+      await Process.run('/system/bin/chmod', ['700', helperPath]);
+    }
+  } on FlutterError {
+    return null;
+  } on FileSystemException {
+    return null;
+  }
+
+  final configPath = joinPath(home, 'config.json');
+  final cookiePath = joinPath(home, 'corplink_cookies.json');
+  final current = await loadCorplinkConfig();
+  final identity = await _loadOrCreateAndroidIdentity(current);
+  if (current?['private_key'] is String &&
+      (current?['private_key'] as String).isNotEmpty &&
+      current?['public_key'] is String &&
+      (current?['public_key'] as String).isNotEmpty &&
+      current?['code'] is String &&
+      (current?['code'] as String).isNotEmpty &&
+      File(cookiePath).existsSync()) {
+    return true;
+  }
+
+  final keyPair = await X25519().newKeyPair();
+  final publicKey = base64Encode((await keyPair.extractPublicKey()).bytes);
+  final privateKey = base64Encode(await keyPair.extractPrivateKeyBytes());
+  final request = jsonEncode({
+    'protocol_version': 1,
+    'action': 'login',
+    'server': settings.server.trim().replaceFirst(RegExp(r'/$'), ''),
+    'company_name': 'Bettbox',
+    'username': settings.username,
+    'password': settings.password,
+    'device_name': identity.$1,
+    'device_id': identity.$2,
+    'public_key': publicKey,
+    'private_key': privateKey,
+    'interface_name': 'bettboxsg',
+    'auth_file': configPath,
+    'cookie_file': cookiePath,
+    'vpn_server_name': 'FUZHOU_INTL_node',
+    'vpn_select_strategy': 'latency',
+  });
+
+  Process process;
+  try {
+    process = await Process.start(helperPath, ['--machine']);
+  } on ProcessException {
+    return null;
+  }
+  var succeeded = false;
+  final stdoutFuture = () async {
+    await for (final line in process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())) {
+      try {
+        final event = jsonDecode(line);
+        if (event is! Map) continue;
+        if (event['event'] == 'login_url') {
+          final url = Uri.tryParse(event['url']?.toString() ?? '');
+          if (url != null) {
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+          }
+        } else if (event['event'] == 'success') {
+          succeeded = true;
+        }
+      } on FormatException {
+        // Helper diagnostics are deliberately ignored by the protocol parser.
+      }
+    }
+  }();
+  await process.stdin.write(request);
+  await process.stdin.close();
+  final exitCode = await process.exitCode.timeout(
+    const Duration(minutes: 6),
+    onTimeout: () {
+      process.kill(ProcessSignal.sigterm);
+      return -1;
+    },
+  );
+  await stdoutFuture;
+  if (exitCode != 0 || !succeeded) return false;
+
+  final generated = await loadCorplinkConfig();
+  if (generated == null) return false;
+  final sanitized = Map<String, dynamic>.from(generated)..remove('password');
+  await File(configPath).writeAsString(jsonEncode(sanitized), flush: true);
+  return sanitized['private_key'] is String &&
+      (sanitized['private_key'] as String).isNotEmpty &&
+      sanitized['code'] is String &&
+      (sanitized['code'] as String).isNotEmpty &&
+      File(cookiePath).existsSync();
+}
+
+Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
   CorplinkSgSettings settings,
 ) async {
   final home = await corplinkSgHomePath();
