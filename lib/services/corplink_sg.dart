@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:bett_box/common/common.dart';
 import 'package:crypto/crypto.dart';
@@ -12,6 +13,8 @@ const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgUsernameKey = 'corplinkSg.username';
 const corplinkSgServerKey = 'corplinkSg.server';
 const corplinkSgPasswordSecureKey = 'corplinkSg.password';
+const corplinkSgDeviceIdSecureKey = 'corplinkSg.deviceId';
+const corplinkSgDeviceNameSecureKey = 'corplinkSg.deviceName';
 const _secureStorage = FlutterSecureStorage();
 
 class CorplinkSgSettings {
@@ -64,6 +67,35 @@ String joinPath(String base, String child) =>
     '$base${Platform.pathSeparator}$child';
 
 Future<bool>? _authorizationInFlight;
+
+Future<(String, String)> _loadOrCreateAndroidIdentity(
+  Map<String, dynamic>? current,
+) async {
+  final storedName = await _secureStorage.read(key: corplinkSgDeviceNameSecureKey);
+  final storedId = await _secureStorage.read(key: corplinkSgDeviceIdSecureKey);
+  if (storedName != null && storedName.isNotEmpty &&
+      storedId != null && storedId.isNotEmpty) {
+    return (storedName, storedId);
+  }
+
+  final currentName = current?['device_name']?.toString() ?? '';
+  final currentId = current?['device_id']?.toString() ?? '';
+  if (currentName.isNotEmpty && currentId.isNotEmpty) {
+    await _secureStorage.write(key: corplinkSgDeviceNameSecureKey, value: currentName);
+    await _secureStorage.write(key: corplinkSgDeviceIdSecureKey, value: currentId);
+    return (currentName, currentId);
+  }
+
+  // Android's hostname is commonly "localhost" and is not an installation
+  // identity. Generate a stable random identity once per Bettbox install.
+  final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
+  final suffix = bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+  final name = 'SG-Node-Android-${suffix.substring(0, 12)}';
+  final id = md5.convert(utf8.encode(name)).toString();
+  await _secureStorage.write(key: corplinkSgDeviceNameSecureKey, value: name);
+  await _secureStorage.write(key: corplinkSgDeviceIdSecureKey, value: id);
+  return (name, id);
+}
 
 Future<bool> ensureCorplinkAuthorization(CorplinkSgSettings settings) {
   return _authorizationInFlight ??= _ensureCorplinkAuthorization(
@@ -150,6 +182,7 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   await Directory(home).create(recursive: true);
   final configPath = joinPath(home, 'config.json');
   final current = await loadCorplinkConfig();
+  final identity = await _loadOrCreateAndroidIdentity(current);
   if (current?['private_key'] is String &&
       (current?['private_key'] as String).isNotEmpty &&
       current?['public_key'] is String &&
@@ -159,8 +192,8 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
     return true;
   }
   final base = settings.server.trim().replaceFirst(RegExp(r'/$'), '');
-  final deviceName = 'SG-Node-${Platform.localHostname}';
-  final deviceId = md5.convert(utf8.encode(deviceName)).toString();
+  final deviceName = identity.$1;
+  final deviceId = identity.$2;
   final keyPair = await X25519().newKeyPair();
   final publicKey = base64Encode((await keyPair.extractPublicKey()).bytes);
   final privateKey = base64Encode(await keyPair.extractPrivateKeyBytes());
@@ -177,12 +210,16 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
     }
   }
   Options requestOptions() => Options(headers: {
-        'Cookie': cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
+        'Cookie': [
+          ...cookies.entries.map((e) => '${e.key}=${e.value}'),
+          'device_id=$deviceId',
+          'device_name=$deviceName',
+        ].join('; '),
         if (cookies['csrf-token'] != null) 'csrf-token': cookies['csrf-token'],
       });
   try {
     final suffix = '?os=Android&os_version=2';
-    final methods = await dio.get('$base/api/login/setting$suffix');
+    final methods = await dio.get('$base/api/login/setting$suffix', options: requestOptions());
     collect(methods);
     final methodData = methods.data is Map ? methods.data['data'] : null;
     final loginOrders = methodData is Map && methodData['login_orders'] is List
@@ -292,6 +329,9 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
       'corplink-cookie-file': cookiePath,
       'corplink-device-id': auth['device_id']?.toString() ?? '',
       'corplink-device-name': auth['device_name']?.toString() ?? name,
+      // FUZHOU_INTL_node is the TCP/SG node used by the current Feilian
+      // deployment. Mihomo resolves its actual endpoint through /api/vpn/list.
+      'corplink-vpn-server-name': 'FUZHOU_INTL_node',
       'corplink-public-key': publicKey,
       'corplink-refresh-threshold-hours': 48,
       'corplink-refresh-hour': 3,
@@ -304,7 +344,9 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   for (final group in groups) {
     if (group is! Map) continue;
     final list = group['proxies'];
-    if (list is List && group['name']?.toString().contains('OpenAI') == true) {
+    final groupName = group['name']?.toString().toLowerCase() ?? '';
+    final isOpenAiGroup = groupName.contains('openai') || groupName.contains('chatgpt');
+    if (list is List && isOpenAiGroup) {
       if (!list.contains(name)) list.insert(0, name);
     }
   }

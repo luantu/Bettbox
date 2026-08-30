@@ -777,6 +777,18 @@ func refreshCorplinkOption(option *WireGuardOption) error {
 	}
 	if info.IP != "" {
 		option.Ip = info.IP
+		if info.IPMask != "" && !strings.Contains(option.Ip, "/") {
+			option.Ip += "/" + info.IPMask
+		}
+	}
+	if info.IPv6 != "" {
+		option.Ipv6 = info.IPv6
+	}
+	if info.Server != "" {
+		option.Server = info.Server
+	}
+	if info.Port != 0 {
+		option.Port = info.Port
 	}
 	if info.ServerPubKeyHex != "" {
 		option.PublicKey = info.ServerPubKeyHex

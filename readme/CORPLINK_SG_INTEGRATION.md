@@ -102,6 +102,32 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 
 ## 构建与发布
 
+### Android arm64
+
+Android 版本不依赖外部 `corplink-rs` 可执行文件。Bettbox 在应用私有目录内生成并保存
+本安装实例的 WireGuard 密钥、设备身份和授权材料，Mihomo-SG 负责调用飞连控制面并建立
+WireGuard-TCP 数据面。首次启用时只填写用户名、密码和上游控制面地址；节点选择固定为
+`FUZHOU_INTL_node`，实际 API 端口、VPN 端口、隧道地址、MTU 和备用地址由
+`/api/vpn/list`、`/vpn/ping`、`/vpn/conn` 动态取得。
+
+GitHub Actions 工作流：`.github/workflows/android-sg-apk.yml`。它固定使用 Java 17、
+Flutter 3.44.9、Go 1.24.6 和 Android NDK 28.2.13676358，执行 Mihomo-SG Android
+arm64 交叉编译后生成 `Bettbox-android-arm64-sg` artifact。失败日志会作为
+`android-sg-build-log` artifact 上传。重试工作流为
+`.github/workflows/android-sg-apk-retry.yml`。
+
+安装 APK 后，在“设置 → 通用 → SG-Node-Linux”填写三项信息并启用。机场订阅、原有
+配置覆写脚本和普通节点仍走原来的配置链；SG 节点会在脚本评估前后各注入一次，保证脚本
+可以把它加入 OpenAI/ChatGPT 专用组。海外 DoH 地址固定经 SG 节点 resolver 发起，不能
+把本地系统 DNS 当作成功依据。
+
+### 验收边界
+
+构建成功只证明 APK 和 Mihomo-SG native library 已生成。公司账号登录、WireGuard
+handshake、隧道内 DoH 以及 `chatgpt.com` HTTP 200 必须在真实 Android 手机上用实际
+服务器和账号另行验收；本仓库不包含账号、Cookie、TOTP、私钥或服务器备份，也不会在
+CI 中执行真实登录。
+
 GitHub Actions 的 Windows amd64 构建会自动从 `luantu/corplink-rs` 编译并放置
 `corplink-rs.exe`。本地构建时，需要先在 `tools/corplink-rs/windows/x64/`（或
 `arm64/`）放置对应架构的 helper，再执行：

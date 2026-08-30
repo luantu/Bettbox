@@ -16,10 +16,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +43,8 @@ type CorplinkOption struct {
 	// devices using the same account.
 	DeviceID   string `proxy:"corplink-device-id,omitempty"`
 	DeviceName string `proxy:"corplink-device-name,omitempty"`
+	// VPNServerName selects the company VPN node returned by /api/vpn/list.
+	VPNServerName string `proxy:"corplink-vpn-server-name,omitempty"`
 	// PublicKey 为本机 wireguard 公钥（base64），用于 /vpn/conn 请求。
 	PublicKey string `proxy:"corplink-public-key,omitempty"`
 	// RefreshCommand 为刷新 cookie 的可执行命令。
@@ -75,9 +79,27 @@ type corplinkRespWgInfo struct {
 
 type corplinkWgInfo struct {
 	IP              string
+	IPMask          string
+	IPv6            string
 	ServerPubKey    string
 	ServerPubKeyHex string
 	MTU             int
+	Server          string
+	Port            int
+}
+
+type corplinkVPNNode struct {
+	APIPort      int      `json:"api_port"`
+	VPNPort      int      `json:"vpn_port"`
+	IP           string   `json:"ip"`
+	ProtocolMode int      `json:"protocol_mode"`
+	Name         string   `json:"name"`
+	BackupIPs    []string `json:"backup_ips"`
+}
+
+type corplinkEnvelope[T any] struct {
+	Code int `json:"code"`
+	Data T   `json:"data"`
 }
 
 // fetchCorplinkWgInfo 调用 corplink /vpn/conn API 获取当前会话的 wg 信息。
@@ -96,7 +118,88 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		return nil, err
 	}
 
-	apiURL := strings.TrimSuffix(opt.APIServer, "/") + "/vpn/conn?os=Android&os_version=2"
+	base := strings.TrimSuffix(opt.APIServer, "/")
+	client := &http.Client{Timeout: 15 * time.Second}
+	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	cookieHeader := cookieStr
+	if opt.DeviceID != "" {
+		if cookieHeader != "" {
+			cookieHeader += "; "
+		}
+		cookieHeader += "device_id=" + opt.DeviceID
+		if opt.DeviceName != "" {
+			cookieHeader += "; device_name=" + opt.DeviceName
+		}
+	}
+	request := func(method, endpoint string, body io.Reader) (*http.Response, error) {
+		req, err := http.NewRequest(method, endpoint, body)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "okhttp/3.14.9")
+		if cookieHeader != "" {
+			req.Header.Set("Cookie", cookieHeader)
+		}
+		if csrf != "" {
+			req.Header.Set("csrf-token", csrf)
+		}
+		return client.Do(req)
+	}
+	var nodes corplinkEnvelope[[]corplinkVPNNode]
+	listResp, err := request(http.MethodGet, base+"/api/vpn/list?os=Android&os_version=2", nil)
+	if err != nil {
+		return nil, err
+	}
+	listBody, readErr := io.ReadAll(io.LimitReader(listResp.Body, 2<<20))
+	listResp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if listResp.StatusCode != http.StatusOK || json.Unmarshal(listBody, &nodes) != nil || nodes.Code != 0 {
+		return nil, fmt.Errorf("corplink vpn list failed")
+	}
+	var node *corplinkVPNNode
+	for i := range nodes.Data {
+		candidate := &nodes.Data[i]
+		if candidate.Name == opt.VPNServerName && candidate.ProtocolMode == 1 {
+			node = candidate
+			break
+		}
+	}
+	if node == nil && opt.VPNServerName == "" {
+		for i := range nodes.Data {
+			if nodes.Data[i].ProtocolMode == 1 {
+				node = &nodes.Data[i]
+				break
+			}
+		}
+	}
+	if node == nil {
+		return nil, fmt.Errorf("corplink vpn node %q not found or not TCP", opt.VPNServerName)
+	}
+	var dataBase string
+	for _, ip := range append([]string{node.IP}, node.BackupIPs...) {
+		if net.ParseIP(ip) == nil || node.APIPort <= 0 {
+			continue
+		}
+		candidate := "https://" + net.JoinHostPort(ip, strconv.Itoa(node.APIPort))
+		pingResp, pingErr := request(http.MethodGet, candidate+"/vpn/ping?os=Android&os_version=2", nil)
+		if pingErr == nil {
+			raw, _ := io.ReadAll(io.LimitReader(pingResp.Body, 64<<10))
+			pingResp.Body.Close()
+			var ping corplinkEnvelope[json.RawMessage]
+			if pingResp.StatusCode == http.StatusOK && json.Unmarshal(raw, &ping) == nil && ping.Code == 0 {
+				dataBase = candidate
+				node.IP = ip
+				break
+			}
+		}
+	}
+	if dataBase == "" {
+		return nil, fmt.Errorf("corplink vpn node %q is unreachable", node.Name)
+	}
+	apiURL := dataBase + "/vpn/conn?os=Android&os_version=2"
 	// corplink /vpn/conn 的 public_key 字段期望 base64 编码；
 	// 兼容 hex 输入（option.PublicKey 在 NewWireGuard 中已被统一为 hex）。
 	reqPubKey := opt.PublicKey
@@ -107,36 +210,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		"public_key": reqPubKey,
 		"otp":        otp,
 	})
-	req, err := http.NewRequest(http.MethodPost, apiURL, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "okhttp/3.14.9")
-	if cookieStr != "" {
-		req.Header.Set("Cookie", cookieStr)
-	}
-	if csrf != "" {
-		req.Header.Set("csrf-token", csrf)
-	}
-	if opt.DeviceID != "" {
-		cookie := req.Header.Get("Cookie")
-		if cookie != "" {
-			cookie += "; "
-		}
-		cookie += "device_id=" + opt.DeviceID
-		if opt.DeviceName != "" {
-			cookie += "; device_name=" + opt.DeviceName
-		}
-		req.Header.Set("Cookie", cookie)
-	}
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	// corplink 控制面使用自签/无 IP SAN 证书，跳过校验（与 corplink 客户端行为一致）。
-	client.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	resp, err := client.Do(req)
+	resp, err := request(http.MethodPost, apiURL, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}
@@ -164,9 +238,13 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	}
 	info := &corplinkWgInfo{
 		IP:              wg.Data.IP,
+		IPMask:          wg.Data.IPMask,
+		IPv6:            wg.Data.IPv6,
 		ServerPubKey:    serverPubB64,
 		ServerPubKeyHex: serverPubHex,
 		MTU:             0,
+		Server:          node.IP,
+		Port:            node.VPNPort,
 	}
 	if wg.Data.Setting != nil {
 		info.MTU = wg.Data.Setting.VPNMTU
