@@ -203,9 +203,10 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   return _ensureAndroidCorplinkAuthorizationLegacy(settings);
 }
 
-/// Discard only the renewable CorpLink session material. Device identity is
-/// intentionally retained so the server sees the same Android installation
-/// on the next login.
+/// Discard renewable CorpLink session material. A server-side auth rejection
+/// also invalidates the device binding: the next login must advertise a new
+/// Android device identity so one account can keep multiple installations
+/// connected, matching the Feilian multi-device revision.
 Future<void> invalidateCorplinkAuthorization() async {
   final home = await corplinkSgHomePath();
   for (final name in const [
@@ -216,6 +217,8 @@ Future<void> invalidateCorplinkAuthorization() async {
     final file = File(joinPath(home, name));
     if (file.existsSync()) await file.delete();
   }
+  await _secureStorage.delete(key: corplinkSgDeviceIdSecureKey);
+  await _secureStorage.delete(key: corplinkSgDeviceNameSecureKey);
   _androidAuthorizationSessionKey = null;
 }
 
