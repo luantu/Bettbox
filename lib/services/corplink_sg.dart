@@ -313,7 +313,7 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
       'path=$helperPath '
       'nativeLibraryDir=$nativeLibraryDir '
       'exists=${File(helperPath).existsSync()} '
-      'error=${e.message} osError=${e.osError?.message ?? 'none'}',
+      'error=${e.message}',
     );
     return null;
   }
