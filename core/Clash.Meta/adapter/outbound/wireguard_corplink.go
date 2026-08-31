@@ -451,8 +451,15 @@ func loadCorplinkCookie(path string) (csrf, cookieStr string, err error) {
 	}
 	defer f.Close()
 
+	// corplink-rs writes cookie_store's native JSON representation on Android
+	// (name/value/domain/path fields). Older clients wrote an array containing
+	// raw_cookie instead. Decode both formats; the native JSON is syntactically
+	// valid even when raw_cookie is absent, so it must not fall through to the
+	// plain-text parser merely based on JSON decode success.
 	var cookies []struct {
 		RawCookie string `json:"raw_cookie"`
+		Name      string `json:"name"`
+		Value     string `json:"value"`
 	}
 	if err := json.NewDecoder(f).Decode(&cookies); err != nil {
 		// Android bootstrap may not have Rust's CookieStore serializer. Accept
@@ -477,7 +484,13 @@ func loadCorplinkCookie(path string) (csrf, cookieStr string, err error) {
 	var parts []string
 	for _, c := range cookies {
 		raw := c.RawCookie
+		if raw == "" && c.Name != "" {
+			raw = c.Name + "=" + c.Value
+		}
 		seg := strings.SplitN(raw, ";", 2)[0]
+		if strings.TrimSpace(seg) == "" {
+			continue
+		}
 		parts = append(parts, seg)
 		name := strings.SplitN(seg, "=", 2)[0]
 		if name == "csrf-token" {

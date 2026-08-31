@@ -23,6 +23,22 @@ func writeCorplinkCookieFile(t *testing.T) string {
 	return path
 }
 
+func TestLoadCorplinkCookieReadsRustCookieStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "corplink_cookies.json")
+	content := `[{"name":"session","value":"rust-session","domain":"aq.ruijie.com.cn","path":"/"},{"name":"csrf-token","value":"rust-csrf","domain":"aq.ruijie.com.cn","path":"/"}]`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write rust cookie fixture: %v", err)
+	}
+
+	csrf, cookieHeader, err := loadCorplinkCookie(path)
+	if err != nil {
+		t.Fatalf("load Rust CookieStore: %v", err)
+	}
+	if csrf != "rust-csrf" || !strings.Contains(cookieHeader, "session=rust-session") {
+		t.Fatalf("unexpected Rust CookieStore conversion: csrf=%q cookie=%q", csrf, cookieHeader)
+	}
+}
+
 func TestCorplinkDNSRoutesEveryConfiguredNameServerThroughTunnel(t *testing.T) {
 	tunnel := NewDirect()
 	servers := []dns.NameServer{
