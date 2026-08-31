@@ -319,12 +319,28 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
         } else if (event['event'] == 'auth_required') {
           debugPrint('[APP] CorpLink helper event=auth_required');
         } else if (event['event'] == 'error') {
-          debugPrint('[APP] CorpLink helper event=error code=${event['code'] ?? 'unknown'}');
+          debugPrint(
+            '[APP] CorpLink helper event=error '
+            'code=${event['code'] ?? 'unknown'} '
+            'message=${event['message'] ?? 'unknown'}',
+          );
         } else if (event['event'] == 'refresh_started') {
           debugPrint('[APP] CorpLink helper event=refresh_started');
         }
       } on FormatException {
         // Helper diagnostics are deliberately ignored by the protocol parser.
+      }
+    }
+  }();
+  final stderrFuture = () async {
+    await for (final line in process.stderr
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())) {
+      // The helper keeps stdout machine-readable. Surface its redacted
+      // diagnostics in the Bettbox log so Android failures are actionable.
+      final trimmed = line.trim();
+      if (trimmed.isNotEmpty) {
+        debugPrint('[APP] CorpLink helper stderr: $trimmed');
       }
     }
   }();
@@ -338,6 +354,7 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
     },
   );
   await stdoutFuture;
+  await stderrFuture;
   debugPrint(
     '[APP] CorpLink helper exit=$exitCode succeeded=$succeeded '
     'config=${File(configPath).existsSync()} cookie=${File(cookiePath).existsSync()}',
