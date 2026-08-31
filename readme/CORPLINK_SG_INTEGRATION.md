@@ -111,8 +111,8 @@ Android 版本不依赖 Linux 版 `corplink-rs` 可执行文件（该 helper 不
 上运行）。Bettbox 优先使用 `feilian` 密码登录；如果服务端拒绝密码流程，才使用打包进 APK 的
 Android arm64 machine helper 和可见 Feishu/Lark 授权。应用在应用私有目录内生成并保存
 本安装实例的 WireGuard 密钥、设备身份和授权材料，Mihomo-SG 负责调用飞连控制面并建立
-WireGuard-TCP 数据面。首次启用时只填写用户名、密码和上游控制面地址；节点选择固定为
-`FUZHOU_INTL_node`，实际 API 端口、VPN 端口、隧道地址、MTU 和备用地址由
+WireGuard-TCP 数据面。首次启用时只填写用户名、密码和上游控制面地址；节点选择默认使用
+`FUZHOU_INTL_node`，同时兼容服务端返回的 `FZ-INT-Node` 及连字符/下划线变体，实际 API 端口、VPN 端口、隧道地址、MTU 和备用地址由
 `/api/vpn/list`、`/vpn/ping`、`/vpn/conn` 动态取得。
 
 GitHub Actions 工作流：`.github/workflows/android-sg-apk.yml`。它固定使用 Java 17、
@@ -135,7 +135,7 @@ SG 构建的 applicationId 为 `com.appshub.bettbox.sg`，用于和已安装的�
 ### `corplink-rs` Android 实现
 
 Android 构建固定使用 `luantu/corplink-rs` 的 `codex/android-machine-helper` 分支提交
-`e65a36c009cd96813b5c0595fe6175f729c1c676`，编译 `corplink-rs-login --machine` 为
+`ccad690330d851cd476a7f2bcb2fda172d5f0b12`，编译 `corplink-rs-login --machine` 为
 `aarch64-linux-android`。该分支的 machine 协议补充了密码字段，并允许自动选择
 `ldap`/`feilian` 登录顺序；helper 以 JSONL 事件报告登录 URL/等待/成功，Android 在成功后
 清理授权配置中的密码字段。当前 Android 先走原生 HTTP `feilian` 流程，只有密码流程失败时才
