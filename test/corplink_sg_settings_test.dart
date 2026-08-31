@@ -32,7 +32,7 @@ void main() {
       cookieFile: '/data/user/0/app/files/corplink_cookies.json',
     );
 
-    expect(request['platform'], 'feilian');
+    expect(request.containsKey('platform'), isFalse);
     expect(request['password'], 'secret');
   });
 }

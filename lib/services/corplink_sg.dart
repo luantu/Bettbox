@@ -361,7 +361,10 @@ Map<String, dynamic> buildAndroidCorplinkMachineRequest({
     'action': 'login',
     'server': server,
     'company_name': 'Bettbox',
-    'platform': 'feilian',
+    // Let corplink-rs follow the server-advertised login order. Some Feilian
+    // deployments expose the password flow as LDAP rather than "feilian";
+    // forcing a third-party platform here can create a file-backed session
+    // that the VPN API will not accept.
     'username': username,
     'password': password,
     'device_name': deviceName,
