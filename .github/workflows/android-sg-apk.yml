@@ -74,8 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/luantu/corplink-rs.git tools/corplink-rs-src
-          git -C tools/corplink-rs-src fetch --depth 1 origin 2089277f1386c2a1cb6663727909827cf0f74e27
-          git -C tools/corplink-rs-src checkout 2089277f1386c2a1cb6663727909827cf0f74e27
+          git -C tools/corplink-rs-src fetch --depth 1 origin e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92
+          git -C tools/corplink-rs-src checkout e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92
           export ANDROID_CLANG="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           export ANDROID_AR="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_CLANG"

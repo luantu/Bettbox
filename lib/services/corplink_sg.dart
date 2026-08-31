@@ -401,7 +401,7 @@ Map<String, dynamic> buildAndroidCorplinkMachineRequest({
     'interface_name': 'bettboxsg',
     'auth_file': authFile,
     'cookie_file': cookieFile,
-    'vpn_server_name': 'FUZHOU_INTL_node',
+    'vpn_server_name': 'FZ-INT-Node',
     'vpn_select_strategy': 'latency',
   };
 }
@@ -587,9 +587,9 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
       'corplink-cookie-file': cookiePath,
       'corplink-device-id': auth['device_id']?.toString() ?? '',
       'corplink-device-name': auth['device_name']?.toString() ?? name,
-      // FUZHOU_INTL_node is the TCP/SG node used by the current Feilian
+      // FZ-INT-Node is the TCP/SG node used by the current Feilian
       // deployment. Mihomo resolves its actual endpoint through /api/vpn/list.
-      'corplink-vpn-server-name': 'FUZHOU_INTL_node',
+      'corplink-vpn-server-name': 'FZ-INT-Node',
       'corplink-public-key': publicKey,
       'corplink-refresh-threshold-hours': 48,
       'corplink-refresh-hour': 3,
