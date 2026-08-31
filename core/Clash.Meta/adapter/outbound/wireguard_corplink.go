@@ -102,6 +102,18 @@ type corplinkEnvelope[T any] struct {
 	Data T   `json:"data"`
 }
 
+func corplinkNodeNameMatches(candidate, requested string) bool {
+	candidate = strings.ToLower(strings.TrimSpace(candidate))
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if candidate == requested {
+		return true
+	}
+	// The Feilian control plane has used both names for the same Fuzhou
+	// international TCP node. Keep the user-facing/legacy selector stable.
+	return (candidate == "fz-int-node" && requested == "fuzhou_intl_node") ||
+		(candidate == "fuzhou_intl_node" && requested == "fz-int-node")
+}
+
 // fetchCorplinkWgInfo 调用 corplink /vpn/conn API 获取当前会话的 wg 信息。
 func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	if opt.APIServer == "" {
@@ -162,7 +174,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	var node *corplinkVPNNode
 	for i := range nodes.Data {
 		candidate := &nodes.Data[i]
-		if candidate.Name == opt.VPNServerName && candidate.ProtocolMode == 1 {
+		if corplinkNodeNameMatches(candidate.Name, opt.VPNServerName) && candidate.ProtocolMode == 1 {
 			node = candidate
 			break
 		}

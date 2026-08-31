@@ -41,6 +41,12 @@ func TestCorplinkDNSRoutesEveryConfiguredNameServerThroughTunnel(t *testing.T) {
 	}
 }
 
+func TestCorplinkNodeNameMatchesLegacyFuzhouAlias(t *testing.T) {
+	if !corplinkNodeNameMatches("FZ-INT-Node", "FUZHOU_INTL_node") {
+		t.Fatal("the current FZ-INT-Node name should match the legacy FUZHOU_INTL_node selector")
+	}
+}
+
 func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 	const deviceID = "android-device-id"
 	const deviceName = "SG-Node-Android-test"
