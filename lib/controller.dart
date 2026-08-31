@@ -2417,7 +2417,7 @@ class AppController {
     // PlatformException. Extension dispatch on a dynamic value is not safe:
     // preserve the original message instead of masking it with a
     // NoSuchMethodError for `formatError`.
-    if (error is Object) return error.formatError;
+    if (error is Object) return (error as Object).formatError;
     return error.toString();
   }
 }

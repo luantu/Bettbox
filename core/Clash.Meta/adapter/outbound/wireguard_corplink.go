@@ -110,10 +110,24 @@ func corplinkNodeNameMatches(candidate, requested string) bool {
 	if candidate == requested {
 		return true
 	}
-	// The Feilian control plane has used both names for the same Fuzhou
-	// international TCP node. Keep the user-facing/legacy selector stable.
-	return (candidate == "fz-int-node" && requested == "fuzhou_intl_node") ||
-		(candidate == "fuzhou_intl_node" && requested == "fz-int-node")
+	// The Feilian control plane has used several spellings for the same
+	// Fuzhou international TCP node. Compare a punctuation-free form so that
+	// FZ-INT-Node, FZ_INT_Node and FUZHOU_INTL_node remain interchangeable.
+	canonical := func(value string) string {
+		var b strings.Builder
+		for _, r := range value {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	left, right := canonical(candidate), canonical(requested)
+	if (left == "fzintnode" || left == "fuzhouintlnode") &&
+		(right == "fzintnode" || right == "fuzhouintlnode") {
+		return true
+	}
+	return false
 }
 
 // fetchCorplinkWgInfo 调用 corplink /vpn/conn API 获取当前会话的 wg 信息。
@@ -202,7 +216,11 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		}
 	}
 	if node == nil {
-		return nil, fmt.Errorf("corplink vpn node %q not found or not TCP", opt.VPNServerName)
+		available := make([]string, 0, len(nodes.Data))
+		for _, candidate := range nodes.Data {
+			available = append(available, fmt.Sprintf("%s(protocol_mode=%d)", candidate.Name, candidate.ProtocolMode))
+		}
+		return nil, fmt.Errorf("corplink vpn node %q not found or not TCP; available: %s", opt.VPNServerName, strings.Join(available, ", "))
 	}
 	var dataBase string
 	var serverTime time.Time
