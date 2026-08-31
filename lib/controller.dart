@@ -2400,6 +2400,11 @@ class AppController {
       return appLocalizations.profileImportFailed(statusCode);
     }
 
-    return error.formatError;
+    // `error` is dynamic here and core setup may throw a String or a
+    // PlatformException. Extension dispatch on a dynamic value is not safe:
+    // preserve the original message instead of masking it with a
+    // NoSuchMethodError for `formatError`.
+    if (error is Object) return error.formatError;
+    return error.toString();
   }
 }
