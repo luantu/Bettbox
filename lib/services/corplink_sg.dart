@@ -72,6 +72,7 @@ String joinPath(String base, String child) =>
     '$base${Platform.pathSeparator}$child';
 
 Future<bool>? _authorizationInFlight;
+String? _androidAuthorizationSessionKey;
 
 Future<(String, String)> _loadOrCreateAndroidIdentity(
   Map<String, dynamic>? current,
@@ -223,15 +224,14 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   final cookiePath = joinPath(home, 'corplink_cookies.json');
   final current = await loadCorplinkConfig();
   final identity = await _loadOrCreateAndroidIdentity(current);
-  if (current?['private_key'] is String &&
-      (current?['private_key'] as String).isNotEmpty &&
-      current?['public_key'] is String &&
-      (current?['public_key'] as String).isNotEmpty &&
-      current?['code'] is String &&
-      (current?['code'] as String).isNotEmpty &&
-      File(cookiePath).existsSync()) {
-    return true;
-  }
+  final sessionKey = '${settings.username}\u0000${settings.server}';
+  if (_androidAuthorizationSessionKey == sessionKey) return true;
+
+  // A stored code/cookie pair is not proof that the Feilian session is still
+  // valid. The core reports an expired session as a misleading "node not
+  // found" error, so re-run the Rust login flow whenever SG setup is needed.
+  // The helper reuses the stable device identity and writes the refreshed
+  // CookieStore/config atomically.
 
   final keyPair = await X25519().newKeyPair();
   final publicKey = base64Encode((await keyPair.extractPublicKey()).bytes);
@@ -297,11 +297,13 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   if (generated == null) return false;
   final sanitized = Map<String, dynamic>.from(generated)..remove('password');
   await File(configPath).writeAsString(jsonEncode(sanitized), flush: true);
-  return sanitized['private_key'] is String &&
+  final authorized = sanitized['private_key'] is String &&
       (sanitized['private_key'] as String).isNotEmpty &&
       sanitized['code'] is String &&
       (sanitized['code'] as String).isNotEmpty &&
       File(cookiePath).existsSync();
+  if (authorized) _androidAuthorizationSessionKey = sessionKey;
+  return authorized;
 }
 
 Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
