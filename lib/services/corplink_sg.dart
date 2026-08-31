@@ -427,9 +427,15 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   proxies.removeWhere((item) => item is Map && item['name'] == name);
   final home = await corplinkSgHomePath();
   final interfaceName = auth['interface_name']?.toString() ?? 'wgdevtest22';
-  final androidCookiePath = joinPath(home, 'bettbox_cookies.txt');
-  final cookiePath = Platform.isAndroid && File(androidCookiePath).existsSync()
-      ? androidCookiePath
+  // The machine-mode Rust helper writes CookieStore JSON. Keep the old plain
+  // Android cookie file as a fallback for upgrades, but never let a stale
+  // legacy file shadow a freshly refreshed session.
+  final rustCookiePath = joinPath(home, 'corplink_cookies.json');
+  final legacyAndroidCookiePath = joinPath(home, 'bettbox_cookies.txt');
+  final cookiePath = Platform.isAndroid
+      ? (File(rustCookiePath).existsSync()
+          ? rustCookiePath
+          : legacyAndroidCookiePath)
       : joinPath(home, '${interfaceName}_cookies.json');
   final apiServer = settings.server.trim();
   final privateKey = auth['private_key']?.toString() ?? '';
