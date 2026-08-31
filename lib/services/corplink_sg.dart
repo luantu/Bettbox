@@ -308,12 +308,20 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
         final event = jsonDecode(line);
         if (event is! Map) continue;
         if (event['event'] == 'login_url') {
+          debugPrint('[APP] CorpLink helper event=login_url');
           final url = Uri.tryParse(event['url']?.toString() ?? '');
           if (url != null) {
             await launchUrl(url, mode: LaunchMode.externalApplication);
           }
         } else if (event['event'] == 'success') {
+          debugPrint('[APP] CorpLink helper event=success');
           succeeded = true;
+        } else if (event['event'] == 'auth_required') {
+          debugPrint('[APP] CorpLink helper event=auth_required');
+        } else if (event['event'] == 'error') {
+          debugPrint('[APP] CorpLink helper event=error code=${event['code'] ?? 'unknown'}');
+        } else if (event['event'] == 'refresh_started') {
+          debugPrint('[APP] CorpLink helper event=refresh_started');
         }
       } on FormatException {
         // Helper diagnostics are deliberately ignored by the protocol parser.
@@ -330,6 +338,10 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
     },
   );
   await stdoutFuture;
+  debugPrint(
+    '[APP] CorpLink helper exit=$exitCode succeeded=$succeeded '
+    'config=${File(configPath).existsSync()} cookie=${File(cookiePath).existsSync()}',
+  );
   if (exitCode != 0 || !succeeded) return false;
 
   final generated = await loadCorplinkConfig();
@@ -436,15 +448,15 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
         data: {'forget_password': false, 'user_name': settings.username},
         options: requestOptions());
     collect(lookup);
-    final platform = loginOrders.contains('ldap') ? 'ldap' : 'feilian';
-    final password = platform == 'ldap'
-        ? settings.password
-        : sha256.convert(utf8.encode(settings.password)).toString();
+    // This Android profile is explicitly the Feilian password flow. Do not
+    // silently switch to LDAP merely because the server advertises LDAP as
+    // another available method.
+    const platform = 'feilian';
+    final password = sha256.convert(utf8.encode(settings.password)).toString();
     final login = await dio.post('$base/api/login$suffix',
         data: {
           'password': password,
           'user_name': settings.username,
-          if (platform == 'ldap') 'platform': 'ldap',
         },
         options: requestOptions());
     collect(login);
