@@ -118,6 +118,13 @@ arm64 交叉编译后生成 `Bettbox-android-arm64-sg` artifact。失败日志�
 `android-sg-build-log` artifact 上传。重试工作流为
 `.github/workflows/android-sg-apk-retry.yml`。
 
+SG 构建的 applicationId 为 `com.appshub.bettbox.sg`，用于和已安装的原版
+`com.appshub.bettbox` 并存。当前 CI 使用 runner 的测试签名；不同 Actions run 之间不能
+覆盖升级安装。若设备上已有旧的 SG 测试包，安装新 artifact 前需先卸载旧 SG 包；这会
+清除 Android Keystore 中的密码，安装后需重新输入飞连密码。要支持同一 SG 包跨 CI run
+升级，必须在仓库 Secrets 中配置一个有效且固定的 Android keystore（`KEYSTORE`、
+`KEY_ALIAS`、`STORE_PASSWORD`、`KEY_PASSWORD`），并在工作流中启用该签名。
+
 安装 APK 后，在“设置 → 通用 → SG-Node-Linux”填写三项信息并启用。机场订阅、原有
 配置覆写脚本和普通节点仍走原来的配置链；SG 节点会在脚本评估前后各注入一次，保证脚本
 可以把它加入 OpenAI/ChatGPT 专用组。海外 DoH 地址固定经 SG 节点 resolver 发起，不能
