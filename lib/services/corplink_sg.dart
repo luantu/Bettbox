@@ -347,6 +347,7 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
   await Directory(home).create(recursive: true);
   final configPath = joinPath(home, 'config.json');
   final cookiePath = joinPath(home, 'bettbox_cookies.txt');
+  final rustCookiePath = joinPath(home, 'corplink_cookies.json');
   final current = await loadCorplinkConfig();
   final identity = await _loadOrCreateAndroidIdentity(current);
   if (current?['private_key'] is String &&
@@ -355,7 +356,7 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
       (current?['public_key'] as String).isNotEmpty &&
       current?['code'] is String &&
       (current?['code'] as String).isNotEmpty &&
-      File(cookiePath).existsSync()) {
+      (File(cookiePath).existsSync() || File(rustCookiePath).existsSync())) {
     return true;
   }
   final base = settings.server.trim().replaceFirst(RegExp(r'/$'), '');
@@ -419,6 +420,11 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
     }
     final code = Uri.tryParse(otpUrl)?.queryParameters['secret'] ?? '';
     if (code.isEmpty || cookies.isEmpty) return false;
+    // Prefer the freshly authenticated plain cookie over a stale CookieStore
+    // left by an earlier Feishu/helper attempt. The core will use this file
+    // for the password-login path on Android.
+    final staleRustCookie = File(rustCookiePath);
+    if (staleRustCookie.existsSync()) await staleRustCookie.delete();
     await File(cookiePath).writeAsString(
       cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
     );
