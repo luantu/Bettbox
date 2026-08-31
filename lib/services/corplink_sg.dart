@@ -361,10 +361,10 @@ Map<String, dynamic> buildAndroidCorplinkMachineRequest({
     'action': 'login',
     'server': server,
     'company_name': 'Bettbox',
-    // Let corplink-rs follow the server-advertised login order. Some Feilian
-    // deployments expose the password flow as LDAP rather than "feilian";
-    // forcing a third-party platform here can create a file-backed session
-    // that the VPN API will not accept.
+    // The saved username/password belong to the Feilian LDAP password flow.
+    // Do not follow the server's third-party-first login order here: that can
+    // open a Feishu/SSO page and leave the Android helper waiting for a scan.
+    'platform': 'ldap',
     'username': username,
     'password': password,
     'device_name': deviceName,
