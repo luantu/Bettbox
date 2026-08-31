@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/metacubex/mihomo/dns"
 )
 
 func writeCorplinkCookieFile(t *testing.T) string {
@@ -19,6 +21,24 @@ func writeCorplinkCookieFile(t *testing.T) string {
 		t.Fatalf("write cookie fixture: %v", err)
 	}
 	return path
+}
+
+func TestCorplinkDNSRoutesEveryConfiguredNameServerThroughTunnel(t *testing.T) {
+	tunnel := NewDirect()
+	servers := []dns.NameServer{
+		{Net: "https", Addr: "https://8.8.8.8/dns-query"},
+		{Net: "https", Addr: "https://1.1.1.1/dns-query"},
+	}
+
+	routed := routeCorplinkDNSThroughTunnel(servers, tunnel)
+	if len(routed) != len(servers) {
+		t.Fatalf("route changed nameserver count: got %d want %d", len(routed), len(servers))
+	}
+	for i, server := range routed {
+		if server.ProxyAdapter != tunnel {
+			t.Fatalf("nameserver %d is not routed through the CorpLink tunnel: %+v", i, server)
+		}
+	}
 }
 
 func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {

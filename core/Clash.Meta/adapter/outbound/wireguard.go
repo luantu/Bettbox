@@ -652,19 +652,10 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		if err != nil {
 			return nil, err
 		}
-		// DoH 通道策略：
-		// - 海外 DoH (1.1.1.1/8.8.8.8) 走 SG-Node 隧道：本机直连被墙，但隧道内
-		//   能拿到 chatgpt.com 等域名的真实 IP（国内 DoH 会返回污染 IP）。
-		// - 国内 DoH (223.5.5.5 等) 直连：解析国内域名快，作为兜底避免隧道
-		//   抖动时全部超时。
-		// 通过 server 地址区分：1.1.1.1 / 8.8.8.8 走隧道，其余直连。
-		for i := range nss {
-			addr := nss[i].Addr
-			if strings.Contains(addr, "1.1.1.1") || strings.Contains(addr, "8.8.8.8") ||
-				strings.Contains(addr, "1.0.0.1") {
-				nss[i].ProxyAdapter = outbound
-			}
-		}
+		// CorpLink DNS 必须经 WireGuard 隧道访问。不要按公网 DNS 地址
+		// 猜测哪些服务器可以直连，否则本地解析可能被污染，且 DoH 请求
+		// 会绕过 SG-Node。
+		nss = routeCorplinkDNSThroughTunnel(nss, outbound)
 		outbound.resolver = dns.NewResolver(dns.Config{
 			Main: nss,
 			IPv6: has6,
@@ -672,6 +663,17 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	}
 
 	return outbound, nil
+}
+
+// routeCorplinkDNSThroughTunnel binds every configured resolver to the
+// CorpLink outbound. The caller supplies DoH nameservers; keeping the routing
+// decision here prevents a direct-DNS fallback from being introduced by an
+// address allowlist.
+func routeCorplinkDNSThroughTunnel(servers []dns.NameServer, tunnel C.ProxyAdapter) []dns.NameServer {
+	for i := range servers {
+		servers[i].ProxyAdapter = tunnel
+	}
+	return servers
 }
 
 func (w *WireGuard) resolve(ctx context.Context, address M.Socksaddr) (netip.AddrPort, error) {
