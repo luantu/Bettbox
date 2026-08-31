@@ -18,6 +18,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -126,18 +128,24 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	}
 
 	base := strings.TrimSuffix(opt.APIServer, "/")
-	client := &http.Client{Timeout: 15 * time.Second}
-	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	cookieHeader := cookieStr
-	if opt.DeviceID != "" {
-		if cookieHeader != "" {
-			cookieHeader += "; "
-		}
-		cookieHeader += "device_id=" + opt.DeviceID
-		if opt.DeviceName != "" {
-			cookieHeader += "; device_name=" + opt.DeviceName
-		}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
 	}
+	client := &http.Client{Timeout: 15 * time.Second, Jar: jar}
+	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	controlURL, err := url.Parse(base)
+	if err != nil {
+		return nil, fmt.Errorf("corplink control server: %v", err)
+	}
+	controlCookies := parseCorplinkCookies(cookieStr)
+	if opt.DeviceID != "" {
+		controlCookies = append(controlCookies, &http.Cookie{Name: "device_id", Value: opt.DeviceID})
+	}
+	if opt.DeviceName != "" {
+		controlCookies = append(controlCookies, &http.Cookie{Name: "device_name", Value: opt.DeviceName})
+	}
+	jar.SetCookies(controlURL, controlCookies)
 	request := func(method, endpoint string, body io.Reader) (*http.Response, error) {
 		req, err := http.NewRequest(method, endpoint, body)
 		if err != nil {
@@ -145,9 +153,6 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "okhttp/3.14.9")
-		if cookieHeader != "" {
-			req.Header.Set("Cookie", cookieHeader)
-		}
 		if csrf != "" {
 			req.Header.Set("csrf-token", csrf)
 		}
@@ -192,6 +197,11 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 			continue
 		}
 		candidate := "https://" + net.JoinHostPort(ip, strconv.Itoa(node.APIPort))
+		if nodeURL, parseErr := url.Parse(candidate); parseErr == nil {
+			// Match corplink-rs: cookies received on the control hostname are
+			// copied into the selected node's host scope before ping/conn.
+			jar.SetCookies(nodeURL, controlCookies)
+		}
 		pingResp, pingErr := request(http.MethodGet, candidate+"/vpn/ping?os=Android&os_version=2", nil)
 		if pingErr == nil {
 			raw, _ := io.ReadAll(io.LimitReader(pingResp.Body, 64<<10))
@@ -475,4 +485,16 @@ func loadCorplinkCookie(path string) (csrf, cookieStr string, err error) {
 		}
 	}
 	return csrf, strings.Join(parts, "; "), nil
+}
+
+func parseCorplinkCookies(cookieHeader string) []*http.Cookie {
+	var cookies []*http.Cookie
+	for _, part := range strings.Split(cookieHeader, ";") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 || kv[0] == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{Name: kv[0], Value: kv[1]})
+	}
+	return cookies
 }
