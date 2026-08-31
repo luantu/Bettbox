@@ -57,8 +57,10 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 ## 授权生命周期
 
 1. 用户点击启用 SG 节点。
-2. Android 端使用 Bettbox 内置的原生 HTTP 授权流程完成密码登录、Cookie 和 OTP；桌面端继续调用
-   `corplink-rs` 子进程。两条路径共用同一组 CorpLink API、设备身份和 WireGuard 配置字段。
+2. Android 端优先使用 Bettbox 内置的原生 HTTP `feilian` 用户名/密码流程完成登录、Cookie 和
+   OTP；只有该流程失败时才调用内置 `corplink-rs-login --machine`，打开可见的 Feishu/Lark 授权。
+   桌面端继续调用 `corplink-rs` 子进程。两条路径共用同一组 CorpLink API、设备身份和 WireGuard
+   配置字段。
 3. 保存 Cookie、device identity 和 private key 到安全存储。
 4. Mihomo 启动或重启前调用 `/vpn/conn`，取得最新隧道 IP、peer public key、endpoint、MTU。
 5. 组装 `wireguard` 出站并追加到最终配置。
@@ -106,7 +108,8 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 ### Android arm64
 
 Android 版本不依赖 Linux 版 `corplink-rs` 可执行文件（该 helper 不能直接在 Android linker
-上运行）。Bettbox 在应用私有目录内生成并保存
+上运行）。Bettbox 优先使用 `feilian` 密码登录；如果服务端拒绝密码流程，才使用打包进 APK 的
+Android arm64 machine helper 和可见 Feishu/Lark 授权。应用在应用私有目录内生成并保存
 本安装实例的 WireGuard 密钥、设备身份和授权材料，Mihomo-SG 负责调用飞连控制面并建立
 WireGuard-TCP 数据面。首次启用时只填写用户名、密码和上游控制面地址；节点选择固定为
 `FUZHOU_INTL_node`，实际 API 端口、VPN 端口、隧道地址、MTU 和备用地址由
@@ -135,7 +138,8 @@ Android 构建固定使用 `luantu/corplink-rs` 的 `codex/android-machine-helpe
 `e65a36c009cd96813b5c0595fe6175f729c1c676`，编译 `corplink-rs-login --machine` 为
 `aarch64-linux-android`。该分支的 machine 协议补充了密码字段，并允许自动选择
 `ldap`/`feilian` 登录顺序；helper 以 JSONL 事件报告登录 URL/等待/成功，Android 在成功后
-清理授权配置中的密码字段。若 helper 无法执行，应用保留原生 HTTP 流程作为兼容回退。
+清理授权配置中的密码字段。当前 Android 先走原生 HTTP `feilian` 流程，只有密码流程失败时才
+启动 helper；helper 无法执行时则返回授权失败，不会伪造已登录状态。
 
 ### 验收边界
 
