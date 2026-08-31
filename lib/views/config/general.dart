@@ -849,6 +849,9 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
   late final username = TextEditingController(text: widget.current.username);
   late final password = TextEditingController(text: widget.current.password);
   late final server = TextEditingController(text: widget.current.server);
+  // Let the user reveal the typed Feilian password to confirm it is correct
+  // before saving (e.g. trailing "!" characters are easy to get wrong).
+  final obscurePassword = ValueNotifier<bool>(true);
 
   @override
   void dispose() {
@@ -856,6 +859,7 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
     username.dispose();
     password.dispose();
     server.dispose();
+    obscurePassword.dispose();
     super.dispose();
   }
 
@@ -896,10 +900,26 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
             controller: username,
             decoration: const InputDecoration(labelText: 'Feilian username'),
           ),
-          TextField(
-            controller: password,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Feilian password'),
+          ValueListenableBuilder<bool>(
+            valueListenable: obscurePassword,
+            builder: (_, showPassword, child) => TextField(
+              controller: password,
+              obscureText: !showPassword,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(
+                labelText: 'Feilian password',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    showPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                  tooltip: showPassword ? 'Hide password' : 'Show password',
+                  onPressed: () => obscurePassword.value = !showPassword,
+                ),
+              ),
+            ),
           ),
           TextField(
             controller: server,

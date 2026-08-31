@@ -198,9 +198,18 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   // domain-aware CookieStore and performs the node-side cookie migration that
   // the legacy Dart login cannot reproduce reliably. Keep the Dart flow only
   // as a compatibility fallback for installations where the helper is absent.
+  //
+  // Only fall back when the helper could not be launched at all (null). When
+  // the helper ran but reported failure (false), do NOT mask it with the
+  // legacy Dart flow: for a pure-password Feilian account the legacy flow
+  // can never complete a login (it requires a TOTP completion URL), so it
+  // would only convert a real helper error into a misleading LOGIN_FAILED.
   final nativeResult = await _ensureAndroidCorplinkRsAuthorization(settings);
   if (nativeResult == true) return true;
-  return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+  if (nativeResult == null) {
+    return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+  }
+  return false;
 }
 
 /// Discard renewable CorpLink session material. A server-side auth rejection
@@ -294,7 +303,18 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   Process process;
   try {
     process = await Process.start(helperPath, ['--machine']);
-  } on ProcessException {
+  } on ProcessException catch (e) {
+    // Surface the exact failure so Android logcat shows whether the helper
+    // is missing, not executable, or rejected by the platform. A silent
+    // fallback to the legacy Dart flow would dead-end on pure-password
+    // Feilian (it cannot complete a login without a TOTP completion URL).
+    debugPrint(
+      '[APP] CorpLink helper Process.start failed '
+      'path=$helperPath '
+      'nativeLibraryDir=$nativeLibraryDir '
+      'exists=${File(helperPath).existsSync()} '
+      'error=${e.message} osError=${e.osError?.message ?? 'none'}',
+    );
     return null;
   }
   var succeeded = false;
