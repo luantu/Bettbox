@@ -253,6 +253,9 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
     'action': 'login',
     'server': settings.server.trim().replaceFirst(RegExp(r'/$'), ''),
     'company_name': 'Bettbox',
+    // The Feilian deployment exposes the Feishu/Lark third-party flow to the
+    // machine protocol. The helper rejects requests without this field.
+    'platform': 'lark',
     'username': settings.username,
     'password': settings.password,
     'device_name': identity.$1,
