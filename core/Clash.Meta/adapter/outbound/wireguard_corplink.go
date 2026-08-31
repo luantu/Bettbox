@@ -120,11 +120,6 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		return nil, errors.New("corplink api server not set")
 	}
 
-	otp, err := corplinkTotp(opt.Code)
-	if err != nil {
-		return nil, err
-	}
-
 	csrf, cookieStr, err := loadCorplinkCookie(opt.CookieFile)
 	if err != nil {
 		return nil, err
@@ -191,6 +186,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		return nil, fmt.Errorf("corplink vpn node %q not found or not TCP", opt.VPNServerName)
 	}
 	var dataBase string
+	var serverTime time.Time
 	for _, ip := range append([]string{node.IP}, node.BackupIPs...) {
 		if net.ParseIP(ip) == nil || node.APIPort <= 0 {
 			continue
@@ -204,6 +200,11 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 			if pingResp.StatusCode == http.StatusOK && json.Unmarshal(raw, &ping) == nil && ping.Code == 0 {
 				dataBase = candidate
 				node.IP = ip
+				if dateHeader := pingResp.Header.Get("Date"); dateHeader != "" {
+					if parsed, parseErr := http.ParseTime(dateHeader); parseErr == nil {
+						serverTime = parsed
+					}
+				}
 				break
 			}
 		}
@@ -218,9 +219,12 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	if b, err := hex.DecodeString(reqPubKey); err == nil && len(b) == 32 {
 		reqPubKey = base64.StdEncoding.EncodeToString(b)
 	}
+	if serverTime.IsZero() {
+		serverTime = time.Now()
+	}
 	body, _ := json.Marshal(map[string]string{
 		"public_key": reqPubKey,
-		"otp":        otp,
+		"otp":        corplinkTotpAt(opt.Code, serverTime),
 	})
 	resp, err := request(http.MethodPost, apiURL, strings.NewReader(string(body)))
 	if err != nil {
@@ -267,6 +271,15 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 
 // corplinkTotp 基于 base32 密钥生成当前 30 秒槽的 6 位 TOTP。
 func corplinkTotp(codeB32 string) (string, error) {
+	return corplinkTotpAtChecked(codeB32, time.Now())
+}
+
+func corplinkTotpAt(codeB32 string, at time.Time) string {
+	result, _ := corplinkTotpAtChecked(codeB32, at)
+	return result
+}
+
+func corplinkTotpAtChecked(codeB32 string, at time.Time) (string, error) {
 	if codeB32 == "" {
 		return "", errors.New("corplink code not set")
 	}
@@ -275,7 +288,7 @@ func corplinkTotp(codeB32 string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("corplink code decode: %v", err)
 	}
-	counter := uint64(time.Now().Unix() / 30)
+	counter := uint64(at.Unix() / 30)
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, counter)
 	mac := hmac.New(sha1.New, key)

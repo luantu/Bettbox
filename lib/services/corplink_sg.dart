@@ -194,12 +194,13 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
 Future<bool> _ensureAndroidCorplinkAuthorization(
   CorplinkSgSettings settings,
 ) async {
-  // The control plane exposes the Feilian username/password flow alongside
-  // the Lark flow. Prefer the former so a normal Android install needs only
-  // the three settings shown in Bettbox; use the native helper as a visible
-  // Feishu fallback when password login is unavailable or rejected.
-  if (await _ensureAndroidCorplinkAuthorizationLegacy(settings)) return true;
-  return await _ensureAndroidCorplinkRsAuthorization(settings) == true;
+  // The Rust client is the reference implementation for Feilian. It keeps a
+  // domain-aware CookieStore and performs the node-side cookie migration that
+  // the legacy Dart login cannot reproduce reliably. Keep the Dart flow only
+  // as a compatibility fallback for installations where the helper is absent.
+  final nativeResult = await _ensureAndroidCorplinkRsAuthorization(settings);
+  if (nativeResult == true) return true;
+  return _ensureAndroidCorplinkAuthorizationLegacy(settings);
 }
 
 /// Discard only the renewable CorpLink session material. Device identity is
