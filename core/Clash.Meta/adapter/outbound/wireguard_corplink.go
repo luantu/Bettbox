@@ -146,6 +146,13 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		controlCookies = append(controlCookies, &http.Cookie{Name: "device_name", Value: opt.DeviceName})
 	}
 	jar.SetCookies(controlURL, controlCookies)
+	// Keep the serialized Cookie header explicitly, matching the reference
+	// corplink client. The jar is still used for Set-Cookie persistence, but
+	// relying on domain matching alone can drop the control-session cookies
+	// after the API base switches to a node IP.
+	requestCookieHeader := cookieStr
+	requestCookieHeader = appendCorplinkCookie(requestCookieHeader, "device_id", opt.DeviceID)
+	requestCookieHeader = appendCorplinkCookie(requestCookieHeader, "device_name", opt.DeviceName)
 	request := func(method, endpoint string, body io.Reader) (*http.Response, error) {
 		req, err := http.NewRequest(method, endpoint, body)
 		if err != nil {
@@ -153,6 +160,9 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "okhttp/3.14.9")
+		if requestCookieHeader != "" {
+			req.Header.Set("Cookie", requestCookieHeader)
+		}
 		if csrf != "" {
 			req.Header.Set("csrf-token", csrf)
 		}
@@ -277,6 +287,21 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	}
 	log.Infoln("[WG-Corplink] fetched wg_info: ip=%s server_pubkey=%s", info.IP, serverPubB64)
 	return info, nil
+}
+
+func appendCorplinkCookie(header, name, value string) string {
+	if name == "" || value == "" {
+		return header
+	}
+	for _, part := range strings.Split(header, ";") {
+		if strings.TrimSpace(strings.SplitN(part, "=", 2)[0]) == name {
+			return header
+		}
+	}
+	if header == "" {
+		return name + "=" + value
+	}
+	return header + "; " + name + "=" + value
 }
 
 // corplinkTotp 基于 base32 密钥生成当前 30 秒槽的 6 位 TOTP。
