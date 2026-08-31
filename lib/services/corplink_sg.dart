@@ -462,6 +462,11 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
     collect(login);
     var otpUrl = (login.data is Map ? (login.data['data']?['url'] ?? '') : '').toString();
     if (otpUrl.isEmpty) {
+      // Feilian password login must establish the authenticated session and
+      // return its completion URL. /api/v2/p/otp only provisions a TOTP seed;
+      // treating that seed as a login result creates a config that later
+      // fails with the misleading "Cookies are missing" response.
+      if (platform == 'feilian') return false;
       final otp = await dio.post('$base/api/v2/p/otp$suffix',
           data: {}, options: requestOptions());
       collect(otp);
