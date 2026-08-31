@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:bett_box/plugins/app.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgUsernameKey = 'corplinkSg.username';
@@ -192,9 +193,17 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
 ) async {
   final home = await corplinkSgHomePath();
   await Directory(home).create(recursive: true);
-  final helperPath = joinPath(home, 'corplink-rs-login');
+  // Android SELinux does not allow an app to execute an ELF copied into its
+  // ordinary files directory. The CI build packages this helper as a native
+  // library, whose extracted directory is executable by the app process.
+  final nativeLibraryDir = Platform.isAndroid
+      ? await app.getNativeLibraryDir()
+      : null;
+  final helperPath = nativeLibraryDir == null
+      ? joinPath(home, 'corplink-rs-login')
+      : joinPath(nativeLibraryDir, 'libcorplink-rs-login.so');
   try {
-    if (!File(helperPath).existsSync()) {
+    if (!File(helperPath).existsSync() && nativeLibraryDir == null) {
       final bytes = await rootBundle.load(
         'assets/bin/android-arm64-v8a/corplink-rs-login',
       );

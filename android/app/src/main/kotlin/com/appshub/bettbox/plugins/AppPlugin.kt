@@ -201,6 +201,9 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
                 activityRef?.get()?.moveTaskToBack(true)
                 result.success(true)
             }
+            "getNativeLibraryDir" -> {
+                result.success(BettboxApplication.getAppContext().applicationInfo.nativeLibraryDir)
+            }
             "updateExcludeFromRecents" -> {
                 updateExcludeFromRecents(call.argument<Boolean>("value"))
                 result.success(true)

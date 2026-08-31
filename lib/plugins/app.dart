@@ -38,6 +38,10 @@ class App {
     return await methodChannel.invokeMethod<bool>('moveTaskToBack');
   }
 
+  Future<String?> getNativeLibraryDir() async {
+    return await methodChannel.invokeMethod<String>('getNativeLibraryDir');
+  }
+
   Future<List<Package>> getPackages({bool forceRefresh = false}) async {
     final packagesRaw = await methodChannel.invokeListMethod<Map<dynamic, dynamic>>(
       'getPackages',

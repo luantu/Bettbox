@@ -77,6 +77,10 @@ jobs:
           install -m 0700 \
             tools/corplink-rs-src/target/aarch64-linux-android/release/corplink-rs-login \
             assets/bin/android-arm64-v8a/corplink-rs-login
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          install -m 0755 \
+            tools/corplink-rs-src/target/aarch64-linux-android/release/corplink-rs-login \
+            android/app/src/main/jniLibs/arm64-v8a/libcorplink-rs-login.so
 
       - name: Build Mihomo-SG Android library
         shell: bash
