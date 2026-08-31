@@ -159,7 +159,11 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", "okhttp/3.14.9")
+		// Match corplink-rs and the reference Mihomo-SG client. The Feilian
+		// control plane uses this Android CorpLink identity when validating
+		// the session/device binding; okhttp is not equivalent here.
+		req.Header.Set("User-Agent", "CorpLink/201000 (GooglePixel; Android 16; en)")
+		req.Header.Set("Accept", "application/json")
 		if requestCookieHeader != "" {
 			req.Header.Set("Cookie", requestCookieHeader)
 		}
