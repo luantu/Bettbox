@@ -342,7 +342,19 @@ class AppController {
     final params = await globalState.getSetupParams(
       pathConfig: realPatchConfig,
     );
-    final message = await clashCore.setupConfig(params);
+    var message = await clashCore.setupConfig(params);
+    // A persisted CorpLink session can expire between app launches. Clear
+    // only renewable session files and rebuild the config once so the Android
+    // auth path can refresh CookieStore/config instead of retrying a dead
+    // session forever.
+    if (message.contains('10220001') ||
+        message.toLowerCase().contains('cookies are missing')) {
+      await invalidateCorplinkAuthorization();
+      final retryParams = await globalState.getSetupParams(
+        pathConfig: realPatchConfig,
+      );
+      message = await clashCore.setupConfig(retryParams);
+    }
     if (message.isNotEmpty) {
       commonPrint.log('[Core] Setup config failed: $message');
       throw message;

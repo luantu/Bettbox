@@ -185,8 +185,28 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   CorplinkSgSettings settings,
 ) async {
   final helperResult = await _ensureAndroidCorplinkRsAuthorization(settings);
-  if (helperResult != null) return helperResult;
+  // The native machine protocol currently covers the Feishu/Lark flow. If it
+  // cannot complete (for example when this deployment exposes LDAP instead),
+  // continue with the existing username/password HTTP flow instead of making
+  // Android authorization a hard dependency on the helper.
+  if (helperResult == true) return true;
   return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+}
+
+/// Discard only the renewable CorpLink session material. Device identity is
+/// intentionally retained so the server sees the same Android installation
+/// on the next login.
+Future<void> invalidateCorplinkAuthorization() async {
+  final home = await corplinkSgHomePath();
+  for (final name in const [
+    'config.json',
+    'corplink_cookies.json',
+    'bettbox_cookies.txt',
+  ]) {
+    final file = File(joinPath(home, name));
+    if (file.existsSync()) await file.delete();
+  }
+  _androidAuthorizationSessionKey = null;
 }
 
 Future<bool?> _ensureAndroidCorplinkRsAuthorization(
