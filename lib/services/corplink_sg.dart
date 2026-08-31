@@ -361,10 +361,8 @@ Map<String, dynamic> buildAndroidCorplinkMachineRequest({
     'action': 'login',
     'server': server,
     'company_name': 'Bettbox',
-    // The saved username/password belong to the Feilian LDAP password flow.
-    // Do not follow the server's third-party-first login order here: that can
-    // open a Feishu/SSO page and leave the Android helper waiting for a scan.
-    'platform': 'ldap',
+    // The saved username/password use the Feilian password flow.
+    'platform': 'feilian',
     'username': username,
     'password': password,
     'device_name': deviceName,

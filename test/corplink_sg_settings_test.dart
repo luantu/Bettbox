@@ -32,7 +32,7 @@ void main() {
       cookieFile: '/data/user/0/app/files/corplink_cookies.json',
     );
 
-    expect(request['platform'], 'ldap');
+    expect(request['platform'], 'feilian');
     expect(request['password'], 'secret');
   });
 }
