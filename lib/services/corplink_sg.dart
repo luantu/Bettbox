@@ -623,4 +623,64 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
     }
   }
   rawConfig['proxy-groups'] = groups;
+
+  // Build a dedicated SG-OpenAI group that prefers the CorpLink SG wireguard
+  // tunnel and falls back to the user's primary subscription group, so the
+  // integration works on profiles that have no "openai"/"chatgpt"-named group.
+  // The group is created idempotently: re-evaluation passes overwrite any
+  // previous instance so its members always reflect the live proxy list.
+  const sgOpenAiGroupName = 'SG-OpenAI';
+  String? primarySubscriptionGroup;
+  for (final g in groups) {
+    if (g is! Map) continue;
+    final groupName = g['name']?.toString() ?? '';
+    // Prefer the user's most-likely "main" group as a manual fallback target.
+    // On the example 狗子云 subscription this matches the top-level select.
+    if (groupName == '狗子云' ||
+        groupName.toLowerCase() == 'proxy' ||
+        groupName.toLowerCase() == 'select') {
+      primarySubscriptionGroup = groupName;
+      break;
+    }
+  }
+  final sgOpenAiProxies = <String>[
+    name,
+    if (primarySubscriptionGroup != null) primarySubscriptionGroup,
+    'DIRECT',
+  ];
+  groups.removeWhere((g) =>
+      g is Map && g['name']?.toString() == sgOpenAiGroupName);
+  groups.add({
+    'name': sgOpenAiGroupName,
+    'type': 'select',
+    'proxies': sgOpenAiProxies,
+  });
+  rawConfig['proxy-groups'] = groups;
+
+  // Prepend comprehensive OpenAI/ChatGPT domain rules so they win over the
+  // user's subscription rules (which typically only carry DOMAIN-KEYWORD,openai).
+  // Rules are evaluated top-down in Mihomo; prepending gives SG-OpenAI highest
+  // priority while leaving the user's existing rules intact as a manual fallback
+  // in the profile editor.
+  const openAiRules = <String>[
+    'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,openai.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,chat.openai.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,api.openai.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,platform.openai.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,auth0.openai.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,cdn.openai.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,openaiusercontent.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,oaistatic.com,SG-OpenAI',
+    'DOMAIN-SUFFIX,oaiusercontent.com,SG-OpenAI',
+    'DOMAIN-KEYWORD,openai,SG-OpenAI',
+    'DOMAIN-KEYWORD,chatgpt,SG-OpenAI',
+  ];
+  final rules =
+      (rawConfig['rules'] as List?)?.cast<dynamic>() ?? <dynamic>[];
+  // Idempotent re-evaluation: strip any prior SG-OpenAI rules so they are not
+  // duplicated on the second applyCorplinkSgNode call (after handleEvaluate).
+  rules.removeWhere((r) =>
+      r is String && r.contains(',$sgOpenAiGroupName'));
+  rawConfig['rules'] = <dynamic>[...openAiRules, ...rules];
 }
