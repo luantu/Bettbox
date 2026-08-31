@@ -199,6 +199,15 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	if listResp.StatusCode != http.StatusOK || json.Unmarshal(listBody, &nodes) != nil || nodes.Code != 0 {
 		return nil, fmt.Errorf("corplink vpn list failed")
 	}
+	// The Feilian control plane signs a vpn-token (Set-Cookie on /api/vpn/list)
+	// that the VPN node requires on /vpn/conn. It carries uid/did(device_id)/
+	// session_id. Without it the node answers 10220001 "Cookies are missing".
+	// Capture it and attach to the per-request Cookie header used for ping/conn.
+	for _, sc := range listResp.Header.Values("Set-Cookie") {
+		if v := extractCorplinkCookie(sc, "vpn-token"); v != "" {
+			requestCookieHeader = appendCorplinkCookie(requestCookieHeader, "vpn-token", v)
+		}
+	}
 	var node *corplinkVPNNode
 	for i := range nodes.Data {
 		candidate := &nodes.Data[i]
@@ -311,6 +320,8 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	return info, nil
 }
 
+// appendCorplinkCookie appends name=value to an existing Cookie header,
+// skipping a name that is already present.
 func appendCorplinkCookie(header, name, value string) string {
 	if name == "" || value == "" {
 		return header
@@ -324,6 +335,18 @@ func appendCorplinkCookie(header, name, value string) string {
 		return name + "=" + value
 	}
 	return header + "; " + name + "=" + value
+}
+
+// extractCorplinkCookie parses a single Set-Cookie header value and returns
+// the value of the named cookie (empty if absent). It only inspects the first
+// segment before ';' so attributes like Path=/ and Max-Age= are ignored.
+func extractCorplinkCookie(setCookie, name string) string {
+	first := strings.TrimSpace(strings.SplitN(setCookie, ";", 2)[0])
+	kv := strings.SplitN(first, "=", 2)
+	if len(kv) == 2 && kv[0] == name {
+		return kv[1]
+	}
+	return ""
 }
 
 // corplinkTotp 基于 base32 密钥生成当前 30 秒槽的 6 位 TOTP。
