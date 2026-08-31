@@ -459,7 +459,16 @@ Future<Map<String, dynamic>?> loadCorplinkConfig() async {
 
 Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   final settings = await CorplinkSgSettings.load();
-  if (!settings.enabled || settings.server.trim().isEmpty) return;
+  // Do not launch either login flow while the user is still entering the
+  // three required values. This keeps first launch on Bettbox's settings
+  // page instead of unexpectedly opening Feishu because secure password
+  // storage is empty after an uninstall/signature change.
+  if (!settings.enabled ||
+      settings.username.trim().isEmpty ||
+      settings.password.isEmpty ||
+      settings.server.trim().isEmpty) {
+    return;
+  }
 
   if (!await ensureCorplinkAuthorization(settings)) return;
   final auth = await loadCorplinkConfig();
