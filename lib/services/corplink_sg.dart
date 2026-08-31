@@ -262,8 +262,6 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
       (current?['private_key'] as String).isNotEmpty &&
       current?['public_key'] is String &&
       (current?['public_key'] as String).isNotEmpty &&
-      current?['code'] is String &&
-      (current?['code'] as String).isNotEmpty &&
       File(cookiePath).existsSync();
   if (hasPersistedAuthorization) {
     // The core will reject an expired session and the next explicit retry can
@@ -367,8 +365,6 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   await File(configPath).writeAsString(jsonEncode(sanitized), flush: true);
   final authorized = sanitized['private_key'] is String &&
       (sanitized['private_key'] as String).isNotEmpty &&
-      sanitized['code'] is String &&
-      (sanitized['code'] as String).isNotEmpty &&
       File(cookiePath).existsSync();
   if (authorized) _androidAuthorizationSessionKey = sessionKey;
   return authorized;
@@ -420,8 +416,6 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
       (current?['private_key'] as String).isNotEmpty &&
       current?['public_key'] is String &&
       (current?['public_key'] as String).isNotEmpty &&
-      current?['code'] is String &&
-      (current?['code'] as String).isNotEmpty &&
       (File(cookiePath).existsSync() || File(rustCookiePath).existsSync())) {
     return true;
   }
@@ -564,7 +558,7 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   final privateKey = auth['private_key']?.toString() ?? '';
   final publicKey = auth['public_key']?.toString() ?? '';
   final code = auth['code']?.toString() ?? '';
-  if (privateKey.isEmpty || publicKey.isEmpty || code.isEmpty) return;
+  if (privateKey.isEmpty || publicKey.isEmpty) return;
 
   proxies.add({
     'name': name,
