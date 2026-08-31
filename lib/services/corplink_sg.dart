@@ -184,13 +184,12 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
 Future<bool> _ensureAndroidCorplinkAuthorization(
   CorplinkSgSettings settings,
 ) async {
-  final helperResult = await _ensureAndroidCorplinkRsAuthorization(settings);
-  // The native machine protocol currently covers the Feishu/Lark flow. If it
-  // cannot complete (for example when this deployment exposes LDAP instead),
-  // continue with the existing username/password HTTP flow instead of making
-  // Android authorization a hard dependency on the helper.
-  if (helperResult == true) return true;
-  return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+  // The control plane exposes the Feilian username/password flow alongside
+  // the Lark flow. Prefer the former so a normal Android install needs only
+  // the three settings shown in Bettbox; use the native helper as a visible
+  // Feishu fallback when password login is unavailable or rejected.
+  if (await _ensureAndroidCorplinkAuthorizationLegacy(settings)) return true;
+  return await _ensureAndroidCorplinkRsAuthorization(settings) == true;
 }
 
 /// Discard only the renewable CorpLink session material. Device identity is
@@ -347,6 +346,7 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
   final home = await corplinkSgHomePath();
   await Directory(home).create(recursive: true);
   final configPath = joinPath(home, 'config.json');
+  final cookiePath = joinPath(home, 'bettbox_cookies.txt');
   final current = await loadCorplinkConfig();
   final identity = await _loadOrCreateAndroidIdentity(current);
   if (current?['private_key'] is String &&
@@ -354,7 +354,8 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
       current?['public_key'] is String &&
       (current?['public_key'] as String).isNotEmpty &&
       current?['code'] is String &&
-      (current?['code'] as String).isNotEmpty) {
+      (current?['code'] as String).isNotEmpty &&
+      File(cookiePath).existsSync()) {
     return true;
   }
   final base = settings.server.trim().replaceFirst(RegExp(r'/$'), '');
@@ -418,7 +419,6 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
     }
     final code = Uri.tryParse(otpUrl)?.queryParameters['secret'] ?? '';
     if (code.isEmpty || cookies.isEmpty) return false;
-    final cookiePath = joinPath(home, 'bettbox_cookies.txt');
     await File(cookiePath).writeAsString(
       cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
     );
