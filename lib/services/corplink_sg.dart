@@ -223,13 +223,25 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   final configPath = joinPath(home, 'config.json');
   final cookiePath = joinPath(home, 'corplink_cookies.json');
   final current = await loadCorplinkConfig();
-  final identity = await _loadOrCreateAndroidIdentity(current);
   final sessionKey = '${settings.username}\u0000${settings.server}';
+  final hasPersistedAuthorization =
+      current?['private_key'] is String &&
+      (current?['private_key'] as String).isNotEmpty &&
+      current?['public_key'] is String &&
+      (current?['public_key'] as String).isNotEmpty &&
+      current?['code'] is String &&
+      (current?['code'] as String).isNotEmpty &&
+      File(cookiePath).existsSync();
+  if (hasPersistedAuthorization) {
+    // The core will reject an expired session and the next explicit retry can
+    // re-enter the helper. Do not force a browser/Feilian login on every app
+    // process restart when the persisted session is still usable.
+    _androidAuthorizationSessionKey = sessionKey;
+    return true;
+  }
+  final identity = await _loadOrCreateAndroidIdentity(current);
   if (_androidAuthorizationSessionKey == sessionKey) return true;
 
-  // A stored code/cookie pair is not proof that the Feilian session is still
-  // valid. The core reports an expired session as a misleading "node not
-  // found" error, so re-run the Rust login flow whenever SG setup is needed.
   // The helper reuses the stable device identity and writes the refreshed
   // CookieStore/config atomically.
 
