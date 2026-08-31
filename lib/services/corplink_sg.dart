@@ -277,26 +277,17 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   final keyPair = await X25519().newKeyPair();
   final publicKey = base64Encode((await keyPair.extractPublicKey()).bytes);
   final privateKey = base64Encode(await keyPair.extractPrivateKeyBytes());
-  final request = jsonEncode({
-    'protocol_version': 1,
-    'action': 'login',
-    'server': settings.server.trim().replaceFirst(RegExp(r'/$'), ''),
-    'company_name': 'Bettbox',
-    // The Feilian deployment exposes the Feishu/Lark third-party flow to the
-    // machine protocol. The helper rejects requests without this field.
-    'platform': 'lark',
-    'username': settings.username,
-    'password': settings.password,
-    'device_name': identity.$1,
-    'device_id': identity.$2,
-    'public_key': publicKey,
-    'private_key': privateKey,
-    'interface_name': 'bettboxsg',
-    'auth_file': configPath,
-    'cookie_file': cookiePath,
-    'vpn_server_name': 'FUZHOU_INTL_node',
-    'vpn_select_strategy': 'latency',
-  });
+  final request = jsonEncode(buildAndroidCorplinkMachineRequest(
+    server: settings.server.trim().replaceFirst(RegExp(r'/$'), ''),
+    username: settings.username,
+    password: settings.password,
+    deviceName: identity.$1,
+    deviceId: identity.$2,
+    publicKey: publicKey,
+    privateKey: privateKey,
+    authFile: configPath,
+    cookieFile: cookiePath,
+  ));
 
   Process process;
   try {
@@ -348,6 +339,37 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
       File(cookiePath).existsSync();
   if (authorized) _androidAuthorizationSessionKey = sessionKey;
   return authorized;
+}
+
+Map<String, dynamic> buildAndroidCorplinkMachineRequest({
+  required String server,
+  required String username,
+  required String password,
+  required String deviceName,
+  required String deviceId,
+  required String publicKey,
+  required String privateKey,
+  required String authFile,
+  required String cookieFile,
+}) {
+  return {
+    'protocol_version': 1,
+    'action': 'login',
+    'server': server,
+    'company_name': 'Bettbox',
+    'platform': 'feilian',
+    'username': username,
+    'password': password,
+    'device_name': deviceName,
+    'device_id': deviceId,
+    'public_key': publicKey,
+    'private_key': privateKey,
+    'interface_name': 'bettboxsg',
+    'auth_file': authFile,
+    'cookie_file': cookieFile,
+    'vpn_server_name': 'FUZHOU_INTL_node',
+    'vpn_select_strategy': 'latency',
+  };
 }
 
 Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(

@@ -18,4 +18,21 @@ void main() {
 
     expect(corplinkSgSettingsChanged(before, after), isTrue);
   });
+
+  test('uses the password machine flow for Android CorpLink login', () {
+    final request = buildAndroidCorplinkMachineRequest(
+      server: 'https://example.invalid',
+      username: 'user',
+      password: 'secret',
+      deviceName: 'device',
+      deviceId: 'id',
+      publicKey: 'public',
+      privateKey: 'private',
+      authFile: '/data/user/0/app/files/config.json',
+      cookieFile: '/data/user/0/app/files/corplink_cookies.json',
+    );
+
+    expect(request['platform'], 'feilian');
+    expect(request['password'], 'secret');
+  });
 }
