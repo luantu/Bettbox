@@ -820,7 +820,16 @@ class CorplinkSgItem extends ConsumerWidget {
         final result = await globalState.showCommonDialog<CorplinkSgSettings>(
           child: _CorplinkSgDialog(current: current),
         );
-        if (result != null) await result.save();
+        if (result != null) {
+          final changed = corplinkSgSettingsChanged(current, result);
+          await result.save();
+          if (changed) {
+            // Rebuild the active profile immediately so SG-Node-Linux is
+            // injected before the next start, rather than waiting for an
+            // unrelated profile refresh.
+            await globalState.appController.applyProfile();
+          }
+        }
       },
     );
   }

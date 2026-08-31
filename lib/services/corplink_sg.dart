@@ -65,6 +65,16 @@ class CorplinkSgSettings {
   ).save();
 }
 
+bool corplinkSgSettingsChanged(
+  CorplinkSgSettings before,
+  CorplinkSgSettings after,
+) {
+  return before.enabled != after.enabled ||
+      before.username != after.username ||
+      before.password != after.password ||
+      before.server != after.server;
+}
+
 Future<String> corplinkSgHomePath() =>
     appPath.homeDirPath.then((path) => joinPath(path, 'corplink-sg'));
 
