@@ -594,7 +594,10 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
     'mtu': 1400,
     'persistent-keepalive': 25,
     'remote-dns-resolve': true,
-    'dns': ['https://8.8.8.8/dns-query', 'https://1.1.1.1/dns-query'],
+    'dns': [
+      'https://223.5.5.5/dns-query',
+      'https://doh.pub/dns-query',
+    ],
     'corplink': {
       'corplink-api-server': apiServer,
       'corplink-code': code,
