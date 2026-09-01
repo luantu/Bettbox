@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/metacubex/mihomo/common/atomic"
@@ -524,6 +525,21 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		}
 		outbound.bind = newTCPWireGuardBind(context.Background(), func(ctx context.Context) (net.Conn, error) {
 			d := net.Dialer{}
+			// Android: the WireGuard TCP control connection (dialing the VPN
+			// endpoint to build the tunnel) must bypass the local VpnService,
+			// otherwise it is captured by tun0 and routed back through the
+			// proxy - which on a rule/global mode pointing at this very
+			// SG-Node proxy becomes a self-loop ("tunnel not ready" /
+			// recursive proxy of 140.224.74.169:34080 via GLOBAL). Applying
+			// dialer.DefaultSocketHook (= VpnService.protect on Android)
+			// makes this socket egress via the physical network, matching how
+			// every other outbound in mihomo is protected.
+			if hook := dialer.DefaultSocketHook; hook != nil {
+				h := hook
+				d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+					return h(network, address, c)
+				}
+			}
 			nc, err := d.DialContext(ctx, "tcp", outbound.tcpDialTarget())
 			if err != nil {
 				return nil, err

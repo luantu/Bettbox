@@ -25,10 +25,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"crypto/tls"
 
+	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/log"
 )
 
@@ -154,7 +156,24 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		return nil, err
 	}
 	client := &http.Client{Timeout: 15 * time.Second, Jar: jar}
-	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	// Android: the CorpLink control-plane calls (/api/vpn/list, /vpn/ping,
+	// /vpn/conn) must bypass the local VpnService, otherwise they are
+	// captured by tun0 and routed back through the proxy (which, when the
+	// proxy is SG-Node itself, is a self-loop -> refresh EOF / auth fails).
+	// dialer.DefaultSocketHook is VpnService.protect on Android and nil on
+	// other platforms, so this is a no-op outside Android.
+	if hook := dialer.DefaultSocketHook; hook != nil {
+		h := hook
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{}
+			d.ControlContext = func(_ context.Context, nw, addr string, c syscall.RawConn) error {
+				return h(nw, addr, c)
+			}
+			return d.DialContext(ctx, network, address)
+		}
+	}
+	client.Transport = transport
 	controlURL, err := url.Parse(base)
 	if err != nil {
 		return nil, fmt.Errorf("corplink control server: %v", err)
