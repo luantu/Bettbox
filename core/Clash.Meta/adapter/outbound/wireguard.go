@@ -191,6 +191,15 @@ const tunnelFailureDialTimeoutValue = 3 * time.Second
 
 func tunnelFailureDialTimeout() time.Duration { return tunnelFailureDialTimeoutValue }
 
+// tunnelReadyTimeout bounds the *first* tunnel establishment wait that runs
+// before any business dial (see DialContext/ListenPacketContext). A real
+// device's initial TCP connect + WireGuard handshake to an international node
+// can exceed the strict 3s data-plane dial timeout, so give the first bring-up
+// more room while still failing fast on a genuinely broken tunnel.
+const tunnelReadyTimeoutValue = 8 * time.Second
+
+func tunnelReadyTimeout() time.Duration { return tunnelReadyTimeoutValue }
+
 // isTunnelFailure 判断业务错误是否属于"隧道数据面失败"（应触发重建）。
 // DNS 解析失败/超时属于外部解析问题，不应误判为隧道不可用而反复重建。
 func isTunnelFailure(err error) bool {
@@ -226,12 +235,15 @@ func isTunnelFailure(err error) bool {
 
 // waitTunnelReady 等待当前 TCP 连接完成 WireGuard 握手（隧道 ready）。
 // 返回 true 表示就绪；false 表示超时或连接不存在。仅 TCP 模式使用。
+// 连接尚未建立时先主动触发底层 TCP dial（EnsureConn），保证首次业务请求/
+// 测速不会与握手竞态——DNS-over-tunnel 与连接都需隧道 ready 后才能放行。
 func (w *WireGuard) waitTunnelReady(ctx context.Context) bool {
 	if !w.option.TCP {
 		return true
 	}
 	tcpBind, ok := w.bind.(interface {
 		IsConnReady(string) bool
+		EnsureConn(string, time.Duration) (bool, error)
 	})
 	if !ok {
 		return true
@@ -239,13 +251,22 @@ func (w *WireGuard) waitTunnelReady(ctx context.Context) bool {
 	ep := w.connectAddr.String()
 	// 连接不存在（尚未建立）时直接放行，让 Send 触发建连
 	if !tcpBind.IsConnReady(ep) {
+		// Use the more generous readiness timeout for the pre-dial bring-up so a
+		// real device's first handshake is not cut short by the strict data-plane
+		// dial timeout.
+		timeout := tunnelReadyTimeout()
 		if waiter, ok := w.bind.(interface {
 			WaitConnReady(string, time.Duration) bool
 		}); ok {
-			return waiter.WaitConnReady(ep, tunnelFailureDialTimeout())
+			// EnsureConn forces the lazy dial and blocks on handshake completion;
+			// fall back to WaitConnReady only if EnsureConn is not usable.
+			if ready, err := tcpBind.EnsureConn(ep, timeout); err == nil {
+				return ready
+			}
+			return waiter.WaitConnReady(ep, timeout)
 		}
 		// 等待 ready 或超时
-		deadline := time.NewTimer(tunnelFailureDialTimeout())
+		deadline := time.NewTimer(tunnelReadyTimeout())
 		defer deadline.Stop()
 		for {
 			if tcpBind.IsConnReady(ep) {
@@ -980,6 +1001,19 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 		}
 		return nil, err
 	}
+	// Wait for the WireGuard handshake to complete *before* resolving or
+	// dialing through the tunnel. On the first request (notably the node delay
+	// test with remote-dns-resolve), the DoH query and the TCP connection both
+	// traverse the tunnel; if they race the handshake the tunnel is not ready
+	// yet and the delay test times out while later traffic works. Forcing
+	// readiness here makes the very first dial succeed.
+	if !w.waitTunnelReady(ctx) {
+		log.Warnln("[WG](%s) tunnel not ready within %v before dial, treating as failure", w.option.Name, tunnelReadyTimeout())
+		if w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
+		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
+	}
 	if !metadata.Resolved() || w.resolver != nil {
 		r := resolver.DefaultResolver
 		if w.resolver != nil {
@@ -1037,6 +1071,15 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 			w.invalidateTunnelForBusyFailure()
 		}
 		return nil, err
+	}
+	// Same ordering guarantee as DialContext: wait for handshake before any
+	// tunnel traffic (UDP resolve + bind) so first-packet dials do not race it.
+	if !w.waitTunnelReady(ctx) {
+		log.Warnln("[WG](%s) tunnel not ready within %v before UDP dial, treating as failure", w.option.Name, tunnelReadyTimeout())
+		if w.registerBusyFailure() {
+			w.invalidateTunnelForBusyFailure()
+		}
+		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
 	}
 	if err = w.ResolveUDP(ctx, metadata); err != nil {
 		// DNS 解析失败不计入隧道健康

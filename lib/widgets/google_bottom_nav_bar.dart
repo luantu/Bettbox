@@ -91,33 +91,23 @@ class GoogleBottomNavBar extends ConsumerWidget {
                 ),
               ],
             ),
-            // Four mobile destinations do not fit at the default GNav
-            // spacing on a narrow phone. Keep every destination reachable
-            // instead of letting the last one be clipped off-screen.
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: GNav(
-                rippleColor: enableHapticFeedback
-                    ? context.colorScheme.onSurface.withValues(alpha: 0.15)
-                    : Colors.transparent,
-                hoverColor: context.colorScheme.onSurface.withValues(
-                  alpha: 0.1,
-                ),
-                haptic: enableHapticFeedback,
-                gap: 4,
-                activeColor: context.colorScheme.onSecondaryContainer,
-                iconSize: 22,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 9,
-                  vertical: 10,
-                ),
-                duration: const Duration(milliseconds: 250),
-                tabBackgroundColor: context.colorScheme.secondaryContainer,
-                color: context.colorScheme.onSurfaceVariant,
-                tabs: tabsList,
-                selectedIndex: selectedIndex,
-                onTabChange: handleTabChange,
-              ),
+            child: GNav(
+              rippleColor: enableHapticFeedback
+                  ? context.colorScheme.onSurface.withValues(alpha: 0.15)
+                  : Colors
+                        .transparent, // Disabling ripple may disable haptic feedback
+              hoverColor: context.colorScheme.onSurface.withValues(alpha: 0.1),
+              haptic: enableHapticFeedback, // Control GNav haptic feedback
+              gap: 8,
+              activeColor: context.colorScheme.onSecondaryContainer,
+              iconSize: 24,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              duration: const Duration(milliseconds: 250),
+              tabBackgroundColor: context.colorScheme.secondaryContainer,
+              color: context.colorScheme.onSurfaceVariant,
+              tabs: tabsList,
+              selectedIndex: selectedIndex,
+              onTabChange: handleTabChange,
             ),
           ),
         ),

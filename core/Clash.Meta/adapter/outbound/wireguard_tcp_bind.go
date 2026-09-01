@@ -320,6 +320,31 @@ func (t *tcpWireGuardBind) WaitConnReady(endpoint string, timeout time.Duration)
 	return state.waitReady(timeout)
 }
 
+// EnsureConn forces the lazy TCP dial for the given endpoint and waits up to
+// timeout for the WireGuard handshake to complete (tunnel data plane ready).
+// This is used on the first business request / delay-test so the tunnel is
+// established *before* any DNS-over-tunnel resolution or connection attempt.
+// Without it, the initial dial races the handshake: the DoH query and the TCP
+// connection both traverse a tunnel that is not yet up, so the node delay test
+// times out while later real traffic works once the handshake completes.
+// endpoint uses DstToString() form, i.e. "ip:port".
+func (t *tcpWireGuardBind) EnsureConn(endpoint string, timeout time.Duration) (bool, error) {
+	key := endpoint
+	if v, ok := t.tcpConnMap.Load(key); ok {
+		if state, ok := v.(*tcpConnState); ok && state != nil {
+			return state.waitReady(timeout), nil
+		}
+	}
+	// Kick the lazy dial exactly like wireguard-go's Send path would, then wait
+	// for the handshake completion signal (MarkConnReady closes readyCh).
+	ep := wgconn.Endpoint(&stateEndpoint{key: key})
+	state, err := t.getConn(ep)
+	if err != nil {
+		return false, err
+	}
+	return state.waitReady(timeout), nil
+}
+
 // IsConnReady 返回 endpoint 对应连接是否已完成握手（隧道可用）。
 func (t *tcpWireGuardBind) IsConnReady(endpoint string) bool {
 	if endpoint == "" {

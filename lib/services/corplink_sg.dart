@@ -560,7 +560,7 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   if (auth == null) return;
   final proxies =
       (rawConfig['proxies'] as List?)?.cast<dynamic>() ?? <dynamic>[];
-  const name = 'SG-Node-Linux';
+  const name = 'SG-Node';
   proxies.removeWhere((item) => item is Map && item['name'] == name);
   final home = await corplinkSgHomePath();
   final interfaceName = auth['interface_name']?.toString() ?? 'wgdevtest22';

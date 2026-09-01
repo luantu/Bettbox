@@ -813,7 +813,7 @@ class CorplinkSgItem extends ConsumerWidget {
   Widget build(BuildContext context, ref) {
     return ListItem(
       leading: const Icon(Icons.vpn_key_outlined),
-      title: const Text('SG-Node-Linux'),
+      title: const Text('SG-Node'),
       subtitle: const Text('CorpLink / WireGuard-TCP / tunnel DoH'),
       onTap: () async {
         final current = await CorplinkSgSettings.load();
@@ -824,7 +824,7 @@ class CorplinkSgItem extends ConsumerWidget {
           final changed = corplinkSgSettingsChanged(current, result);
           await result.save();
           if (changed) {
-            // Rebuild the active profile immediately so SG-Node-Linux is
+            // Rebuild the active profile immediately so SG-Node is
             // injected before the next start, rather than waiting for an
             // unrelated profile refresh.
             await globalState.appController.applyProfile();
@@ -866,7 +866,7 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
   @override
   Widget build(BuildContext context) {
     return CommonDialog(
-      title: 'SG-Node-Linux',
+      title: 'SG-Node',
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context, rootNavigator: true).pop(),

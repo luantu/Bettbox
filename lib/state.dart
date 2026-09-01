@@ -569,7 +569,7 @@ class GlobalState {
     final profileId = targetProfile.id;
     final configMap = await getProfileConfig(profileId);
     // Inject before the user's JavaScript override runs, so an override can
-    // reference SG-Node-Linux in proxy-groups/rules just like an airport node.
+    // reference SG-Node in proxy-groups/rules just like an airport node.
     await applyCorplinkSgNode(configMap);
     final rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     final originalProxyGroups = rawConfig['proxy-groups'];

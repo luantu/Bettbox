@@ -3,7 +3,7 @@
 ## 目标
 
 Bettbox 保留现有机场订阅、节点测速、配置覆写和分流能力，并增加一个内置的
-`SG-Node-Linux`/`SG-Node` CorpLink 节点。用户只填写：
+`SG-Node` CorpLink 节点。用户只填写：
 
 - 飞连用户名；
 - 飞连密码；
@@ -24,15 +24,15 @@ Bettbox 原有配置解析和 JS 覆写
         ↓
 CorpLink 授权状态刷新
         ↓
-追加 SG-Node-Linux WireGuard-TCP 出站
+追加 SG-Node WireGuard-TCP 出站
         ↓
-保留原有 proxy-groups/rules，并将 SG-Node-Linux 暴露给覆写脚本
+保留原有 proxy-groups/rules，并将 SG-Node 暴露给覆写脚本
         ↓
 同一个 Mihomo 内核运行机场节点和 CorpLink 节点
 ```
 
 这样机场节点和 SG 节点共享同一个控制器、连接记录、DNS 和分流体系；覆写脚本可以
-使用固定节点名 `SG-Node-Linux` 加入 OpenAI 专用组。
+使用固定节点名 `SG-Node` 加入 OpenAI 专用组。
 
 ## 输入与安全存储
 
@@ -43,7 +43,7 @@ CorpLink 授权状态刷新
 ## 固定默认值
 
 ```text
-节点名：SG-Node-Linux
+节点名：SG-Node
 协议：WireGuard over TCP
 国际服务器端口：由 CorpLink /vpn/list 返回，当前 FZ-INT 为 34080
 MTU：使用服务端下发值，当前为 1400
@@ -76,8 +76,8 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 - 节点已存在时按名称更新，不产生重复节点；
 - 原有覆写脚本在注入前后都能运行；
 - `remote-dns-resolve` 强制为 `true`；
-- OpenAI 专用组优先包含 `SG-Node-Linux`，但保留机场节点作为备用；
-- Windows 正式节点 `SG-Node` 仍由现有 Windows 配置管理，不被 Linux 集成重命名。
+- OpenAI 专用组优先包含 `SG-Node`，但保留机场节点作为备用；
+- 该固定节点名 `SG-Node` 用于当前 Android/桌面注入，若与机场订阅中的同名节点冲突，注入逻辑按名称更新（不会产生重复节点）。
 
 ## 验收标准
 
@@ -86,9 +86,9 @@ WireGuard 私钥。不能复制 Windows 正式实例或另一台 Bettbox 的 Coo
 1. 只使用机场配置时，原有机场节点仍能连接；
 2. 只输入用户名、密码、服务器地址时，能生成并保存独立 CorpLink 身份；
 3. Mihomo 日志出现 `corplink refreshed` 和 `WireGuard handshake completed`；
-4. `SG-Node-Linux` 出现在 `/proxies` 和目标 proxy-group；
+4. `SG-Node` 出现在 `/proxies` 和目标 proxy-group；
 5. DoH 请求经隧道访问；
-6. 通过 SG-Node-Linux 访问 `https://chatgpt.com/robots.txt` 返回 HTTP 200；
+6. 通过 SG-Node 访问 `https://chatgpt.com/robots.txt` 返回 HTTP 200；
 7. Windows 正式 `SG-Node` 同时在线且仍返回 HTTP 200；
 8. 停止/重启 Bettbox 后 Cookie、密钥和 device identity 仍可恢复；
 9. 授权失败、handshake 超时和 DNS 失败能在日志中区分。
@@ -127,7 +127,7 @@ SG 构建的 applicationId 为 `com.appshub.bettbox.sg`，用于和已安装的�
 用于生产发布。设备上若已经安装早期 runner 临时签名的 SG 包，首次切换到固定测试签名仍
 需卸载旧 SG 包，这会清除 Android Keystore 中的密码，安装后需重新输入飞连密码。
 
-安装 APK 后，在“设置 → 通用 → SG-Node-Linux”填写三项信息并启用。机场订阅、原有
+安装 APK 后，在“设置 → 通用 → SG-Node”填写三项信息并启用。机场订阅、原有
 配置覆写脚本和普通节点仍走原来的配置链；SG 节点会在脚本评估前后各注入一次，保证脚本
 可以把它加入 OpenAI/ChatGPT 专用组。海外 DoH 地址固定经 SG 节点 resolver 发起，不能
 把本地系统 DNS 当作成功依据。
