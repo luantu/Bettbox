@@ -595,8 +595,8 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
     'persistent-keepalive': 25,
     'remote-dns-resolve': true,
     'dns': [
-      'https://223.5.5.5/dns-query',
-      'https://doh.pub/dns-query',
+      'https://1.1.1.1/dns-query',
+      'https://8.8.8.8/dns-query',
     ],
     'corplink': {
       'corplink-api-server': apiServer,
@@ -621,7 +621,9 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
     final list = group['proxies'];
     final groupName = group['name']?.toString().toLowerCase() ?? '';
     final isOpenAiGroup = groupName.contains('openai') || groupName.contains('chatgpt');
-    if (list is List && isOpenAiGroup) {
+    // Also join the GLOBAL group so global-mode traffic can use the tunnel.
+    final isGlobalGroup = groupName == 'global';
+    if (list is List && (isOpenAiGroup || isGlobalGroup)) {
       if (!list.contains(name)) list.insert(0, name);
     }
   }

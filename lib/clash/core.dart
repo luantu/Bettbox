@@ -125,12 +125,26 @@ class ClashCore {
       final allList = globalProxy['all'] as List?;
       if (allList == null) return [];
 
-      final groupNames = [
+      // Preserve config order from GLOBAL's member list first (this is how a
+      // standard subscription exposes its groups), then append any group-typed
+      // proxies that GLOBAL does not reference. The CorpLink integration
+      // injects an "SG-OpenAI" selector that is intentionally *not* wired into
+      // GLOBAL, so relying solely on GLOBAL.all would hide it from the proxy
+      // page even though the core has it.
+      final orderedGroupNames = <String>[
         UsedProxy.GLOBAL.name,
         ...allList.where((e) {
           final proxy = allProxies[e] as Map<String, dynamic>?;
           return GroupTypeExtension.valueList.contains(proxy?['type']);
         }),
+      ];
+      final groupNames = <String>[
+        ...orderedGroupNames,
+        ...allProxies.keys.where((name) {
+          if (name == UsedProxy.GLOBAL.name) return false;
+          final proxy = allProxies[name] as Map<String, dynamic>?;
+          return GroupTypeExtension.valueList.contains(proxy?['type']);
+        }).where((name) => !orderedGroupNames.contains(name)),
       ];
       final groupsRaw = groupNames.map((groupName) {
         final proxyData = allProxies[groupName] as Map?;
