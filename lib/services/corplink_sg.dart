@@ -686,4 +686,16 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   rules.removeWhere((r) =>
       r is String && r.contains(',$sgOpenAiGroupName'));
   rawConfig['rules'] = <dynamic>[...openAiRules, ...rules];
+
+  // Force the core to emit DEBUG-level logs so the CorpLink WireGuard tunnel
+  // data plane (handshake frames, TCP encapsulation, DoH-over-tunnel) can be
+  // diagnosed on a real device. Without this the tunnel logs are dropped by
+  // log.print() because the default level is INFO. The Dart side mirrors core
+  // logs to logcat, so `adb logcat | grep WG-TCP` becomes actionable.
+  final general = rawConfig['general'];
+  if (general is Map) {
+    general['log-level'] = 'debug';
+  } else {
+    rawConfig['general'] = <String, dynamic>{'log-level': 'debug'};
+  }
 }

@@ -87,6 +87,10 @@ class _ClashContainerState extends ConsumerState<ClashManager>
   @override
   void onLog(Log log) {
     ref.read(logsProvider.notifier).addLog(log);
+    // Mirror core logs to logcat so the WireGuard/CorpLink tunnel data plane
+    // can be diagnosed on a device. debugPrint routes to __android_log_print
+    // on Android; the [CORE] prefix keeps adb filtering simple.
+    debugPrint('[CORE][${log.logLevel.name}] ${log.payload}');
     if (log.logLevel == LogLevel.error) {
       globalState.showNotifier(log.payload);
     }

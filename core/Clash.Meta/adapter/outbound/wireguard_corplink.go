@@ -32,6 +32,13 @@ import (
 	"github.com/metacubex/mihomo/log"
 )
 
+// corplinkWGIdentifier 是 CorpLink 版 wireguard-go 使用的 Noise 构造标识符。
+// 标准 WireGuard 是 "WireGuard v1 zx2c4 Jason@zx2c4.com"；CorpLink 服务端
+// 用 "CorpLink v1 vpn@feilian-----------" 计算 InitialHash/InitialChainKey，
+// 客户端必须使用同一个标识符，否则服务端无法解密握手 initiation（表现为
+// TCP 已建立但握手永不完成 / 节点测速 timeout）。
+const corplinkWGIdentifier = "CorpLink v1 vpn@feilian-----------"
+
 // CorplinkOption 描述 corplink 认证所需参数。
 type CorplinkOption struct {
 	// APIServer 为 corplink 控制面地址（如 https://140.224.74.169:34443），

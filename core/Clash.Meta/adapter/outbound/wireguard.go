@@ -634,7 +634,22 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		outbound.bind.SetParseReserved(false) // AmneziaWG don't need parse reserved
 		outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
 	} else {
-		outbound.device = device.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
+		if option.Corplink.APIServer != "" {
+			// CorpLink (feilian) peers run a modified WireGuard whose Noise
+			// construction identifier is "CorpLink v1 vpn@feilian-----------"
+			// instead of the standard WireGuard one. The identifier is mixed
+			// into the precomputed InitialHash/InitialChainKey, so the server
+			// decrypts the initiation only when the client uses the same
+			// identifier. Without this the handshake is silently dropped and
+			// the node delay test times out while the TCP connection itself
+			// stays established.
+			outbound.device = device.NewDeviceWithIdentifier(
+				outbound.tunDevice, outbound.bind, logger, option.Workers,
+				corplinkWGIdentifier,
+			)
+		} else {
+			outbound.device = device.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
+		}
 		// 握手监听：握手永久失败时主动失效底层 TCP 连接（仅 wg-fork device 支持）。
 		// 解决"TCP 连接仍在但 WireGuard 数据面无响应"导致的静默断链。
 		if option.TCP {
