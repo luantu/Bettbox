@@ -122,14 +122,17 @@ Future<void> _service(List<String> flags) async {
       if (_lastTunnelReconnectAt != null &&
           now.difference(_lastTunnelReconnectAt!) <
               const Duration(seconds: 3)) {
+        commonPrint.log('[reconnectTunnels] skipped (debounce)');
         return;
       }
       _lastTunnelReconnectAt = now;
+      commonPrint.log('[reconnectTunnels] network changed, reconnecting');
       Future(() async {
         try {
           await clashLibHandler.reconnectTunnels();
+          commonPrint.log('[reconnectTunnels] done');
         } catch (e) {
-          commonPrint.log('reconnectTunnels failed: $e');
+          commonPrint.log('[reconnectTunnels] failed: $e');
         }
       });
     }
