@@ -103,6 +103,54 @@ func TestHandshakeFailureEntersDialBackoff(t *testing.T) {
 	}
 }
 
+func TestReconnectTransportClosesConnsAndClearsBackoff(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan *net.TCPConn, 1)
+	go func() {
+		c, aerr := ln.Accept()
+		if aerr == nil {
+			accepted <- c.(*net.TCPConn)
+		}
+	}()
+
+	client, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	var serverConn *net.TCPConn
+	select {
+	case serverConn = <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("listener did not accept the dial")
+	}
+
+	bind := newTCPWireGuardBind(context.Background(), nil)
+	key := "220.250.13.174:34080"
+	state := newTCPConnState(serverConn, 1)
+	bind.tcpConnMap.Store(key, state)
+	bind.recordEndpointFailure(key)
+
+	bind.ReconnectTransport()
+
+	if _, ok := bind.tcpConnMap.Load(key); ok {
+		t.Fatal("ReconnectTransport did not remove the transport connection")
+	}
+	bind.mu.Lock()
+	_, hasFail := bind.lastFail[key]
+	_, hasCount := bind.failCount[key]
+	bind.mu.Unlock()
+	if hasFail || hasCount {
+		t.Fatal("ReconnectTransport did not clear the dial backoff")
+	}
+}
+
 func TestTCPConnStateReadySignal(t *testing.T) {
 	state := newTCPConnState(nil, 1)
 	go func() {
