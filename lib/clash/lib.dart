@@ -173,6 +173,11 @@ class ClashLibHandler {
     return completer.future;
   }
 
+  Future<void> reconnectTunnels() async {
+    final id = 'reconnectTunnels-${DateTime.now().microsecondsSinceEpoch}';
+    await invokeAction('{"id":"$id","method":"reconnectTunnels"}');
+  }
+
   void attachMessagePort(int messagePort) {
     clashFFI.attachMessagePort(messagePort);
   }

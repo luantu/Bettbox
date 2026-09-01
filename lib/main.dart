@@ -111,6 +111,29 @@ Future<void> _service(List<String> flags) async {
     final clashLibHandler = ClashLibHandler();
     final smartAutoStopLock = Lock();
 
+    // Reconnect WireGuard tunnels after a network change (e.g. WiFi reconnected
+    // after being dropped). The SG-Node transport is a TCP connection that
+    // becomes half-open when the underlying network disappears, and the core's
+    // idle watchdog recovers it too slowly for a usable UX. Tearing the
+    // transport down here lets the next dial/keepalive rebuild it immediately.
+    DateTime? _lastTunnelReconnectAt;
+    void reconnectTunnelsOnNetworkChange() {
+      final now = DateTime.now();
+      if (_lastTunnelReconnectAt != null &&
+          now.difference(_lastTunnelReconnectAt!) <
+              const Duration(seconds: 3)) {
+        return;
+      }
+      _lastTunnelReconnectAt = now;
+      Future(() async {
+        try {
+          await clashLibHandler.reconnectTunnels();
+        } catch (e) {
+          commonPrint.log('reconnectTunnels failed: $e');
+        }
+      });
+    }
+
     Future<void> checkSmartAutoStop() async {
       try {
         final vpnProps = globalState.config.vpnProps;
@@ -169,7 +192,10 @@ Future<void> _service(List<String> flags) async {
         onDnsChanged: (String dns) {
           clashLibHandler.updateDns(dns);
         },
-        onNetworkChanged: checkSmartAutoStop,
+        onNetworkChanged: () {
+          checkSmartAutoStop();
+          reconnectTunnelsOnNetworkChange();
+        },
       ),
     );
 

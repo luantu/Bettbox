@@ -1024,6 +1024,25 @@ func (w *WireGuard) Close() error {
 	return nil
 }
 
+// Reconnect forces the WireGuard transport to tear down and re-establish its
+// underlying connection. It is invoked after an Android network change: the
+// previous TCP transport becomes a half-open socket whose writes are silently
+// dropped and whose read blocks forever, and neither the 90s idle watchdog nor
+// the keepalive probe recovers it quickly enough. Closing the transport here
+// makes the next business dial (or keepalive send) rebuild it via the normal
+// lazy-dial path. The CorpLink session itself is not touched: the assigned
+// tunnel IP / peer endpoint survive a client-side network change, so refreshing
+// here would only add a failing fetch during the offline window.
+func (w *WireGuard) Reconnect() {
+	if !w.option.TCP {
+		return
+	}
+	if tcpBind, ok := w.bind.(interface{ ReconnectTransport() }); ok {
+		tcpBind.ReconnectTransport()
+	}
+	log.Infoln("[WG](%s) transport reset after network change", w.option.Name)
+}
+
 func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
 	var conn net.Conn
 	if err = w.init(ctx); err != nil {

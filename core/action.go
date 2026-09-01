@@ -224,6 +224,9 @@ func handleAction(action *Action, result ActionResult) {
 		handleFlushDnsCache()
 		result.success(true)
 		return
+	case reconnectTunnelsMethod:
+		result.success(handleReconnectTunnels())
+		return
 	case generateAgeKeyPairMethod:
 		secretKey, publicKey, err := age.GenX25519KeyPair()
 		if err != nil {

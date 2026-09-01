@@ -289,6 +289,32 @@ func (t *tcpWireGuardBind) InvalidateEndpoint(endpoint string) {
 	t.invalidateConn(stateEndpoint{key: endpoint}, state, "handshake failed")
 }
 
+// ReconnectTransport closes every TCP transport connection and clears the dial
+// backoff so the next Send rebuilds the tunnel immediately. Used on an explicit
+// network-change recovery path: after a WiFi/cellular switch the previous
+// transport is a half-open socket (writes silently dropped, reads block
+// forever), and neither the 90s idle watchdog nor keepalive probes recover it
+// quickly enough. Closing all connections avoids any endpoint-key mismatch
+// between the resolved dial target and the connectAddr host form.
+func (t *tcpWireGuardBind) ReconnectTransport() {
+	t.mu.Lock()
+	for k := range t.lastFail {
+		delete(t.lastFail, k)
+	}
+	for k := range t.failCount {
+		delete(t.failCount, k)
+	}
+	t.mu.Unlock()
+
+	t.tcpConnMap.Range(func(k, v interface{}) bool {
+		if state, ok := v.(*tcpConnState); ok && state != nil {
+			key, _ := k.(string)
+			t.invalidateConn(stateEndpoint{key: key}, state, "network change reconnect")
+		}
+		return true
+	})
+}
+
 // MarkConnReady 标记 endpoint 对应的 TCP 连接已完成 WireGuard 握手（隧道可用）。
 // 供 wireguard device 层的握手成功回调使用。只有握手完成后业务才允许放行。
 func (t *tcpWireGuardBind) MarkConnReady(endpoint string) {

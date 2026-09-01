@@ -313,6 +313,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         override fun onAvailable(network: Network) {
             networks.add(network)
             handleNetworkChange()
+            // Rebuild any half-open WireGuard transport as soon as a network is
+            // usable again (a WiFi -> WiFi reconnect keeps the transport type
+            // unchanged, so handleNetworkChange alone would not notify Dart).
+            invokeDart("networkChanged")
         }
 
         override fun onLost(network: Network) {
@@ -320,6 +324,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             networkDnsMap.remove(network)
             onUpdateNetwork()
             handleNetworkChange()
+            invokeDart("networkChanged")
         }
 
         override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {

@@ -311,6 +311,32 @@ func handleResetConnections() bool {
 	return true
 }
 
+// handleReconnectTunnels forces every WireGuard outbound to tear down and
+// rebuild its transport. Invoked after an Android network change so the SG-Node
+// TCP transport (which has become a half-open socket) recovers without the user
+// having to toggle the VPN switch. Non-WireGuard proxies are skipped.
+// Reconnectable adapters are collected under runLock (the proxy map is guarded
+// by it), then reconnected outside the lock so a single slow adapter cannot
+// stall the remaining ones while the lock is held.
+func handleReconnectTunnels() bool {
+	runLock.Lock()
+	var adapters []interface{ Reconnect() }
+	for _, p := range tunnel.Proxies() {
+		if r, ok := p.Adapter().(interface{ Reconnect() }); ok {
+			adapters = append(adapters, r)
+		}
+	}
+	runLock.Unlock()
+
+	for _, r := range adapters {
+		r.Reconnect()
+	}
+	if len(adapters) > 0 {
+		log.Infoln("[APP] reconnectTunnels: %d tunnel(s) reconnected", len(adapters))
+	}
+	return true
+}
+
 func handleCloseConnection(connectionId string) bool {
 	runLock.Lock()
 	defer runLock.Unlock()
