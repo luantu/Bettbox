@@ -809,27 +809,62 @@ class _SecretDialogState extends ConsumerState<_SecretDialog> {
 class CorplinkSgItem extends ConsumerWidget {
   const CorplinkSgItem({super.key});
 
+  String _statusText(CorplinkSgSettings settings) {
+    if (!settings.enabled) return '未启用 · 机场节点不受影响';
+    if (!settings.isConfigured) return '需要补全飞连账号信息';
+    return settings.routeOpenAi
+        ? '已配置 · OpenAI 将使用 SG-Node'
+        : '已配置 · 仅作为额外节点';
+  }
+
   @override
   Widget build(BuildContext context, ref) {
-    return ListItem(
-      leading: const Icon(Icons.vpn_key_outlined),
-      title: const Text('SG-Node'),
-      subtitle: const Text('CorpLink / WireGuard-TCP / tunnel DoH'),
-      onTap: () async {
-        final current = await CorplinkSgSettings.load();
-        final result = await globalState.showCommonDialog<CorplinkSgSettings>(
-          child: _CorplinkSgDialog(current: current),
-        );
-        if (result != null) {
-          final changed = corplinkSgSettingsChanged(current, result);
-          await result.save();
-          if (changed) {
-            // Rebuild the active profile immediately so SG-Node is
-            // injected before the next start, rather than waiting for an
-            // unrelated profile refresh.
+    return FutureBuilder<CorplinkSgSettings>(
+      future: CorplinkSgSettings.load(),
+      builder: (context, snapshot) {
+        final settings = snapshot.data;
+        return ListItem(
+          leading: const Icon(Icons.vpn_key_outlined),
+          title: const Text('飞连 SG-Node'),
+          subtitle: Text(
+            settings == null
+                ? '额外的 WireGuard-TCP 隧道'
+                : _statusText(settings),
+          ),
+          onTap: () async {
+            final current = settings ?? await CorplinkSgSettings.load();
+            final result = await globalState.showCommonDialog<CorplinkSgSettings>(
+              child: _CorplinkSgDialog(current: current),
+            );
+            if (result == null) return;
+
+            final validationError = result.validationError;
+            if (validationError != null) {
+              globalState.showNotifier(validationError);
+              return;
+            }
+            final changed = corplinkSgSettingsChanged(current, result);
+            await result.save();
+            if (!changed) return;
+
+            if (result.enabled) {
+              globalState.showNotifier('正在授权飞连 SG-Node…');
+              try {
+                final authorized = await ensureCorplinkAuthorization(result);
+                if (!authorized) {
+                  globalState.showNotifier('SG-Node 授权失败，普通代理仍可继续使用');
+                }
+              } on Object catch (e) {
+                commonPrint.log('[CorpLinkSG] authorize failed: $e');
+                globalState.showNotifier('SG-Node 授权失败，普通代理仍可继续使用');
+              }
+            } else {
+              globalState.showNotifier('SG-Node 已停用');
+            }
+
             await globalState.appController.applyProfile();
-          }
-        }
+          },
+        );
       },
     );
   }
@@ -846,6 +881,7 @@ class _CorplinkSgDialog extends StatefulWidget {
 
 class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
   late final enabled = ValueNotifier(widget.current.enabled);
+  late final routeOpenAi = ValueNotifier(widget.current.routeOpenAi);
   late final username = TextEditingController(text: widget.current.username);
   late final password = TextEditingController(text: widget.current.password);
   late final server = TextEditingController(text: widget.current.server);
@@ -856,6 +892,7 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
   @override
   void dispose() {
     enabled.dispose();
+    routeOpenAi.dispose();
     username.dispose();
     password.dispose();
     server.dispose();
@@ -876,6 +913,7 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
           onPressed: () => Navigator.of(context, rootNavigator: true).pop(
             CorplinkSgSettings(
               enabled: enabled.value,
+              routeOpenAi: routeOpenAi.value,
               username: username.text.trim(),
               password: password.text,
               server: server.text.trim(),
@@ -887,13 +925,29 @@ class _CorplinkSgDialogState extends State<_CorplinkSgDialog> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text(
+              'SG-Node 使用飞连账号建立额外的 WireGuard-TCP 隧道，机场节点会保留。',
+            ),
+          ),
           ValueListenableBuilder(
             valueListenable: enabled,
             builder: (_, value, child) => SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Enable CorpLink SG node'),
+              title: const Text('启用飞连 SG-Node'),
               value: value,
               onChanged: (v) => enabled.value = v,
+            ),
+          ),
+          ValueListenableBuilder(
+            valueListenable: routeOpenAi,
+            builder: (_, value, child) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('让 OpenAI / ChatGPT 使用 SG-Node'),
+              subtitle: const Text('关闭后只添加节点，不修改现有 OpenAI 分流。'),
+              value: value,
+              onChanged: (v) => routeOpenAi.value = v,
             ),
           ),
           TextField(

@@ -69,6 +69,16 @@ jobs:
             echo "keyPassword=bettbox-sg-test"
           } >> android/local.properties
 
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run Flutter unit tests
+        run: flutter test
+
+      - name: Run Go outbound tests
+        working-directory: core/Clash.Meta
+        run: go test -p 1 ./adapter/outbound/...
+
       - name: Build corplink-rs Android login helper
         shell: bash
         run: |
@@ -119,7 +129,6 @@ jobs:
           set -o pipefail
           go version
           go env GOOS GOARCH CGO_ENABLED CC ANDROID_NDK ANDROID_NDK_ROOT
-          flutter pub get
           timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
 
       - name: Publish Android build diagnostics

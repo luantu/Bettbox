@@ -19,6 +19,34 @@ void main() {
     expect(corplinkSgSettingsChanged(before, after), isTrue);
   });
 
+  test('detects OpenAI routing preference changes', () {
+    const base = CorplinkSgSettings(
+      enabled: true,
+      routeOpenAi: true,
+      username: 'user',
+      password: 'secret',
+      server: 'https://example.invalid',
+    );
+    expect(
+      corplinkSgSettingsChanged(
+        base,
+        const CorplinkSgSettings(
+          enabled: true,
+          routeOpenAi: false,
+          username: 'user',
+          password: 'secret',
+          server: 'https://example.invalid',
+        ),
+      ),
+      isTrue,
+    );
+    expect(base.isConfigured, isTrue);
+    expect(
+      const CorplinkSgSettings(enabled: true).validationError,
+      isNotNull,
+    );
+  });
+
   test('uses the password machine flow for Android CorpLink login', () {
     final request = buildAndroidCorplinkMachineRequest(
       server: 'https://example.invalid',

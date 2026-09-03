@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:bett_box/plugins/app.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
+const corplinkSgRouteOpenAiKey = 'corplinkSg.routeOpenAi';
 const corplinkSgUsernameKey = 'corplinkSg.username';
 const corplinkSgServerKey = 'corplinkSg.server';
 const corplinkSgPasswordSecureKey = 'corplinkSg.password';
@@ -24,16 +25,33 @@ const _secureStorage = FlutterSecureStorage();
 
 class CorplinkSgSettings {
   final bool enabled;
+  final bool routeOpenAi;
   final String username;
   final String password;
   final String server;
 
   const CorplinkSgSettings({
     this.enabled = false,
+    this.routeOpenAi = true,
     this.username = '',
     this.password = '',
     this.server = '',
   });
+
+  bool get isConfigured =>
+      username.trim().isNotEmpty &&
+      password.isNotEmpty &&
+      server.trim().isNotEmpty;
+
+  String? get validationError {
+    if (!enabled) return null;
+    if (username.trim().isEmpty) return '请输入飞连用户名';
+    if (password.isEmpty) return '请输入飞连密码';
+    if (server.trim().isEmpty) return '请输入上游服务器地址';
+    final uri = Uri.tryParse(server.trim());
+    if (uri == null || uri.host.isEmpty) return '上游服务器地址无效';
+    return null;
+  }
 
   static Future<CorplinkSgSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -41,6 +59,7 @@ class CorplinkSgSettings {
         await _secureStorage.read(key: corplinkSgPasswordSecureKey) ?? '';
     return CorplinkSgSettings(
       enabled: prefs.getBool(corplinkSgEnabledKey) ?? false,
+      routeOpenAi: prefs.getBool(corplinkSgRouteOpenAiKey) ?? true,
       username: prefs.getString(corplinkSgUsernameKey) ?? '',
       password: securePassword,
       server: prefs.getString(corplinkSgServerKey) ?? '',
@@ -50,6 +69,7 @@ class CorplinkSgSettings {
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(corplinkSgEnabledKey, enabled);
+    await prefs.setBool(corplinkSgRouteOpenAiKey, routeOpenAi);
     await prefs.setString(corplinkSgUsernameKey, username);
     await _secureStorage.write(
       key: corplinkSgPasswordSecureKey,
@@ -59,6 +79,7 @@ class CorplinkSgSettings {
   }
 
   Future<void> disable() => CorplinkSgSettings(
+    routeOpenAi: routeOpenAi,
     username: username,
     password: password,
     server: server,
@@ -70,6 +91,7 @@ bool corplinkSgSettingsChanged(
   CorplinkSgSettings after,
 ) {
   return before.enabled != after.enabled ||
+      before.routeOpenAi != after.routeOpenAi ||
       before.username != after.username ||
       before.password != after.password ||
       before.server != after.server;
@@ -149,6 +171,13 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
   };
   await File(configPath).writeAsString(jsonEncode(config));
 
+  Future<void> sanitizeConfig() async {
+    final current = await loadCorplinkConfig();
+    if (current == null) return;
+    current.remove('password');
+    await File(configPath).writeAsString(jsonEncode(current));
+  }
+
   final executable = Platform.isWindows ? 'corplink-rs.exe' : 'corplink-rs';
   final bundled = joinPath(appPath.executableDirPath, executable);
   final command = File(bundled).existsSync() ? bundled : executable;
@@ -156,11 +185,22 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
   // Process.run here: it waits for the daemon to exit and would prevent
   // Bettbox from ever reaching config injection. We only use it as the
   // bootstrap/login helper, then Mihomo-SG owns the actual tunnel.
-  final process = await Process.start(
-    command,
-    [configPath],
-    mode: ProcessStartMode.detachedWithStdio,
-  );
+  late final Process process;
+  try {
+    process = await Process.start(
+      command,
+      [configPath],
+      mode: ProcessStartMode.detachedWithStdio,
+    );
+  } on ProcessException catch (e) {
+    await sanitizeConfig();
+    commonPrint.log('[CorpLinkSG] helper unavailable: ${e.message}');
+    return false;
+  } on Object catch (e) {
+    await sanitizeConfig();
+    commonPrint.log('[CorpLinkSG] helper start failed: $e');
+    return false;
+  }
   final deadline = DateTime.now().add(const Duration(seconds: 90));
   Map<String, dynamic>? updated;
   while (DateTime.now().isBefore(deadline)) {
@@ -178,6 +218,7 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
       (updated?['code'] as String).isNotEmpty;
   if (!authorized) {
     process.kill();
+    await sanitizeConfig();
     return false;
   }
   process.kill();
@@ -548,14 +589,10 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   // three required values. This keeps first launch on Bettbox's settings
   // page instead of unexpectedly opening Feishu because secure password
   // storage is empty after an uninstall/signature change.
-  if (!settings.enabled ||
-      settings.username.trim().isEmpty ||
-      settings.password.isEmpty ||
-      settings.server.trim().isEmpty) {
-    return;
-  }
+  if (!settings.enabled || !settings.isConfigured) return;
 
-  if (!await ensureCorplinkAuthorization(settings)) return;
+  // Authorization is an explicit user action. Config evaluation must remain
+  // side-effect free so an optional SG-Node failure cannot break Bettbox.
   final auth = await loadCorplinkConfig();
   if (auth == null) return;
   final proxies =
@@ -616,88 +653,85 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
 
   final groups =
       (rawConfig['proxy-groups'] as List?)?.cast<dynamic>() ?? <dynamic>[];
+  final openAiGroupNamePattern = RegExp(r'openai|chatgpt', caseSensitive: false);
+  final isOpenAiRoutingEnabled = settings.routeOpenAi;
   for (final group in groups) {
     if (group is! Map) continue;
     final list = group['proxies'];
-    final groupName = group['name']?.toString().toLowerCase() ?? '';
-    final isOpenAiGroup = groupName.contains('openai') || groupName.contains('chatgpt');
-    // Also join the GLOBAL group so global-mode traffic can use the tunnel.
-    final isGlobalGroup = groupName == 'global';
-    if (list is List && (isOpenAiGroup || isGlobalGroup)) {
+    final groupName = group['name']?.toString() ?? '';
+    final isOpenAiGroup = openAiGroupNamePattern.hasMatch(groupName);
+    final isGlobalGroup = groupName.toLowerCase() == 'global';
+    if (list is List && (isGlobalGroup || (isOpenAiRoutingEnabled && isOpenAiGroup))) {
       if (!list.contains(name)) list.insert(0, name);
     }
   }
   rawConfig['proxy-groups'] = groups;
 
-  // Build a dedicated SG-OpenAI group that prefers the CorpLink SG wireguard
-  // tunnel and falls back to the user's primary subscription group, so the
-  // integration works on profiles that have no "openai"/"chatgpt"-named group.
-  // The group is created idempotently: re-evaluation passes overwrite any
-  // previous instance so its members always reflect the live proxy list.
   const sgOpenAiGroupName = 'SG-OpenAI';
-  String? primarySubscriptionGroup;
-  for (final g in groups) {
-    if (g is! Map) continue;
-    final groupName = g['name']?.toString() ?? '';
-    // Prefer the user's most-likely "main" group as a manual fallback target.
-    // On the example 狗子云 subscription this matches the top-level select.
-    if (groupName == '狗子云' ||
-        groupName.toLowerCase() == 'proxy' ||
-        groupName.toLowerCase() == 'select') {
-      primarySubscriptionGroup = groupName;
-      break;
+  if (isOpenAiRoutingEnabled) {
+    String? primarySubscriptionGroup;
+    for (final g in groups) {
+      if (g is! Map) continue;
+      final groupName = g['name']?.toString() ?? '';
+      final groupType = g['type']?.toString().toLowerCase();
+      if (groupName.toLowerCase() == 'global' ||
+          groupName == sgOpenAiGroupName ||
+          openAiGroupNamePattern.hasMatch(groupName)) {
+        continue;
+      }
+      if (groupType == 'select' ||
+          groupType == 'url-test' ||
+          groupType == 'fallback' ||
+          groupType == 'load-balance') {
+        primarySubscriptionGroup = groupName;
+        break;
+      }
     }
-  }
-  final sgOpenAiProxies = <String>[
-    name,
-    if (primarySubscriptionGroup != null) primarySubscriptionGroup,
-    'DIRECT',
-  ];
-  groups.removeWhere((g) =>
-      g is Map && g['name']?.toString() == sgOpenAiGroupName);
-  groups.add({
-    'name': sgOpenAiGroupName,
-    'type': 'select',
-    'proxies': sgOpenAiProxies,
-  });
-  rawConfig['proxy-groups'] = groups;
+    final sgOpenAiProxies = <String>[
+      name,
+      if (primarySubscriptionGroup != null) primarySubscriptionGroup,
+      'DIRECT',
+    ];
+    groups.removeWhere((g) =>
+        g is Map && g['name']?.toString() == sgOpenAiGroupName);
+    groups.add({
+      'name': sgOpenAiGroupName,
+      'type': 'select',
+      'proxies': sgOpenAiProxies,
+    });
+    rawConfig['proxy-groups'] = groups;
 
-  // Prepend comprehensive OpenAI/ChatGPT domain rules so they win over the
-  // user's subscription rules (which typically only carry DOMAIN-KEYWORD,openai).
-  // Rules are evaluated top-down in Mihomo; prepending gives SG-OpenAI highest
-  // priority while leaving the user's existing rules intact as a manual fallback
-  // in the profile editor.
-  const openAiRules = <String>[
-    'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,openai.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,chat.openai.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,api.openai.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,platform.openai.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,auth0.openai.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,cdn.openai.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,openaiusercontent.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,oaistatic.com,SG-OpenAI',
-    'DOMAIN-SUFFIX,oaiusercontent.com,SG-OpenAI',
-    'DOMAIN-KEYWORD,openai,SG-OpenAI',
-    'DOMAIN-KEYWORD,chatgpt,SG-OpenAI',
-  ];
-  final rules =
-      (rawConfig['rules'] as List?)?.cast<dynamic>() ?? <dynamic>[];
-  // Idempotent re-evaluation: strip any prior SG-OpenAI rules so they are not
-  // duplicated on the second applyCorplinkSgNode call (after handleEvaluate).
-  rules.removeWhere((r) =>
-      r is String && r.contains(',$sgOpenAiGroupName'));
-  rawConfig['rules'] = <dynamic>[...openAiRules, ...rules];
-
-  // Force the core to emit DEBUG-level logs so the CorpLink WireGuard tunnel
-  // data plane (handshake frames, TCP encapsulation, DoH-over-tunnel) can be
-  // diagnosed on a real device. Without this the tunnel logs are dropped by
-  // log.print() because the default level is INFO. The Dart side mirrors core
-  // logs to logcat, so `adb logcat | grep WG-TCP` becomes actionable.
-  final general = rawConfig['general'];
-  if (general is Map) {
-    general['log-level'] = 'debug';
+    const openAiRules = <String>[
+      'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,openai.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,chat.openai.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,api.openai.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,platform.openai.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,auth0.openai.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,cdn.openai.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,openaiusercontent.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,oaistatic.com,SG-OpenAI',
+      'DOMAIN-SUFFIX,oaiusercontent.com,SG-OpenAI',
+      'DOMAIN-KEYWORD,openai,SG-OpenAI',
+      'DOMAIN-KEYWORD,chatgpt,SG-OpenAI',
+    ];
+    final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
+    final rules = rawConfig[rulesKey] is List
+        ? (rawConfig[rulesKey] as List).cast<dynamic>()
+        : <dynamic>[];
+    rules.removeWhere((r) =>
+        r is String && r.endsWith(',$sgOpenAiGroupName'));
+    rawConfig[rulesKey] = <dynamic>[...openAiRules, ...rules];
+    rawConfig.remove(rulesKey == 'rule' ? 'rules' : 'rule');
   } else {
-    rawConfig['general'] = <String, dynamic>{'log-level': 'debug'};
+    groups.removeWhere((g) =>
+        g is Map && g['name']?.toString() == sgOpenAiGroupName);
+    rawConfig['proxy-groups'] = groups;
+    final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
+    if (rawConfig[rulesKey] is List) {
+      (rawConfig[rulesKey] as List).removeWhere((r) =>
+          r is String && r.endsWith(',$sgOpenAiGroupName'));
+    }
+    rawConfig.remove(rulesKey == 'rule' ? 'rules' : 'rule');
   }
 }
