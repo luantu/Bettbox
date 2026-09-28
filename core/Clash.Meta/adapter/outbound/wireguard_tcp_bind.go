@@ -384,6 +384,24 @@ func (t *tcpWireGuardBind) IsConnReady(endpoint string) bool {
 	return false
 }
 
+// HasReadyConn inspects the live connection generation. The session's
+// configured endpoint can be a hostname while the connection map uses its
+// resolved address, so status must not rely on a string-key match.
+func (t *tcpWireGuardBind) HasReadyConn() bool {
+	if t.closed.Load() {
+		return false
+	}
+	ready := false
+	t.tcpConnMap.Range(func(_, value interface{}) bool {
+		if state, ok := value.(*tcpConnState); ok && state != nil && state.ready.Load() {
+			ready = true
+			return false
+		}
+		return true
+	})
+	return ready
+}
+
 // stateEndpoint 适配 invalidateConn 的 wgconn.Endpoint 参数：仅用于从连接表
 // 按键删除，DstToString 返回构造时传入的 key。
 type stateEndpoint struct {

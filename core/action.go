@@ -227,6 +227,12 @@ func handleAction(action *Action, result ActionResult) {
 	case reconnectTunnelsMethod:
 		result.success(handleReconnectTunnels())
 		return
+	case getCorplinkSgStatusMethod:
+		result.success(handleGetCorplinkSgStatus())
+		return
+	case reconnectCorplinkTunnelMethod:
+		result.success(handleReconnectCorplinkTunnel())
+		return
 	case generateAgeKeyPairMethod:
 		secretKey, publicKey, err := age.GenX25519KeyPair()
 		if err != nil {

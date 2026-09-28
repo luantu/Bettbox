@@ -130,6 +130,8 @@ const (
 	flushFakeIPMethod                    Method = "flushFakeIP"
 	flushDnsCacheMethod                  Method = "flushDnsCache"
 	reconnectTunnelsMethod               Method = "reconnectTunnels"
+	getCorplinkSgStatusMethod            Method = "getCorplinkSgStatus"
+	reconnectCorplinkTunnelMethod        Method = "reconnectCorplinkTunnel"
 	generateAgeKeyPairMethod             Method = "generateAgeKeyPair"
 	convertAgeSecretKeyToPublicKeyMethod Method = "convertAgeSecretKeyToPublicKey"
 	getModeMethod                        Method = "getMode"

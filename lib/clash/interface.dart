@@ -81,6 +81,10 @@ mixin ClashInterface {
 
   FutureOr<bool> resetConnections();
 
+  Future<Map> getCorplinkSgStatus();
+
+  Future<bool> reconnectCorplinkTunnel();
+
   Future<bool> setState(CoreState state);
 
   FutureOr<bool> flushFakeIP();
@@ -353,6 +357,22 @@ abstract class ClashHandlerInterface with ClashInterface {
   }
 
   @override
+  Future<Map> getCorplinkSgStatus() {
+    return invoke<Map>(
+      method: ActionMethod.getCorplinkSgStatus,
+      timeout: const Duration(seconds: 4),
+    );
+  }
+
+  @override
+  Future<bool> reconnectCorplinkTunnel() {
+    return invoke<bool>(
+      method: ActionMethod.reconnectCorplinkTunnel,
+      timeout: const Duration(seconds: 4),
+    );
+  }
+
+  @override
   Future<bool> closeConnection(String id) {
     return invoke<bool>(method: ActionMethod.closeConnection, data: id);
   }
@@ -394,15 +414,18 @@ abstract class ClashHandlerInterface with ClashInterface {
 
   @override
   Future<String> asyncTestDelay(String url, String proxyName) {
+    final timeout = proxyName == 'SG-Node'
+        ? const Duration(seconds: 15)
+        : httpTimeoutDuration;
     final delayParams = {
       'proxy-name': proxyName,
-      'timeout': httpTimeoutDuration.inMilliseconds,
+      'timeout': timeout.inMilliseconds,
       'test-url': url,
     };
     return invoke<String>(
       method: ActionMethod.asyncTestDelay,
       data: json.encode(delayParams),
-      timeout: Duration(milliseconds: 6000),
+      timeout: timeout + const Duration(seconds: 3),
       onTimeout: () {
         return json.encode(Delay(name: proxyName, value: -1, url: url));
       },

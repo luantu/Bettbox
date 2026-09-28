@@ -1,6 +1,6 @@
 import 'dart:async';
 
-enum SgRecoveryAction { none, reconnect, reauthorize }
+enum SgRecoveryAction { none, reconnect, rebuild }
 
 /// Captures the AppController's normal Zone before its reentrant core lock is
 /// acquired. Futures and timers created inside a completed synchronized Zone
@@ -44,10 +44,10 @@ class SgRecoveryPolicy {
       _nextAllowedAt = now.add(const Duration(seconds: 30));
       return SgRecoveryAction.reconnect;
     }
-    // Reauthentication is expensive. After it has been attempted once,
-    // require a longer quiet period before another attempt.
+    // Rebuild the outbound/IP stack with the saved authorization. A failed
+    // website probe must never force a fresh password login.
     _failures = 0;
     _nextAllowedAt = now.add(const Duration(minutes: 5));
-    return SgRecoveryAction.reauthorize;
+    return SgRecoveryAction.rebuild;
   }
 }

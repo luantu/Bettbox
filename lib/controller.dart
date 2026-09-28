@@ -15,6 +15,7 @@ import 'package:bett_box/state.dart';
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_bootstrap.dart';
 import 'package:bett_box/services/corplink_sg_recovery.dart';
+import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/widgets/dialog.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
@@ -221,33 +222,59 @@ class AppController {
           await applyProfile(silence: true);
         }
       }
-      var healthy = false;
-      try {
-        final delay = await clashCore.getDelay(
-          'https://www.apple.com/library/test/success.html',
-          'SG-Node',
-        );
-        healthy = delay.value != null && delay.value! > 0;
-      } catch (error) {
-        commonPrint.log('[CorpLinkSG] health probe error: ${error.runtimeType}');
+      var status = SgCoreStatus.fromJson(await clashCore.getCorplinkSgStatus());
+      if (status.recovery == SgStatusRecovery.probe) {
+        // First traffic starts the lazy WireGuard handshake. The target URL
+        // result is not the tunnel's health signal; the handshake state is.
+        try {
+          await clashCore.getDelay(
+            'https://www.apple.com/library/test/success.html', 'SG-Node');
+        } catch (_) {}
+        status = SgCoreStatus.fromJson(await clashCore.getCorplinkSgStatus());
       }
-      final action = _sgRecoveryPolicy.recordProbe(healthy, DateTime.now());
+      // A completed handshake is necessary but not sufficient: the phone
+      // reproduced a ready TCP/WG socket with no working HTTPS data plane.
+      // Require two independent destinations to fail before counting a
+      // business-path failure, so one blocked website cannot churn the tunnel.
+      var healthy = status.phase == SgConnectionPhase.ready;
+      if (healthy) {
+        healthy = await _sgTargetReachable('https://chatgpt.com/robots.txt');
+        if (!healthy) {
+          healthy = await _sgTargetReachable(
+            'https://www.apple.com/library/test/success.html');
+        }
+      }
+      final action = _sgRecoveryPolicy.recordProbe(
+        healthy, DateTime.now());
       switch (action) {
         case SgRecoveryAction.none:
           break;
         case SgRecoveryAction.reconnect:
           commonPrint.log('[CorpLinkSG] health probe requested transport reconnect');
-          await clashLib?.reconnectTunnels();
+          if (status.present) {
+            await clashCore.reconnectCorplinkTunnel();
+          } else {
+            await applyProfile(silence: true);
+          }
           break;
-        case SgRecoveryAction.reauthorize:
-          commonPrint.log('[CorpLinkSG] health probe requested reauthorization');
-          await _autoAuthorizeSg(force: true);
+        case SgRecoveryAction.rebuild:
+          commonPrint.log('[CorpLinkSG] health state requested fresh outbound');
+          await applyProfile(silence: true);
           break;
       }
     } catch (error) {
       commonPrint.log('[CorpLinkSG] recovery error: ${error.runtimeType}');
     } finally {
       _sgHealthCheckInFlight = false;
+    }
+  }
+
+  Future<bool> _sgTargetReachable(String url) async {
+    try {
+      final delay = await clashCore.getDelay(url, 'SG-Node');
+      return delay.value != null && delay.value! > 0;
+    } catch (_) {
+      return false;
     }
   }
 

@@ -325,6 +325,8 @@ const _$ActionMethodEnumMap = {
   ActionMethod.flushFakeIP: 'flushFakeIP',
   ActionMethod.flushDnsCache: 'flushDnsCache',
   ActionMethod.reconnectTunnels: 'reconnectTunnels',
+  ActionMethod.getCorplinkSgStatus: 'getCorplinkSgStatus',
+  ActionMethod.reconnectCorplinkTunnel: 'reconnectCorplinkTunnel',
   ActionMethod.generateAgeKeyPair: 'generateAgeKeyPair',
   ActionMethod.convertAgeSecretKeyToPublicKey: 'convertAgeSecretKeyToPublicKey',
   ActionMethod.decryptAgeConfig: 'decryptAgeConfig',

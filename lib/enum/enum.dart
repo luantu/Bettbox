@@ -254,6 +254,8 @@ enum ActionMethod {
   flushFakeIP,
   flushDnsCache,
   reconnectTunnels,
+  getCorplinkSgStatus,
+  reconnectCorplinkTunnel,
   generateAgeKeyPair,
   convertAgeSecretKeyToPublicKey,
   decryptAgeConfig,

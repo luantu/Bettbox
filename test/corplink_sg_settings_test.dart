@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_bootstrap.dart';
 import 'package:bett_box/services/corplink_sg_recovery.dart';
+import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:synchronized/synchronized.dart';
 
@@ -232,9 +233,32 @@ void main() {
     expect(policy.recordProbe(false, start), SgRecoveryAction.none);
     final afterCooldown = start.add(const Duration(seconds: 31));
     expect(policy.recordProbe(false, afterCooldown),
-        SgRecoveryAction.reauthorize);
+        SgRecoveryAction.rebuild);
     expect(policy.recordProbe(true, afterCooldown), SgRecoveryAction.none);
     expect(policy.recordProbe(false, afterCooldown), SgRecoveryAction.none);
+  });
+
+  test('SG status favors actual handshake over website delay', () {
+    final ready = SgCoreStatus.fromJson({
+      'present': true,
+      'initialized': true,
+      'ready': true,
+      'rebuildRequired': false,
+      'tunnelIp': '10.0.0.2/32',
+      'endpoint': 'vpn.example:34080',
+    });
+    expect(ready.phase, SgConnectionPhase.ready);
+    expect(ready.recovery, SgStatusRecovery.none);
+
+    final stale = SgCoreStatus.fromJson({
+      'present': true,
+      'initialized': true,
+      'ready': true,
+      'rebuildRequired': true,
+    });
+    expect(stale.phase, SgConnectionPhase.needsRebuild);
+    expect(stale.recovery, SgStatusRecovery.rebuild);
+    expect(SgCoreStatus.fromJson({}).recovery, SgStatusRecovery.rebuild);
   });
 
   test('deferred authorization does not inherit a completed lock zone', () async {

@@ -72,10 +72,11 @@ type WireGuard struct {
 	// busyFail 记录连续业务失败（业务 dial 超时/隧道内连接失败）次数。
 	// 达到阈值（busyFailThreshold）时视为隧道 unhealthy，主动失效底层
 	// TCP 连接并触发受控重连，解决"连接看似存在但数据面无响应"的静默断链。
-	busyFail           atomic.Int32
-	busyFailResetAt    atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
-	corplinkRecoveryAt atomic.Int64 // unix nano，限制故障风暴期间的会话刷新频率
-	dohTunnelSeen      atomic.Bool  // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
+	busyFail        atomic.Int32
+	busyFailResetAt atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
+	requiresRebuild atomic.Bool  // /vpn/conn needs a fresh IP stack, not an in-place peer update
+	closed          atomic.Bool
+	dohTunnelSeen   atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
 }
 
 // tcpDialTarget reads the current endpoint instead of retaining the address
@@ -330,42 +331,12 @@ func (w *WireGuard) invalidateTunnelForBusyFailure() {
 }
 
 func (w *WireGuard) refreshCorplinkAfterTunnelFailure() {
-	if w.option.Corplink.APIServer == "" || w.device == nil {
-		return
+	if w.option.Corplink.APIServer != "" {
+		// /vpn/conn can allocate a new tunnel IP. Updating the WG peer in place
+		// leaves tunDevice and localPrefixes on the old address, so request a
+		// complete outbound replacement from the Android health controller.
+		w.requiresRebuild.Store(true)
 	}
-	now := time.Now().UnixNano()
-	last := w.corplinkRecoveryAt.Load()
-	if last != 0 && now-last < int64(15*time.Second) {
-		return
-	}
-	if !w.serverAddrMutex.TryLock() {
-		return
-	}
-	defer w.serverAddrMutex.Unlock()
-	// Re-check after acquiring the lock so concurrent failed dials coalesce
-	// into one refresh instead of repeatedly rewriting the live WG device.
-	now = time.Now().UnixNano()
-	last = w.corplinkRecoveryAt.Load()
-	if last != 0 && now-last < int64(15*time.Second) {
-		return
-	}
-	w.corplinkRecoveryAt.Store(now)
-	if err := refreshCorplinkOption(&w.option); err != nil {
-		log.Warnln("[WG](%s) corplink refresh after tunnel failure failed: %v", w.option.Name, err)
-		return
-	}
-	w.connectAddr = w.option.Addr()
-	ipcConf, err := w.genIpcConf(context.Background(), true)
-	if err != nil {
-		log.Warnln("[WG](%s) failed to rebuild peer config after corplink refresh: %v", w.option.Name, err)
-		return
-	}
-	if err := w.device.IpcSet(ipcConf); err != nil {
-		log.Warnln("[WG](%s) failed to apply refreshed peer config: %v", w.option.Name, err)
-		return
-	}
-	w.serverAddrTime.Store(time.Now())
-	log.Infoln("[WG](%s) applied refreshed corplink peer parameters after tunnel failure", w.option.Name)
 }
 
 type WireGuardOption struct {
@@ -1045,10 +1016,45 @@ func (w *WireGuard) genIpcConf(ctx context.Context, updateOnly bool) (string, er
 
 // Close implements C.ProxyAdapter
 func (w *WireGuard) Close() error {
+	w.closed.Store(true)
 	if w.device != nil {
 		w.device.Close()
 	}
 	return nil
+}
+
+// CorplinkStatus contains only connection telemetry; no cookies, keys or OTP.
+type CorplinkStatus struct {
+	Initialized     bool   `json:"initialized"`
+	Ready           bool   `json:"ready"`
+	RebuildRequired bool   `json:"rebuildRequired"`
+	Closed          bool   `json:"closed"`
+	TunnelIP        string `json:"tunnelIp"`
+	Endpoint        string `json:"endpoint"`
+}
+
+func (w *WireGuard) CorplinkStatus() CorplinkStatus {
+	status := CorplinkStatus{
+		Initialized:     w.initOk.Load(),
+		RebuildRequired: w.requiresRebuild.Load(),
+		Closed:          w.closed.Load(),
+		TunnelIP:        w.option.Ip,
+		Endpoint:        w.tcpDialTarget(),
+	}
+	if status.Initialized && !status.RebuildRequired && !status.Closed {
+		if bind, ok := w.bind.(interface{ HasReadyConn() bool }); ok {
+			status.Ready = bind.HasReadyConn()
+		} else if bind, ok := w.bind.(interface{ IsConnReady(string) bool }); ok {
+			status.Ready = bind.IsConnReady(w.connectAddr.String())
+		}
+	}
+	return status
+}
+
+// IsCorplink identifies only the managed SG outbound. Ordinary WireGuard
+// airport nodes keep the upstream mihomo lifecycle semantics.
+func (w *WireGuard) IsCorplink() bool {
+	return w.option.Corplink.APIServer != ""
 }
 
 // Reconnect forces the WireGuard transport to tear down and re-establish its

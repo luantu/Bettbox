@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/metacubex/mihomo/adapter"
+	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	"github.com/metacubex/mihomo/common/observable"
 	"github.com/metacubex/mihomo/common/utils"
@@ -334,7 +335,55 @@ func handleReconnectTunnels() bool {
 	if len(adapters) > 0 {
 		log.Infoln("[APP] reconnectTunnels: %d tunnel(s) reconnected", len(adapters))
 	}
-	return true
+	return len(adapters) > 0
+}
+
+type corplinkSgStatus struct {
+	outbound.CorplinkStatus
+	Present bool `json:"present"`
+}
+
+func corplinkStatusFromProxies(proxies map[string]constant.Proxy) corplinkSgStatus {
+	for _, name := range []string{"SG-Node", "SG-Node-Linux"} {
+		if proxy, ok := proxies[name]; ok {
+			if adapter, ok := proxy.Adapter().(interface {
+				CorplinkStatus() outbound.CorplinkStatus
+			}); ok {
+				return corplinkSgStatus{CorplinkStatus: adapter.CorplinkStatus(), Present: true}
+			}
+		}
+	}
+	return corplinkSgStatus{}
+}
+
+func handleGetCorplinkSgStatus() corplinkSgStatus {
+	runLock.Lock()
+	defer runLock.Unlock()
+	if !isInit {
+		return corplinkSgStatus{}
+	}
+	return corplinkStatusFromProxies(tunnel.Proxies())
+}
+
+func reconnectCorplinkFromProxies(proxies map[string]constant.Proxy) bool {
+	for _, name := range []string{"SG-Node", "SG-Node-Linux"} {
+		if proxy, ok := proxies[name]; ok {
+			if adapter, ok := proxy.Adapter().(interface{ Reconnect() }); ok {
+				adapter.Reconnect()
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func handleReconnectCorplinkTunnel() bool {
+	runLock.Lock()
+	defer runLock.Unlock()
+	if !isInit {
+		return false
+	}
+	return reconnectCorplinkFromProxies(tunnel.Proxies())
 }
 
 func handleCloseConnection(connectionId string) bool {

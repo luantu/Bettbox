@@ -33,6 +33,11 @@ class ClashCore {
     return clashInterface.preload();
   }
 
+  Future<Map> getCorplinkSgStatus() => clashInterface.getCorplinkSgStatus();
+
+  Future<bool> reconnectCorplinkTunnel() =>
+      clashInterface.reconnectCorplinkTunnel();
+
   static Future<void> initGeo() async {
     final homePath = await appPath.homeDirPath;
     final homeDir = Directory(homePath);

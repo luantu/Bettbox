@@ -308,7 +308,33 @@ func updateHosts(tree *trie.DomainTrie[resolver.HostValue]) {
 }
 
 func updateProxies(proxies map[string]C.Proxy, providers map[string]P.ProxyProvider) {
+	closeReplacedCorplinkProxies(tunnel.Proxies(), proxies)
 	tunnel.UpdateProxies(proxies, providers)
+}
+
+// CorpLink sessions cannot be left running after a config replacement: each
+// /vpn/conn may allocate a different tunnel address, while the old IP stack
+// keeps its original address and TCP connection alive.
+func closeReplacedCorplinkProxies(old, next map[string]C.Proxy) {
+	for _, proxy := range old {
+		adapter := proxy.Adapter()
+		corplink, ok := adapter.(interface{ IsCorplink() bool })
+		if !ok || !corplink.IsCorplink() {
+			continue
+		}
+		reused := false
+		for _, candidate := range next {
+			if candidate.Adapter() == adapter {
+				reused = true
+				break
+			}
+		}
+		if !reused {
+			if err := adapter.Close(); err != nil {
+				log.Warnln("close replaced CorpLink outbound: %v", err)
+			}
+		}
+	}
 }
 
 func updateRules(rules []C.Rule, subRules map[string][]C.Rule, ruleProviders map[string]P.RuleProvider) {
