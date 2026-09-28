@@ -49,7 +49,9 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Setup Android SDK and NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          log-accepted-android-sdk-licenses: 'false'
       - name: Install Android NDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true

@@ -22,6 +22,7 @@ const corplinkSgPasswordSecureKey = 'corplinkSg.password';
 const corplinkSgDeviceIdSecureKey = 'corplinkSg.deviceId';
 const corplinkSgDeviceNameSecureKey = 'corplinkSg.deviceName';
 const _secureStorage = FlutterSecureStorage();
+final corplinkSgLastErrorCode = ValueNotifier<String?>(null);
 
 class CorplinkSgSettings {
   final bool enabled;
@@ -142,7 +143,13 @@ Future<bool> ensureCorplinkAuthorization(
   // A settings change must not inherit the result of a login started with
   // another account or server.
   final previous = _authorizationInFlight;
-  if (previous != null) await previous;
+  if (previous != null) {
+    try {
+      await previous;
+    } catch (_) {
+      // A failed prior attempt must not prevent a new account or retry.
+    }
+  }
   final attempt = _ensureCorplinkAuthorization(settings, force: force);
   _authorizationInFlight = attempt;
   try {
@@ -164,8 +171,8 @@ Future<bool> _ensureCorplinkAuthorization(
   final home = await corplinkSgHomePath();
   final configPath = joinPath(home, 'config.json');
   final existing = await loadCorplinkConfig();
-  if (existing?['private_key'] is String &&
-      (existing?['private_key'] as String).isNotEmpty &&
+  if (!force &&
+      corplinkAuthMatchesSettings(existing, settings) &&
       existing?['code'] is String &&
       (existing?['code'] as String).isNotEmpty) {
     return true;
@@ -339,12 +346,6 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
     return true;
   }
   final identity = await _loadOrCreateAndroidIdentity(current);
-  if (_androidAuthorizationSessionKey == sessionKey &&
-      hasPersistedAuthorization &&
-      !force) {
-    return true;
-  }
-
   // The helper reuses the stable device identity and writes the refreshed
   // CookieStore/config atomically.
 
@@ -400,10 +401,13 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
           }
         } else if (event['event'] == 'success') {
           debugPrint('[APP] CorpLink helper event=success');
+          corplinkSgLastErrorCode.value = null;
           succeeded = true;
         } else if (event['event'] == 'auth_required') {
           debugPrint('[APP] CorpLink helper event=auth_required');
         } else if (event['event'] == 'error') {
+          corplinkSgLastErrorCode.value =
+              event['code']?.toString() ?? 'LOGIN_FAILED';
           debugPrint(
             '[APP] CorpLink helper event=error '
             'code=${event['code'] ?? 'unknown'} '
@@ -499,10 +503,7 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
   final rustCookiePath = joinPath(home, 'corplink_cookies.json');
   final current = await loadCorplinkConfig();
   final identity = await _loadOrCreateAndroidIdentity(current);
-  if (current?['private_key'] is String &&
-      (current?['private_key'] as String).isNotEmpty &&
-      current?['public_key'] is String &&
-      (current?['public_key'] as String).isNotEmpty &&
+  if (corplinkAuthMatchesSettings(current, settings) &&
       (File(cookiePath).existsSync() || File(rustCookiePath).existsSync())) {
     return true;
   }

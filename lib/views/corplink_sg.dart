@@ -75,7 +75,8 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           ? '飞连已停用'
           : authorized
               ? '已授权；请运行连接检查确认 WireGuard 隧道'
-              : '授权失败；SG-OpenAI 组会阻断流量，普通代理仍可用');
+              : '授权失败（${corplinkSgLastErrorCode.value ?? '请查看应用日志'}）；'
+                  'SG-OpenAI 组会阻断流量，普通代理仍可用');
     } catch (error) {
       if (!mounted) return;
       setState(() => _status = '保存或应用失败：${error.runtimeType}');
@@ -181,6 +182,12 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         ),
         const SizedBox(height: 16),
         Text(_status),
+        ValueListenableBuilder<String?>(
+          valueListenable: corplinkSgLastErrorCode,
+          builder: (_, code, _) => code == null
+              ? const SizedBox.shrink()
+              : Text('最近授权错误码：$code'),
+        ),
         const SizedBox(height: 16),
         FilledButton(
           onPressed: _busy ? null : _save,
