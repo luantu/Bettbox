@@ -54,6 +54,8 @@ class AppController {
   final SgRecoveryPolicy _sgRecoveryPolicy = SgRecoveryPolicy();
   Timer? _sgHealthTimer;
   bool _sgHealthCheckInFlight = false;
+  bool _sgAutoAuthInFlight = false;
+  DateTime? _sgNextAutoAuthAt;
 
   AppController(this.context, WidgetRef ref) : _ref = ref;
 
@@ -207,6 +209,16 @@ class AppController {
     try {
       final settings = await CorplinkSgSettings.load();
       if (!settings.enabled || !settings.isConfigured) return;
+      final activeProfile = _ref.read(currentProfileProvider);
+      if (activeProfile != null &&
+          lastProfileModified != null &&
+          !_updatingProfileIds.contains(activeProfile.id)) {
+        final modified = await activeProfile.profileLastModified;
+        if (modified > lastProfileModified!) {
+          commonPrint.log('[CorpLinkSG] active profile changed, reapplying overlay');
+          await applyProfile(silence: true);
+        }
+      }
       var healthy = false;
       try {
         final delay = await clashCore.getDelay(
@@ -227,15 +239,38 @@ class AppController {
           break;
         case SgRecoveryAction.reauthorize:
           commonPrint.log('[CorpLinkSG] health probe requested reauthorization');
-          if (await ensureCorplinkAuthorization(settings, force: true)) {
-            await applyProfile(silence: true);
-          }
+          await _autoAuthorizeSg(force: true);
           break;
       }
     } catch (error) {
       commonPrint.log('[CorpLinkSG] recovery error: ${error.runtimeType}');
     } finally {
       _sgHealthCheckInFlight = false;
+    }
+  }
+
+  Future<void> _autoAuthorizeSg({bool force = false}) async {
+    final now = DateTime.now();
+    if (_sgAutoAuthInFlight ||
+        (_sgNextAutoAuthAt != null && now.isBefore(_sgNextAutoAuthAt!))) {
+      return;
+    }
+    _sgAutoAuthInFlight = true;
+    _sgNextAutoAuthAt = now.add(const Duration(minutes: 5));
+    try {
+      final settings = await CorplinkSgSettings.load();
+      if (!settings.enabled || !settings.isConfigured) return;
+      commonPrint.log('[CorpLinkSG] automatic authorization started');
+      if (await ensureCorplinkAuthorization(settings, force: force)) {
+        await applyProfile(silence: true);
+        commonPrint.log('[CorpLinkSG] automatic authorization applied');
+      } else {
+        commonPrint.log('[CorpLinkSG] automatic authorization failed');
+      }
+    } catch (error) {
+      commonPrint.log('[CorpLinkSG] automatic authorization error: ${error.runtimeType}');
+    } finally {
+      _sgAutoAuthInFlight = false;
     }
   }
 
@@ -399,21 +434,44 @@ class AppController {
       pathConfig: realPatchConfig,
     );
     var message = await clashCore.setupConfig(params);
-    // A persisted CorpLink session can expire between app launches. Clear
-    // only renewable session files and rebuild the config once so the Android
-    // auth path can refresh CookieStore/config instead of retrying a dead
-    // session forever.
-    if (message.contains('10220001') ||
-        message.toLowerCase().contains('cookies are missing')) {
-      await invalidateCorplinkAuthorization();
+    final sgSettings = await CorplinkSgSettings.load();
+    var sgSuppressed = false;
+    if (message.isNotEmpty && sgSettings.enabled && sgSettings.isConfigured) {
+      // An optional SG outbound must not prevent the rest of the subscription
+      // from starting. Retry with the SG group visible but its node withheld.
+      if (message.contains('10220001') ||
+          message.toLowerCase().contains('cookies are missing')) {
+        await invalidateCorplinkAuthorization();
+      }
       final retryParams = await globalState.getSetupParams(
         pathConfig: realPatchConfig,
+        suppressCorplinkNode: true,
       );
-      message = await clashCore.setupConfig(retryParams);
+      final retryMessage = await clashCore.setupConfig(retryParams);
+      if (retryMessage.isEmpty) {
+        commonPrint.log('[CorpLinkSG] node failed setup; ordinary profile started');
+        message = '';
+        sgSuppressed = true;
+      } else {
+        commonPrint.log('[Core] setup without SG also failed: $retryMessage');
+      }
     }
     if (message.isNotEmpty) {
       commonPrint.log('[Core] Setup config failed: $message');
       throw message;
+    }
+    if (sgSettings.enabled && sgSettings.isConfigured) {
+      final storedAuth = await loadCorplinkConfig();
+      final sgHome = await corplinkSgHomePath();
+      final cookiePresent =
+          File(joinPath(sgHome, 'corplink_cookies.json')).existsSync() ||
+          File(joinPath(sgHome, 'bettbox_cookies.txt')).existsSync();
+      if (sgSuppressed ||
+          !corplinkAuthMatchesSettings(storedAuth, sgSettings) ||
+          !cookiePresent) {
+        // A fail-closed group lets normal proxies start while login runs.
+        unawaited(_autoAuthorizeSg(force: sgSuppressed));
+      }
     }
     if (system.isDesktop) {
       final prefs = await preferences.sharedPreferencesCompleter.future;

@@ -1354,6 +1354,11 @@ class _ToolViewState extends ConsumerState<ToolsView> {
         : _buildSearchResults(searchItems);
 
     final items = [
+      _buildModernSection(
+        context,
+        title: '飞连',
+        items: [const _CorplinkToolsItem()],
+      ),
       Consumer(
         builder: (_, ref, _) {
           final state = ref.watch(moreToolsSelectorStateProvider);
@@ -1373,7 +1378,6 @@ class _ToolViewState extends ConsumerState<ToolsView> {
         context,
         title: appLocalizations.settings,
         items: [
-          const _CorplinkToolsItem(),
           _LocaleItem(),
           _ThemeItem(),
           _BackupItem(),

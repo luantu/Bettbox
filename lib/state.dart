@@ -547,8 +547,14 @@ class GlobalState {
     );
   }
 
-  Future<SetupParams> getSetupParams({required ClashConfig pathConfig}) async {
-    final clashConfig = await patchRawConfig(patchConfig: pathConfig);
+  Future<SetupParams> getSetupParams({
+    required ClashConfig pathConfig,
+    bool suppressCorplinkNode = false,
+  }) async {
+    final clashConfig = await patchRawConfig(
+      patchConfig: pathConfig,
+      suppressCorplinkNode: suppressCorplinkNode,
+    );
     final params = SetupParams(
       config: clashConfig,
       selectedMap: config.currentProfile?.selectedMap ?? {},
@@ -561,6 +567,7 @@ class GlobalState {
   Future<Map<String, dynamic>> patchRawConfig({
     required ClashConfig patchConfig,
     Profile? profile,
+    bool suppressCorplinkNode = false,
   }) async {
     final targetProfile = profile ?? config.currentProfile;
     if (targetProfile == null) {
@@ -570,7 +577,7 @@ class GlobalState {
     final configMap = await getProfileConfig(profileId);
     // Inject before the user's JavaScript override runs, so an override can
     // reference SG-Node in proxy-groups/rules just like an airport node.
-    await applyCorplinkSgNode(configMap);
+    await applyCorplinkSgNode(configMap, suppressNode: suppressCorplinkNode);
     final rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     final originalProxyGroups = rawConfig['proxy-groups'];
 
@@ -996,7 +1003,7 @@ class GlobalState {
     rawConfig['rule'] = rules;
     // The override may create or replace proxy-groups, so re-apply the node
     // after evaluation to keep the final groups consistent as well.
-    await applyCorplinkSgNode(rawConfig);
+    await applyCorplinkSgNode(rawConfig, suppressNode: suppressCorplinkNode);
     return rawConfig;
   }
 

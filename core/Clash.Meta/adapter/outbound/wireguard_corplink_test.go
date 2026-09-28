@@ -114,6 +114,24 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 	}
 }
 
+func TestFetchCorplinkWgInfoReportsSafeVpnListErrorCode(t *testing.T) {
+	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":10220001,"message":"session token=private-value"}`)
+	}))
+	defer control.Close()
+
+	_, err := fetchCorplinkWgInfo(CorplinkOption{
+		APIServer:  control.URL,
+		CookieFile: writeCorplinkCookieFile(t),
+	})
+	if err == nil || !strings.Contains(err.Error(), "corplink vpn list code 10220001") {
+		t.Fatalf("expected safe business code, got %v", err)
+	}
+	if strings.Contains(err.Error(), "private-value") {
+		t.Fatalf("server response leaked into diagnostic: %v", err)
+	}
+}
+
 func TestCorplinkTCPDialTargetTracksRefreshedEndpoint(t *testing.T) {
 	w := &WireGuard{option: WireGuardOption{
 		WireGuardPeerOption: WireGuardPeerOption{

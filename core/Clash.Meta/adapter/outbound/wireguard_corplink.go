@@ -222,8 +222,16 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	if readErr != nil {
 		return nil, readErr
 	}
-	if listResp.StatusCode != http.StatusOK || json.Unmarshal(listBody, &nodes) != nil || nodes.Code != 0 {
-		return nil, fmt.Errorf("corplink vpn list failed")
+	if listResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("corplink vpn list HTTP %d", listResp.StatusCode)
+	}
+	if err := json.Unmarshal(listBody, &nodes); err != nil {
+		return nil, errors.New("corplink vpn list invalid response")
+	}
+	if nodes.Code != 0 {
+		// The server message may contain account or session material. Only the
+		// numeric business code is safe to forward into Android logs.
+		return nil, fmt.Errorf("corplink vpn list code %d", nodes.Code)
 	}
 	// The Feilian control plane signs a vpn-token (Set-Cookie on /api/vpn/list)
 	// that the VPN node requires on /vpn/conn. It carries uid/did(device_id)/

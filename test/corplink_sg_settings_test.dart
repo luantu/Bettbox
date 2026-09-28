@@ -66,6 +66,27 @@ void main() {
     expect(request['password'], 'secret');
   });
 
+  test('does not reuse authorization from another account or server', () {
+    const settings = CorplinkSgSettings(
+      enabled: true,
+      username: 'new-user',
+      password: 'secret',
+      server: 'https://new.example.invalid',
+    );
+    final prior = <String, dynamic>{
+      'username': 'old-user',
+      'server': 'https://old.example.invalid',
+      'private_key': 'private',
+      'public_key': 'public',
+    };
+
+    expect(corplinkAuthMatchesSettings(prior, settings), isFalse);
+    prior['username'] = 'new-user';
+    expect(corplinkAuthMatchesSettings(prior, settings), isFalse);
+    prior['server'] = 'https://new.example.invalid';
+    expect(corplinkAuthMatchesSettings(prior, settings), isTrue);
+  });
+
   test('creates a fail-closed SG group before authorization', () {
     final config = <String, dynamic>{
       'proxies': <dynamic>[],
@@ -132,6 +153,43 @@ void main() {
     expect((config['rules'] as List).where(
         (r) => r == 'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI').length, 1);
     expect((config['rules'] as List).last, 'MATCH,DIRECT');
+  });
+
+  test('withholds a failed SG node while keeping the airport profile usable', () {
+    final config = <String, dynamic>{
+      'proxies': <dynamic>[
+        <String, dynamic>{'name': 'Airport-A', 'type': 'socks5'},
+      ],
+      'proxy-groups': <dynamic>[
+        <String, dynamic>{
+          'name': 'OpenAI',
+          'type': 'select',
+          'proxies': <dynamic>['Airport-A'],
+        },
+      ],
+      'rules': <dynamic>['MATCH,OpenAI'],
+    };
+    const settings = CorplinkSgSettings(
+      enabled: true,
+      username: 'user',
+      password: 'secret',
+      server: 'https://example.invalid',
+    );
+    final auth = <String, dynamic>{
+      'username': 'user',
+      'server': 'https://example.invalid',
+      'private_key': 'private',
+      'public_key': 'public',
+    };
+    mergeCorplinkSgOverlay(config, settings: settings, auth: auth,
+        cookiePath: '/private/cookies.json');
+    mergeCorplinkSgOverlay(config, settings: settings, auth: auth,
+        cookiePath: '/private/cookies.json', suppressNode: true);
+
+    expect((config['proxies'] as List).map((p) => p['name']).toList(),
+        ['Airport-A']);
+    expect((config['proxy-groups'] as List).first['proxies'], ['Airport-A']);
+    expect((config['proxy-groups'] as List).last['proxies'], ['REJECT']);
   });
 
   test('promotes a downloaded profile over the SG bootstrap profile', () {

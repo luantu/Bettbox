@@ -21,6 +21,7 @@ import 'common/common.dart';
 import 'common/external_control.dart';
 import 'common/network_matcher.dart';
 import 'models/models.dart';
+import 'services/corplink_sg.dart';
 
 ReceivePort? _serviceReceiverPort;
 ReceivePort? _messageReceiverPort;
@@ -233,12 +234,29 @@ Future<void> _service(List<String> flags) async {
         if (profileId == null) {
           return;
         }
-        final res = await clashLibHandler.quickStart(
+        var res = await clashLibHandler.quickStart(
           InitParams(homeDir: homeDirPath, version: version),
           params,
           globalState.getCoreState(),
         );
-        debugPrint(res);
+        if (res.isNotEmpty) {
+          final settings = await CorplinkSgSettings.load();
+          if (settings.enabled && settings.isConfigured) {
+            final fallback = await globalState.getSetupParams(
+              pathConfig: clashConfig,
+              suppressCorplinkNode: true,
+            );
+            final retry = await clashLibHandler.quickStart(
+              InitParams(homeDir: homeDirPath, version: version),
+              fallback,
+              globalState.getCoreState(),
+            );
+            if (retry.isEmpty) {
+              commonPrint.log('[CorpLinkSG] quick start continued without SG node');
+              res = '';
+            }
+          }
+        }
         if (res.isNotEmpty) {
           commonPrint.log('QuickStart failed with error: $res');
           await vpn?.stop();

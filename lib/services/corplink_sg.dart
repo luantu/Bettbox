@@ -610,7 +610,10 @@ Future<Map<String, dynamic>?> loadCorplinkConfig() async {
   }
 }
 
-Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
+Future<void> applyCorplinkSgNode(
+  Map<String, dynamic> rawConfig, {
+  bool suppressNode = false,
+}) async {
   final settings = await CorplinkSgSettings.load();
   if (!settings.enabled) return;
 
@@ -632,6 +635,7 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
     settings: settings,
     auth: File(cookiePath).existsSync() ? auth : null,
     cookiePath: cookiePath,
+    suppressNode: suppressNode,
   );
 }
 
@@ -652,11 +656,13 @@ void mergeCorplinkSgOverlay(
   required CorplinkSgSettings settings,
   Map<String, dynamic>? auth,
   String? cookiePath,
+  bool suppressNode = false,
 }) {
   if (!settings.enabled) return;
   const nodeName = 'SG-Node';
   const groupName = 'SG-OpenAI';
-  final authorized = settings.isConfigured &&
+  final authorized = !suppressNode &&
+      settings.isConfigured &&
       corplinkAuthMatchesSettings(auth, settings) &&
       cookiePath != null &&
       cookiePath.isNotEmpty;
@@ -713,14 +719,15 @@ void mergeCorplinkSgOverlay(
         {'select', 'url-test', 'fallback', 'load-balance'}.contains(kind)) {
       primarySubscriptionGroup = name;
     }
-    if (!authorized || !settings.routeOpenAi) continue;
-    if (group['proxies'] is! List ||
-        (name != 'GLOBAL' && !openAiGroup.hasMatch(name))) {
-      continue;
-    }
+    if (group['proxies'] is! List) continue;
+    final targeted = name == 'GLOBAL' || openAiGroup.hasMatch(name);
+    if (authorized && !targeted) continue;
     final members = List<dynamic>.from(group['proxies'] as List);
     members.remove(nodeName);
-    group['proxies'] = <dynamic>[nodeName, ...members];
+    if (members.isEmpty) members.add('REJECT');
+    group['proxies'] = authorized && settings.routeOpenAi && targeted
+        ? <dynamic>[nodeName, ...members]
+        : members;
   }
 
   groups.add({
