@@ -67,7 +67,9 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     @Volatile
     private var quickResponseEnabled = false
     private var quickResponseJob: Job? = null
-    private var lastNetworkType: Int? = null
+    private val networkChangeLock = Any()
+    private var networkBaselineReady = false
+    private var lastUnderlyingNetwork: Network? = null
     private var lastDns = ""
 
     val networks: MutableSet<Network> = Collections.newSetFromMap(ConcurrentHashMap())
@@ -313,10 +315,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         override fun onAvailable(network: Network) {
             networks.add(network)
             handleNetworkChange()
-            // Rebuild any half-open WireGuard transport as soon as a network is
-            // usable again (a WiFi -> WiFi reconnect keeps the transport type
-            // unchanged, so handleNetworkChange alone would not notify Dart).
-            invokeDart("networkChanged")
         }
 
         override fun onLost(network: Network) {
@@ -324,7 +322,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             networkDnsMap.remove(network)
             onUpdateNetwork()
             handleNetworkChange()
-            invokeDart("networkChanged")
         }
 
         override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
@@ -344,6 +341,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (!networkCallbackRegistered.compareAndSet(false, true)) return
         runCatching {
             networks.clear()
+            synchronized(networkChangeLock) {
+                networkBaselineReady = false
+                lastUnderlyingNetwork = null
+            }
             connectivity?.registerNetworkCallback(request, callback)
         }.onFailure {
             networkCallbackRegistered.set(false)
@@ -360,34 +361,62 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }.also {
             networks.clear()
             networkDnsMap.clear()
+            synchronized(networkChangeLock) {
+                networkBaselineReady = false
+                lastUnderlyingNetwork = null
+            }
             onUpdateNetwork()
         }
     }
     
     private fun handleNetworkChange() {
-        val currentNetworkType = getCurrentNetworkType()
-        if (lastNetworkType == null) {
-            lastNetworkType = currentNetworkType
-            return
+        val current = selectedUnderlyingNetwork()
+        val changedWhileRunning = synchronized(networkChangeLock) {
+            if (!networkBaselineReady) {
+                networkBaselineReady = true
+                lastUnderlyingNetwork = current
+                false
+            } else if (current == lastUnderlyingNetwork) {
+                false
+            } else {
+                lastUnderlyingNetwork = current
+                GlobalState.currentRunState == RunState.START
+            }
         }
+        if (!changedWhileRunning) return
 
-        if (currentNetworkType != lastNetworkType) {
-            lastNetworkType = currentNetworkType
+        // VPN becoming the system's activeNetwork does not change the
+        // underlying Wi-Fi/cellular Network object, so it cannot reset a
+        // healthy CorpLink TCP session. A Wi-Fi to Wi-Fi reconnect does.
+        android.util.Log.i("VpnPlugin", "underlying network changed; reconnecting tunnels")
+        ServicePlugin.notifyNetworkChanged()
+        invokeDart("networkChanged")
 
-            ServicePlugin.notifyNetworkChanged()
-            invokeDart("networkChanged")
-
-            if (!quickResponseEnabled) return
-
+        if (quickResponseEnabled) {
             quickResponseJob?.cancel()
             quickResponseJob = scope.launch {
                 delay(150)
                 if (GlobalState.currentRunState == RunState.START) {
-                    android.util.Log.d("VpnPlugin", "Quick Response: Network changed, notifying Dart")
                     ServicePlugin.notifyQuickResponse()
                 }
             }
         }
+    }
+
+    private fun selectedUnderlyingNetwork(): Network? {
+        val cm = connectivity ?: return null
+        val active = cm.activeNetwork
+        if (active != null && networks.contains(active)) return active
+        return networks.filter { cm.getNetworkCapabilities(it) != null }
+            .maxWithOrNull(compareBy<Network> { network ->
+                val caps = cm.getNetworkCapabilities(network)
+                when {
+                    caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> 3
+                    caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> 2
+                    caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> 1
+                    else -> 0
+                }
+            }.thenBy { it.networkHandle })
     }
 
     private fun invokeDart(method: String, arguments: Any? = null) {
@@ -404,17 +433,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
     
-    private fun getCurrentNetworkType(): Int {
-        val activeNetwork = connectivity?.activeNetwork ?: return -1
-        val caps = connectivity?.getNetworkCapabilities(activeNetwork) ?: return -1
-        return when {
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 1
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 2
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> 3
-            else -> 0
-        }
-    }
-
     private suspend fun startForeground() {
         val shouldUpdate = GlobalState.runLock.withLock {
             GlobalState.currentRunState == RunState.START || GlobalState.isSmartStopped
