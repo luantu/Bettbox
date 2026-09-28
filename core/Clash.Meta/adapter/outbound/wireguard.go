@@ -537,6 +537,7 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 			if hook := dialer.DefaultSocketHook; hook != nil {
 				h := hook
 				d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+					log.Infoln("[WG](%s) protecting TCP transport socket", option.Name)
 					return h(network, address, c)
 				}
 			}

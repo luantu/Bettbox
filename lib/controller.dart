@@ -267,8 +267,11 @@ class AppController {
       } else {
         commonPrint.log('[CorpLinkSG] automatic authorization failed');
       }
-    } catch (error) {
-      commonPrint.log('[CorpLinkSG] automatic authorization error: ${error.runtimeType}');
+    } catch (error, stack) {
+      final origin = stack.toString().split('\n').first;
+      commonPrint.log(
+        '[CorpLinkSG] automatic authorization error: ${error.runtimeType} at $origin',
+      );
     } finally {
       _sgAutoAuthInFlight = false;
     }

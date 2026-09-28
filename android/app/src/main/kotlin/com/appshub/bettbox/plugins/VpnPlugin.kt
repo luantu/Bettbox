@@ -329,6 +329,12 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             networkDnsMap[network] = dnsList
             onUpdateNetwork()
         }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            // Capabilities can arrive after onAvailable. Re-evaluate the
+            // physical network choice once Wi-Fi/cellular type is known.
+            if (networks.contains(network)) handleNetworkChange()
+        }
     }
 
     private val request = NetworkRequest.Builder().apply {
@@ -407,8 +413,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val cm = connectivity ?: return null
         val active = cm.activeNetwork
         if (active != null && networks.contains(active)) return active
-        return networks.filter { cm.getNetworkCapabilities(it) != null }
-            .maxWithOrNull(compareBy<Network> { network ->
+        return networks.maxWithOrNull(compareBy<Network> { network ->
                 val caps = cm.getNetworkCapabilities(network)
                 when {
                     caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> 3

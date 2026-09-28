@@ -2,8 +2,11 @@ package com.appshub.bettbox.core
 
 import android.util.Log
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicInteger
 
 object Core {
+
+    private val protectLogCount = AtomicInteger(0)
 
     private external fun startTun(fd: Int, cb: TunInterface)
     private external fun suspend(suspended: Int)
@@ -33,7 +36,11 @@ object Core {
         startTun(fd, object : TunInterface {
             override fun protect(fd: Int) {
                 runCatching {
-                    if (!protect(fd)) {
+                    val accepted = protect(fd)
+                    if (protectLogCount.getAndIncrement() < 50) {
+                        Log.i("Core", "VpnService.protect callback accepted=$accepted")
+                    }
+                    if (!accepted) {
                         Log.w("Core", "VpnService.protect rejected outbound socket")
                     }
                 }
