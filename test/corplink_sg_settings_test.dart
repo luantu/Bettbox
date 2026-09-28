@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_bootstrap.dart';
 import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:synchronized/synchronized.dart';
 
 void main() {
   test('detects CorpLink settings changes that require profile rebuild', () {
@@ -213,5 +216,51 @@ void main() {
         SgRecoveryAction.reauthorize);
     expect(policy.recordProbe(true, afterCooldown), SgRecoveryAction.none);
     expect(policy.recordProbe(false, afterCooldown), SgRecoveryAction.none);
+  });
+
+  test('deferred authorization does not inherit a completed lock zone', () async {
+    final scheduler = SgDeferredScheduler();
+    final lifecycle = Lock(reentrant: true);
+    final completed = Completer<void>();
+
+    await lifecycle.synchronized(() async {
+      scheduler.schedule(() async {
+        try {
+          await lifecycle.synchronized(() async {});
+          completed.complete();
+        } catch (error, stack) {
+          completed.completeError(error, stack);
+        }
+      });
+    });
+
+    await completed.future.timeout(const Duration(seconds: 2));
+  });
+
+  test('periodic health checks run outside the startup lock zone', () async {
+    final scheduler = SgDeferredScheduler();
+    final lifecycle = Lock(reentrant: true);
+    final completed = Completer<void>();
+    late Timer timer;
+
+    await lifecycle.synchronized(() async {
+      timer = scheduler.run(() => Timer.periodic(
+        const Duration(milliseconds: 10),
+        (current) async {
+          current.cancel();
+          try {
+            await lifecycle.synchronized(() async {});
+            completed.complete();
+          } catch (error, stack) {
+            completed.completeError(error, stack);
+          }
+        },
+      ));
+    });
+    try {
+      await completed.future.timeout(const Duration(seconds: 2));
+    } finally {
+      timer.cancel();
+    }
   });
 }
