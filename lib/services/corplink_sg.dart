@@ -135,15 +135,31 @@ Future<(String, String)> _loadOrCreateAndroidIdentity(
   return (name, id);
 }
 
-Future<bool> ensureCorplinkAuthorization(CorplinkSgSettings settings) {
-  return _authorizationInFlight ??= _ensureCorplinkAuthorization(
-    settings,
-  ).whenComplete(() => _authorizationInFlight = null);
+Future<bool> ensureCorplinkAuthorization(
+  CorplinkSgSettings settings, {
+  bool force = false,
+}) async {
+  // A settings change must not inherit the result of a login started with
+  // another account or server.
+  final previous = _authorizationInFlight;
+  if (previous != null) await previous;
+  final attempt = _ensureCorplinkAuthorization(settings, force: force);
+  _authorizationInFlight = attempt;
+  try {
+    return await attempt;
+  } finally {
+    if (identical(_authorizationInFlight, attempt)) {
+      _authorizationInFlight = null;
+    }
+  }
 }
 
-Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
+Future<bool> _ensureCorplinkAuthorization(
+  CorplinkSgSettings settings, {
+  bool force = false,
+}) async {
   if (Platform.isAndroid) {
-    return _ensureAndroidCorplinkAuthorization(settings);
+    return _ensureAndroidCorplinkAuthorization(settings, force: force);
   }
   final home = await corplinkSgHomePath();
   final configPath = joinPath(home, 'config.json');
@@ -234,6 +250,7 @@ Future<bool> _ensureCorplinkAuthorization(CorplinkSgSettings settings) async {
 
 Future<bool> _ensureAndroidCorplinkAuthorization(
   CorplinkSgSettings settings,
+  {bool force = false}
 ) async {
   // The Rust client is the reference implementation for Feilian. It keeps a
   // domain-aware CookieStore and performs the node-side cookie migration that
@@ -245,7 +262,10 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   // legacy Dart flow: for a pure-password Feilian account the legacy flow
   // can never complete a login (it requires a TOTP completion URL), so it
   // would only convert a real helper error into a misleading LOGIN_FAILED.
-  final nativeResult = await _ensureAndroidCorplinkRsAuthorization(settings);
+  final nativeResult = await _ensureAndroidCorplinkRsAuthorization(
+    settings,
+    force: force,
+  );
   if (nativeResult == true) return true;
   if (nativeResult == null) {
     return _ensureAndroidCorplinkAuthorizationLegacy(settings);
@@ -274,6 +294,7 @@ Future<void> invalidateCorplinkAuthorization() async {
 
 Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   CorplinkSgSettings settings,
+  {bool force = false}
 ) async {
   final home = await corplinkSgHomePath();
   await Directory(home).create(recursive: true);
@@ -308,12 +329,9 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   final current = await loadCorplinkConfig();
   final sessionKey = '${settings.username}\u0000${settings.server}';
   final hasPersistedAuthorization =
-      current?['private_key'] is String &&
-      (current?['private_key'] as String).isNotEmpty &&
-      current?['public_key'] is String &&
-      (current?['public_key'] as String).isNotEmpty &&
+      corplinkAuthMatchesSettings(current, settings) &&
       File(cookiePath).existsSync();
-  if (hasPersistedAuthorization) {
+  if (hasPersistedAuthorization && !force) {
     // The core will reject an expired session and the next explicit retry can
     // re-enter the helper. Do not force a browser/Feilian login on every app
     // process restart when the persisted session is still usable.
@@ -321,14 +339,22 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
     return true;
   }
   final identity = await _loadOrCreateAndroidIdentity(current);
-  if (_androidAuthorizationSessionKey == sessionKey) return true;
+  if (_androidAuthorizationSessionKey == sessionKey &&
+      hasPersistedAuthorization &&
+      !force) {
+    return true;
+  }
 
   // The helper reuses the stable device identity and writes the refreshed
   // CookieStore/config atomically.
 
   final keyPair = await X25519().newKeyPair();
-  final publicKey = base64Encode((await keyPair.extractPublicKey()).bytes);
-  final privateKey = base64Encode(await keyPair.extractPrivateKeyBytes());
+  final publicKey = hasPersistedAuthorization
+      ? current!['public_key'].toString()
+      : base64Encode((await keyPair.extractPublicKey()).bytes);
+  final privateKey = hasPersistedAuthorization
+      ? current!['private_key'].toString()
+      : base64Encode(await keyPair.extractPrivateKeyBytes());
   final request = jsonEncode(buildAndroidCorplinkMachineRequest(
     server: settings.server.trim().replaceFirst(RegExp(r'/$'), ''),
     username: settings.username,
@@ -600,12 +626,20 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
           ? rustCookiePath
           : legacyCookiePath)
       : joinPath(home, '${interfaceName}_cookies.json');
+  final nativeLibraryDir = Platform.isAndroid
+      ? await app.getNativeLibraryDir()
+      : null;
+  final refreshCommand = nativeLibraryDir == null
+      ? null
+      : '"${joinPath(nativeLibraryDir, 'libcorplink-rs-login.so')}" '
+          '--refresh-cookie "${joinPath(home, 'config.json')}"';
 
   mergeCorplinkSgOverlay(
     rawConfig,
     settings: settings,
     auth: File(cookiePath).existsSync() ? auth : null,
     cookiePath: cookiePath,
+    refreshCommand: refreshCommand,
   );
 }
 
@@ -626,6 +660,7 @@ void mergeCorplinkSgOverlay(
   required CorplinkSgSettings settings,
   Map<String, dynamic>? auth,
   String? cookiePath,
+  String? refreshCommand,
 }) {
   if (!settings.enabled) return;
   const nodeName = 'SG-Node';
@@ -664,6 +699,8 @@ void mergeCorplinkSgOverlay(
         'corplink-device-name': auth['device_name']?.toString() ?? nodeName,
         'corplink-vpn-server-name': 'FZ-INT-Node',
         'corplink-public-key': publicKey,
+        if (refreshCommand != null)
+          'corplink-refresh-command': refreshCommand,
         'corplink-refresh-threshold-hours': 48,
         'corplink-refresh-hour': 3,
       },

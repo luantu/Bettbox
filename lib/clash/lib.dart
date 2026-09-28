@@ -127,6 +127,10 @@ class ClashLib extends ClashHandlerInterface with AndroidClashInterface {
     return invoke<bool>(method: ActionMethod.updateDns, data: value);
   }
 
+  Future<bool> reconnectTunnels() {
+    return invoke<bool>(method: ActionMethod.reconnectTunnels);
+  }
+
   @override
   Future<DateTime?> getRunTime() async {
     final runTimeString = await invoke<String>(method: ActionMethod.getRunTime);

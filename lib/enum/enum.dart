@@ -253,6 +253,7 @@ enum ActionMethod {
   setupConfig,
   flushFakeIP,
   flushDnsCache,
+  reconnectTunnels,
   generateAgeKeyPair,
   convertAgeSecretKeyToPublicKey,
   decryptAgeConfig,

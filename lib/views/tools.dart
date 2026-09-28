@@ -8,6 +8,7 @@ import 'package:bett_box/models/models.dart';
 import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/views/about.dart';
+import 'package:bett_box/views/corplink_sg.dart';
 import 'package:bett_box/views/access.dart';
 import 'package:bett_box/views/application_setting.dart';
 import 'package:bett_box/views/config/config.dart';
@@ -217,6 +218,17 @@ class _ToolViewState extends ConsumerState<ToolsView> {
     }
 
     items.addAll([
+      _SearchItem(
+        title: '飞连 SG-Node',
+        subtitle: '账号、隧道状态和连接恢复',
+        category: settingsCategory,
+        leading: const Icon(Icons.vpn_key_outlined),
+        onTap: (context, _) => _pushPage(
+          context,
+          '飞连 SG-Node',
+          const CorplinkSgView(),
+        ),
+      ),
       _SearchItem(
         title: appLocalizations.language,
         subtitle: appLocalizations.language,
@@ -1361,6 +1373,7 @@ class _ToolViewState extends ConsumerState<ToolsView> {
         context,
         title: appLocalizations.settings,
         items: [
+          const _CorplinkToolsItem(),
           _LocaleItem(),
           _ThemeItem(),
           _BackupItem(),
@@ -1562,6 +1575,23 @@ class _ConfigItem extends StatelessWidget {
       delegate: NextDelegate(
         title: appLocalizations.basicConfig,
         builder: (_) => const ConfigView(),
+      ),
+    );
+  }
+}
+
+class _CorplinkToolsItem extends StatelessWidget {
+  const _CorplinkToolsItem();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListItem.next(
+      leading: const Icon(Icons.vpn_key_outlined),
+      title: const Text('飞连 SG-Node'),
+      subtitle: const Text('独立配置、连接检查与恢复'),
+      delegate: NextDelegate(
+        title: '飞连 SG-Node',
+        builder: (_) => const CorplinkSgView(),
       ),
     );
   }

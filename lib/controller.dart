@@ -13,6 +13,8 @@ import 'package:bett_box/plugins/service.dart' as vpn_service;
 import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/services/corplink_sg.dart';
+import 'package:bett_box/services/corplink_sg_bootstrap.dart';
+import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:bett_box/widgets/dialog.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
@@ -49,6 +51,9 @@ class AppController {
   int _coreGeneration = 0;
   int _setupGeneration = 0;
   final Set<String> _updatingProfileIds = {};
+  final SgRecoveryPolicy _sgRecoveryPolicy = SgRecoveryPolicy();
+  Timer? _sgHealthTimer;
+  bool _sgHealthCheckInFlight = false;
 
   AppController(this.context, WidgetRef ref) : _ref = ref;
 
@@ -173,10 +178,13 @@ class AppController {
   Future<void> _updateStatus(bool isStart) async {
     if (isStart) {
       await _fastStart();
+      if (globalState.isStart) _startSgHealthMonitor();
       if (globalState.isStart && !_ref.read(runTimeProvider.notifier).isStart) {
         _ref.read(runTimeProvider.notifier).value = 0;
       }
     } else {
+      _sgHealthTimer?.cancel();
+      _sgHealthTimer = null;
       await globalState.handleStop();
       clashCore.resetTraffic();
       _ref.read(trafficsProvider.notifier).clear();
@@ -186,7 +194,53 @@ class AppController {
     }
   }
 
+  void _startSgHealthMonitor() {
+    if (!system.isAndroid || _sgHealthTimer != null) return;
+    _sgHealthTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      unawaited(_checkSgHealth());
+    });
+  }
+
+  Future<void> _checkSgHealth() async {
+    if (_sgHealthCheckInFlight || !globalState.isStart) return;
+    _sgHealthCheckInFlight = true;
+    try {
+      final settings = await CorplinkSgSettings.load();
+      if (!settings.enabled || !settings.isConfigured) return;
+      var healthy = false;
+      try {
+        final delay = await clashCore.getDelay(
+          'https://www.apple.com/library/test/success.html',
+          'SG-Node',
+        );
+        healthy = delay.value != null && delay.value! > 0;
+      } catch (error) {
+        commonPrint.log('[CorpLinkSG] health probe error: ${error.runtimeType}');
+      }
+      final action = _sgRecoveryPolicy.recordProbe(healthy, DateTime.now());
+      switch (action) {
+        case SgRecoveryAction.none:
+          break;
+        case SgRecoveryAction.reconnect:
+          commonPrint.log('[CorpLinkSG] health probe requested transport reconnect');
+          await clashLib?.reconnectTunnels();
+          break;
+        case SgRecoveryAction.reauthorize:
+          commonPrint.log('[CorpLinkSG] health probe requested reauthorization');
+          if (await ensureCorplinkAuthorization(settings, force: true)) {
+            await applyProfile(silence: true);
+          }
+          break;
+      }
+    } catch (error) {
+      commonPrint.log('[CorpLinkSG] recovery error: ${error.runtimeType}');
+    } finally {
+      _sgHealthCheckInFlight = false;
+    }
+  }
+
   Future<void> _fastStart() async {
+    await ensureSgBootstrapProfile();
     final currentProfile = _ref.read(currentProfileProvider);
     if (currentProfile == null) {
       commonPrint.log('Fast start aborted: No active profile configured.');
@@ -328,6 +382,7 @@ class AppController {
   }
 
   Future<bool> _setupCoreConfig({bool? enableTun}) async {
+    await ensureSgBootstrapProfile();
     final currentProfile = _ref.read(currentProfileProvider);
     if (currentProfile == null) {
       return false;
@@ -459,8 +514,47 @@ class AppController {
 
   Future<void> addProfile(Profile profile) async {
     _ref.read(profilesProvider.notifier).setProfile(profile);
-    if (_ref.read(currentProfileIdProvider) != null) return;
-    _ref.read(currentProfileIdProvider.notifier).value = profile.id;
+    final currentId = _ref.read(currentProfileIdProvider);
+    final selectedId = selectProfileAfterImport(currentId, profile.id);
+    if (selectedId != currentId) {
+      _ref.read(currentProfileIdProvider.notifier).value = selectedId;
+      applyProfileDebounce(silence: true);
+    }
+  }
+
+  Future<void> ensureSgBootstrapProfile() async {
+    final settings = await CorplinkSgSettings.load();
+    if (!settings.enabled) return;
+    final profiles = _ref.read(profilesProvider);
+    final currentId = _ref.read(currentProfileIdProvider);
+    if (profiles.any((profile) => profile.id != sgBootstrapProfileId)) {
+      if (currentId == null) {
+        _ref.read(currentProfileIdProvider.notifier).value = profiles
+            .firstWhere((profile) => profile.id != sgBootstrapProfileId)
+            .id;
+      }
+      return;
+    }
+
+    var profile = profiles.getProfile(sgBootstrapProfileId);
+    if (profile != null &&
+        currentId == sgBootstrapProfileId &&
+        await profile.check()) {
+      return;
+    }
+    profile ??= Profile.normal(label: '飞连 SG-Node').copyWith(
+      id: sgBootstrapProfileId,
+      autoUpdate: false,
+      useScriptOverride: false,
+    );
+    if (!await profile.check()) {
+      final file = await profile.getFile();
+      await file.writeAsString(sgBootstrapProfileYaml, flush: true);
+    }
+    _ref.read(profilesProvider.notifier).setProfile(profile);
+    if (currentId != sgBootstrapProfileId) {
+      _ref.read(currentProfileIdProvider.notifier).value = sgBootstrapProfileId;
+    }
   }
 
   Future<void> deleteProfile(String id) async {
@@ -1259,6 +1353,7 @@ class AppController {
     await updateTray(true);
 
     await _initCore();
+    await ensureSgBootstrapProfile();
     try {
       await _initStatus();
     } catch (e) {

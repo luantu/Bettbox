@@ -846,6 +846,7 @@ class CorplinkSgItem extends ConsumerWidget {
             final changed = corplinkSgSettingsChanged(current, result);
             await result.save();
             if (!changed) return;
+            await globalState.appController.ensureSgBootstrapProfile();
 
             if (result.enabled) {
               globalState.showNotifier('正在授权飞连 SG-Node…');
