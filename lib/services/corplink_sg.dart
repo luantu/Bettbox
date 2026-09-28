@@ -13,6 +13,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:bett_box/plugins/app.dart';
+import 'package:bett_box/plugins/vpn.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgRouteOpenAiKey = 'corplinkSg.routeOpenAi';
@@ -630,13 +631,47 @@ Future<void> applyCorplinkSgNode(
           ? rustCookiePath
           : legacyCookiePath)
       : joinPath(home, '${interfaceName}_cookies.json');
+  String? controlIP;
+  if (Platform.isAndroid && !suppressNode && auth != null) {
+    final host = Uri.tryParse(settings.server.trim())?.host;
+    if (host != null && host.isNotEmpty && InternetAddress.tryParse(host) == null) {
+      try {
+        final physicalAddresses = await Vpn()
+            .resolveUnderlyingHost(host)
+            .timeout(const Duration(seconds: 4));
+        controlIP = selectCorplinkPhysicalIP(physicalAddresses);
+      } catch (_) {
+        // The core retains the last successfully connected management IP.
+        // A temporary physical DNS outage must not discard the whole profile.
+      }
+    }
+  }
   mergeCorplinkSgOverlay(
     rawConfig,
     settings: settings,
     auth: File(cookiePath).existsSync() ? auth : null,
     cookiePath: cookiePath,
+    controlIP: controlIP,
     suppressNode: suppressNode,
   );
+}
+
+String? selectCorplinkPhysicalIP(Iterable<String> addresses) {
+  String? ipv6;
+  for (final text in addresses) {
+    final address = InternetAddress.tryParse(text);
+    if (address == null) continue;
+    final bytes = address.rawAddress;
+    if (address.type == InternetAddressType.IPv4 &&
+        bytes.length == 4 &&
+        bytes[0] == 198 &&
+        (bytes[1] == 18 || bytes[1] == 19)) {
+      continue;
+    }
+    if (address.type == InternetAddressType.IPv4) return address.address;
+    ipv6 ??= address.address;
+  }
+  return ipv6;
 }
 
 bool corplinkAuthMatchesSettings(
@@ -656,6 +691,7 @@ void mergeCorplinkSgOverlay(
   required CorplinkSgSettings settings,
   Map<String, dynamic>? auth,
   String? cookiePath,
+  String? controlIP,
   bool suppressNode = false,
 }) {
   if (!settings.enabled) return;
@@ -690,6 +726,7 @@ void mergeCorplinkSgOverlay(
       'dns': ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query'],
       'corplink': {
         'corplink-api-server': apiServer,
+        if (controlIP != null) 'corplink-control-ip': controlIP,
         'corplink-code': auth['code']?.toString() ?? '',
         'corplink-cookie-file': cookiePath,
         'corplink-device-id': auth['device_id']?.toString() ?? '',

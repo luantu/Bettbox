@@ -90,6 +90,23 @@ func (c *corplinkAddressCache) store(address, dialAddress string) {
 	c.mu.Unlock()
 }
 
+// primeCorplinkControlAddress accepts an address resolved on Android's
+// physical Network, never an IP supplied by the user or by VPN DNS.
+func primeCorplinkControlAddress(c *corplinkAddressCache, baseURL, physicalIP string) {
+	if net.ParseIP(physicalIP) == nil {
+		return
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Hostname() == "" || u.Scheme != "https" {
+		return
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+	c.store(net.JoinHostPort(u.Hostname(), port), net.JoinHostPort(physicalIP, port))
+}
+
 func (c *corplinkAddressCache) dial(ctx context.Context, network, address string, hook dialer.SocketControl) (net.Conn, error) {
 	d := net.Dialer{Timeout: 5 * time.Second}
 	if hook != nil {
@@ -116,6 +133,10 @@ type CorplinkOption struct {
 	// APIServer 为 corplink 控制面地址（如 https://140.224.74.169:34443），
 	// 用于调用 /vpn/conn 获取会话信息。为空时不做认证。
 	APIServer string `proxy:"corplink-api-server,omitempty"`
+	// ControlIP is the management hostname resolved on Android's underlying
+	// physical Network. It is optional; the last successful address is the
+	// fallback while no physical network is available.
+	ControlIP string `proxy:"corplink-control-ip,omitempty"`
 	// Code 为 base32 编码的 TOTP 密钥（corplink config.json 的 code 字段）。
 	Code string `proxy:"corplink-code,omitempty"`
 	// CookieFile 为 corplink 保存的 cookie 文件路径（utun16_cookies.json）。
@@ -234,6 +255,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	// dialer.DefaultSocketHook is VpnService.protect on Android and nil on
 	// other platforms, so this is a no-op outside Android.
 	if hook := dialer.DefaultSocketHook; hook != nil {
+		primeCorplinkControlAddress(corplinkControlAddresses, base, opt.ControlIP)
 		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 			return corplinkControlAddresses.dial(ctx, network, address, hook)
 		}

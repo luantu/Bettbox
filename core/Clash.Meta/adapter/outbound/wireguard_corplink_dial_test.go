@@ -66,3 +66,16 @@ func TestCorplinkControlDialNeverCachesFakeIP(t *testing.T) {
 		t.Fatalf("real address was not cached: %q valid=%v", cached, ok)
 	}
 }
+
+func TestCorplinkControlIPSeedsPhysicalAddress(t *testing.T) {
+	cache := newCorplinkAddressCache(time.Minute)
+	base := "https://management.example:10443"
+	primeCorplinkControlAddress(cache, base, "203.0.113.8")
+	if got, ok := cache.lookup("management.example:10443"); !ok || got != "203.0.113.8:10443" {
+		t.Fatalf("physical control address = %q, valid=%v", got, ok)
+	}
+	primeCorplinkControlAddress(cache, base, "198.18.0.8")
+	if got, _ := cache.lookup("management.example:10443"); got != "203.0.113.8:10443" {
+		t.Fatalf("fake IP replaced known physical address: %q", got)
+	}
+}

@@ -113,6 +113,15 @@ void main() {
     expect((config['rules'] as List).first, 'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI');
   });
 
+  test('selects a physical control address, never VPN fake IP', () {
+    expect(
+      selectCorplinkPhysicalIP(['198.18.0.5', '2001:db8::1', '203.0.113.8']),
+      '203.0.113.8',
+    );
+    expect(selectCorplinkPhysicalIP(['198.19.1.4']), isNull);
+    expect(selectCorplinkPhysicalIP(['2001:db8::1']), '2001:db8::1');
+  });
+
   test('merges authorized SG node once and preserves subscription routing', () {
     final config = <String, dynamic>{
       'proxies': <dynamic>[
@@ -144,12 +153,14 @@ void main() {
     };
 
     mergeCorplinkSgOverlay(config, settings: settings, auth: auth,
-        cookiePath: '/private/cookies.json');
+        cookiePath: '/private/cookies.json', controlIP: '203.0.113.8');
     mergeCorplinkSgOverlay(config, settings: settings, auth: auth,
-        cookiePath: '/private/cookies.json');
+        cookiePath: '/private/cookies.json', controlIP: '203.0.113.8');
 
     expect((config['proxies'] as List).map((p) => p['name']).toList(),
         ['Airport-A', 'SG-Node']);
+    expect((config['proxies'] as List).last['corplink']['corplink-control-ip'],
+        '203.0.113.8');
     final groups = config['proxy-groups'] as List;
     expect(groups.where((g) => g['name'] == 'SG-OpenAI').length, 1);
     expect((groups.first['proxies'] as List), ['SG-Node', 'Airport-A']);

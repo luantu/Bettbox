@@ -69,6 +69,14 @@ class Vpn {
         const [];
   }
 
+  Future<List<String>> resolveUnderlyingHost(String host) async {
+    return await methodChannel.invokeListMethod<String>(
+          'resolveUnderlyingHost',
+          {'host': host},
+        ) ??
+        const [];
+  }
+
   Future<void> setSmartStopped(bool value) async {
     await methodChannel.invokeMethod<bool>('setSmartStopped', {'value': value});
   }

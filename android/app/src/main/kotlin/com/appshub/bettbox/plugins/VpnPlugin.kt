@@ -191,6 +191,29 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(getLocalIpAddresses())
             }
 
+            "resolveUnderlyingHost" -> {
+                val host = call.argument<String>("host")?.trim().orEmpty()
+                if (host.isBlank()) {
+                    result.success(emptyList<String>())
+                } else {
+                    // VpnService.protect only bypasses VPN routing for a
+                    // socket. Resolve the management hostname on the same
+                    // physical Wi-Fi/cellular Network, not VPN fake-IP DNS.
+                    scope.launch(Dispatchers.IO) {
+                        val addresses = runCatching {
+                            selectedUnderlyingNetwork()
+                                ?.getAllByName(host)
+                                ?.mapNotNull { it.hostAddress }
+                                ?.filter { it.isNotBlank() }
+                                ?: emptyList()
+                        }.getOrElse { emptyList() }
+                        withContext(Dispatchers.Main) {
+                            result.success(addresses)
+                        }
+                    }
+                }
+            }
+
             "setSmartStopped" -> {
                 val value = call.argument<Boolean>("value") ?: false
                 GlobalState.isSmartStopped = value
