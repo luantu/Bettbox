@@ -282,6 +282,43 @@ void main() {
     expect(SgCoreStatus.fromJson({}).recovery, SgStatusRecovery.rebuild);
   });
 
+  test('first SG probe retries after VPN settles and reconnects', () async {
+    final events = <String>[];
+    var probes = 0;
+    final ok = await recoverInitialSgConnection(
+      probe: () async {
+        events.add('probe');
+        return ++probes == 2;
+      },
+      readStatus: () async => SgCoreStatus.fromJson({
+        'present': true, 'initialized': true, 'ready': false,
+      }),
+      reconnect: () async {
+        events.add('reconnect');
+        return true;
+      },
+      rebuild: () async { events.add('rebuild'); },
+      settle: () async { events.add('settle'); },
+    );
+    expect(ok, isTrue);
+    expect(events, ['probe', 'settle', 'reconnect', 'probe']);
+  });
+
+  test('initial probe does not churn a ready tunnel for a blocked site', () async {
+    var reconnects = 0;
+    final ok = await recoverInitialSgConnection(
+      probe: () async => false,
+      readStatus: () async => SgCoreStatus.fromJson({
+        'present': true, 'initialized': true, 'ready': true,
+      }),
+      reconnect: () async { reconnects++; return true; },
+      rebuild: () async { reconnects++; },
+      settle: () async {},
+    );
+    expect(ok, isFalse);
+    expect(reconnects, 0);
+  });
+
   test('deferred authorization does not inherit a completed lock zone', () async {
     final scheduler = SgDeferredScheduler();
     final lifecycle = Lock(reentrant: true);

@@ -47,3 +47,32 @@ class SgCoreStatus {
           SgStatusRecovery.rebuild,
       };
 }
+
+/// Bring up the lazy tunnel after Android VpnService starts. A failed website
+/// request alone is not evidence that a completed WireGuard handshake failed.
+Future<bool> recoverInitialSgConnection({
+  required Future<bool> Function() probe,
+  required Future<SgCoreStatus> Function() readStatus,
+  required Future<bool> Function() reconnect,
+  required Future<void> Function() rebuild,
+  required Future<void> Function() settle,
+}) async {
+  if (await probe()) return true;
+  var status = await readStatus();
+  if (status.phase == SgConnectionPhase.ready) return false;
+  if (status.recovery == SgStatusRecovery.rebuild) {
+    await rebuild();
+    return probe();
+  }
+
+  await settle();
+  if (!await reconnect()) {
+    await rebuild();
+    return probe();
+  }
+  if (await probe()) return true;
+  status = await readStatus();
+  if (status.phase == SgConnectionPhase.ready) return false;
+  await rebuild();
+  return probe();
+}

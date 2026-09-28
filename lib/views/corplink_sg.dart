@@ -86,7 +86,13 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
             }
             break;
           case SgStatusRecovery.probe:
-            await _probeChatGpt();
+            await recoverInitialSgConnection(
+              probe: _probeChatGpt,
+              readStatus: _readStatus,
+              reconnect: clashCore.reconnectCorplinkTunnel,
+              rebuild: () => globalState.appController.applyProfile(silence: true),
+              settle: () => Future<void>.delayed(const Duration(seconds: 2)),
+            );
             break;
           case SgStatusRecovery.reconnect:
             await clashCore.reconnectCorplinkTunnel();
