@@ -1,4 +1,6 @@
 import 'package:bett_box/services/corplink_sg.dart';
+import 'package:bett_box/services/corplink_sg_bootstrap.dart';
+import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -130,5 +132,28 @@ void main() {
     expect((config['rules'] as List).where(
         (r) => r == 'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI').length, 1);
     expect((config['rules'] as List).last, 'MATCH,DIRECT');
+  });
+
+  test('promotes a downloaded profile over the SG bootstrap profile', () {
+    expect(selectProfileAfterImport(sgBootstrapProfileId, 'subscription-1'),
+        'subscription-1');
+    expect(selectProfileAfterImport('user-selected', 'subscription-2'),
+        'user-selected');
+    expect(selectProfileAfterImport(null, 'subscription-3'),
+        'subscription-3');
+  });
+
+  test('recovers only after repeated failures and backs off', () {
+    final policy = SgRecoveryPolicy();
+    final start = DateTime.utc(2026, 9, 28);
+    expect(policy.recordProbe(false, start), SgRecoveryAction.none);
+    expect(policy.recordProbe(false, start), SgRecoveryAction.none);
+    expect(policy.recordProbe(false, start), SgRecoveryAction.reconnect);
+    expect(policy.recordProbe(false, start), SgRecoveryAction.none);
+    final afterCooldown = start.add(const Duration(seconds: 31));
+    expect(policy.recordProbe(false, afterCooldown),
+        SgRecoveryAction.reauthorize);
+    expect(policy.recordProbe(true, afterCooldown), SgRecoveryAction.none);
+    expect(policy.recordProbe(false, afterCooldown), SgRecoveryAction.none);
   });
 }

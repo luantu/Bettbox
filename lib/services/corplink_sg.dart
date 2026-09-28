@@ -585,153 +585,147 @@ Future<Map<String, dynamic>?> loadCorplinkConfig() async {
 
 Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
   final settings = await CorplinkSgSettings.load();
-  // Do not launch either login flow while the user is still entering the
-  // three required values. This keeps first launch on Bettbox's settings
-  // page instead of unexpectedly opening Feishu because secure password
-  // storage is empty after an uninstall/signature change.
-  if (!settings.enabled || !settings.isConfigured) return;
+  if (!settings.enabled) return;
 
-  // Authorization is an explicit user action. Config evaluation must remain
-  // side-effect free so an optional SG-Node failure cannot break Bettbox.
-  final auth = await loadCorplinkConfig();
-  if (auth == null) return;
-  final proxies =
-      (rawConfig['proxies'] as List?)?.cast<dynamic>() ?? <dynamic>[];
-  const name = 'SG-Node';
-  proxies.removeWhere((item) => item is Map && item['name'] == name);
+  // The downloaded profile is read afresh for every apply. This overlay is
+  // deliberately repeatable because scripts may replace the group list.
+  final stored = await loadCorplinkConfig();
+  final auth = corplinkAuthMatchesSettings(stored, settings) ? stored : null;
   final home = await corplinkSgHomePath();
-  final interfaceName = auth['interface_name']?.toString() ?? 'wgdevtest22';
-  // The machine-mode Rust helper writes CookieStore JSON. Keep the old plain
-  // Android cookie file as a fallback for upgrades, but never let a stale
-  // legacy file shadow a freshly refreshed session.
+  final interfaceName = auth?['interface_name']?.toString() ?? 'bettboxsg';
   final rustCookiePath = joinPath(home, 'corplink_cookies.json');
-  final legacyAndroidCookiePath = joinPath(home, 'bettbox_cookies.txt');
+  final legacyCookiePath = joinPath(home, 'bettbox_cookies.txt');
   final cookiePath = Platform.isAndroid
       ? (File(rustCookiePath).existsSync()
           ? rustCookiePath
-          : legacyAndroidCookiePath)
+          : legacyCookiePath)
       : joinPath(home, '${interfaceName}_cookies.json');
-  final apiServer = settings.server.trim();
-  final privateKey = auth['private_key']?.toString() ?? '';
-  final publicKey = auth['public_key']?.toString() ?? '';
-  final code = auth['code']?.toString() ?? '';
-  if (privateKey.isEmpty || publicKey.isEmpty) return;
 
-  proxies.add({
-    'name': name,
-    'type': 'wireguard',
-    'ip': '0.0.0.0',
-    'private-key': privateKey,
-    'server': Uri.tryParse(apiServer)?.host ?? apiServer,
-    'port': 34080,
-    'public-key': publicKey,
-    'allowed-ips': ['0.0.0.0/0'],
-    'tcp': true,
-    'udp': true,
-    'mtu': 1400,
-    'persistent-keepalive': 25,
-    'remote-dns-resolve': true,
-    'dns': [
-      'https://1.1.1.1/dns-query',
-      'https://8.8.8.8/dns-query',
-    ],
-    'corplink': {
-      'corplink-api-server': apiServer,
-      'corplink-code': code,
-      'corplink-cookie-file': cookiePath,
-      'corplink-device-id': auth['device_id']?.toString() ?? '',
-      'corplink-device-name': auth['device_name']?.toString() ?? name,
-      // FZ-INT-Node is the TCP/SG node used by the current Feilian
-      // deployment. Mihomo resolves its actual endpoint through /api/vpn/list.
-      'corplink-vpn-server-name': 'FZ-INT-Node',
-      'corplink-public-key': publicKey,
-      'corplink-refresh-threshold-hours': 48,
-      'corplink-refresh-hour': 3,
-    },
-  });
+  mergeCorplinkSgOverlay(
+    rawConfig,
+    settings: settings,
+    auth: File(cookiePath).existsSync() ? auth : null,
+    cookiePath: cookiePath,
+  );
+}
+
+bool corplinkAuthMatchesSettings(
+  Map<String, dynamic>? auth,
+  CorplinkSgSettings settings,
+) {
+  if (auth == null) return false;
+  final server = settings.server.trim().replaceFirst(RegExp(r'/$'), '');
+  return auth['username']?.toString() == settings.username.trim() &&
+      auth['server']?.toString().replaceFirst(RegExp(r'/$'), '') == server &&
+      (auth['private_key']?.toString().isNotEmpty ?? false) &&
+      (auth['public_key']?.toString().isNotEmpty ?? false);
+}
+
+void mergeCorplinkSgOverlay(
+  Map<String, dynamic> rawConfig, {
+  required CorplinkSgSettings settings,
+  Map<String, dynamic>? auth,
+  String? cookiePath,
+}) {
+  if (!settings.enabled) return;
+  const nodeName = 'SG-Node';
+  const groupName = 'SG-OpenAI';
+  final authorized = settings.isConfigured &&
+      corplinkAuthMatchesSettings(auth, settings) &&
+      cookiePath != null &&
+      cookiePath.isNotEmpty;
+
+  final proxies = List<dynamic>.from(rawConfig['proxies'] as List? ?? const []);
+  proxies.removeWhere((item) => item is Map && item['name'] == nodeName);
+  if (authorized) {
+    final apiServer = settings.server.trim();
+    final privateKey = auth!['private_key'].toString();
+    final publicKey = auth['public_key'].toString();
+    proxies.add({
+      'name': nodeName,
+      'type': 'wireguard',
+      'ip': '0.0.0.0',
+      'private-key': privateKey,
+      'server': Uri.parse(apiServer).host,
+      'port': 34080,
+      'public-key': publicKey,
+      'allowed-ips': ['0.0.0.0/0'],
+      'tcp': true,
+      'udp': true,
+      'mtu': 1400,
+      'persistent-keepalive': 25,
+      'remote-dns-resolve': true,
+      'dns': ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query'],
+      'corplink': {
+        'corplink-api-server': apiServer,
+        'corplink-code': auth['code']?.toString() ?? '',
+        'corplink-cookie-file': cookiePath,
+        'corplink-device-id': auth['device_id']?.toString() ?? '',
+        'corplink-device-name': auth['device_name']?.toString() ?? nodeName,
+        'corplink-vpn-server-name': 'FZ-INT-Node',
+        'corplink-public-key': publicKey,
+        'corplink-refresh-threshold-hours': 48,
+        'corplink-refresh-hour': 3,
+      },
+    });
+  }
   rawConfig['proxies'] = proxies;
 
-  final groups =
-      (rawConfig['proxy-groups'] as List?)?.cast<dynamic>() ?? <dynamic>[];
-  final openAiGroupNamePattern = RegExp(r'openai|chatgpt', caseSensitive: false);
-  final isOpenAiRoutingEnabled = settings.routeOpenAi;
+  final groups = List<dynamic>.from(
+    rawConfig['proxy-groups'] as List? ?? const [],
+  );
+  groups.removeWhere((group) => group is Map && group['name'] == groupName);
+  final openAiGroup = RegExp(r'openai|chatgpt', caseSensitive: false);
+  String? primarySubscriptionGroup;
   for (final group in groups) {
     if (group is! Map) continue;
-    final list = group['proxies'];
-    final groupName = group['name']?.toString() ?? '';
-    final isOpenAiGroup = openAiGroupNamePattern.hasMatch(groupName);
-    final isGlobalGroup = groupName.toLowerCase() == 'global';
-    if (list is List && (isGlobalGroup || (isOpenAiRoutingEnabled && isOpenAiGroup))) {
-      if (!list.contains(name)) list.insert(0, name);
+    final name = group['name']?.toString() ?? '';
+    final kind = group['type']?.toString().toLowerCase();
+    if (name != 'GLOBAL' &&
+        !openAiGroup.hasMatch(name) &&
+        primarySubscriptionGroup == null &&
+        {'select', 'url-test', 'fallback', 'load-balance'}.contains(kind)) {
+      primarySubscriptionGroup = name;
     }
+    if (!authorized || !settings.routeOpenAi) continue;
+    if (group['proxies'] is! List ||
+        (name != 'GLOBAL' && !openAiGroup.hasMatch(name))) {
+      continue;
+    }
+    final members = List<dynamic>.from(group['proxies'] as List);
+    members.remove(nodeName);
+    group['proxies'] = <dynamic>[nodeName, ...members];
   }
+
+  groups.add({
+    'name': groupName,
+    'type': 'select',
+    'proxies': authorized
+        ? <String>[nodeName, if (primarySubscriptionGroup != null) primarySubscriptionGroup]
+        : <String>['REJECT'],
+  });
   rawConfig['proxy-groups'] = groups;
 
-  const sgOpenAiGroupName = 'SG-OpenAI';
-  if (isOpenAiRoutingEnabled) {
-    String? primarySubscriptionGroup;
-    for (final g in groups) {
-      if (g is! Map) continue;
-      final groupName = g['name']?.toString() ?? '';
-      final groupType = g['type']?.toString().toLowerCase();
-      if (groupName.toLowerCase() == 'global' ||
-          groupName == sgOpenAiGroupName ||
-          openAiGroupNamePattern.hasMatch(groupName)) {
-        continue;
-      }
-      if (groupType == 'select' ||
-          groupType == 'url-test' ||
-          groupType == 'fallback' ||
-          groupType == 'load-balance') {
-        primarySubscriptionGroup = groupName;
-        break;
-      }
-    }
-    final sgOpenAiProxies = <String>[
-      name,
-      if (primarySubscriptionGroup != null) primarySubscriptionGroup,
-      'DIRECT',
-    ];
-    groups.removeWhere((g) =>
-        g is Map && g['name']?.toString() == sgOpenAiGroupName);
-    groups.add({
-      'name': sgOpenAiGroupName,
-      'type': 'select',
-      'proxies': sgOpenAiProxies,
-    });
-    rawConfig['proxy-groups'] = groups;
-
-    const openAiRules = <String>[
-      'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,openai.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,chat.openai.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,api.openai.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,platform.openai.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,auth0.openai.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,cdn.openai.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,openaiusercontent.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,oaistatic.com,SG-OpenAI',
-      'DOMAIN-SUFFIX,oaiusercontent.com,SG-OpenAI',
-      'DOMAIN-KEYWORD,openai,SG-OpenAI',
-      'DOMAIN-KEYWORD,chatgpt,SG-OpenAI',
-    ];
-    final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
-    final rules = rawConfig[rulesKey] is List
-        ? (rawConfig[rulesKey] as List).cast<dynamic>()
-        : <dynamic>[];
-    rules.removeWhere((r) =>
-        r is String && r.endsWith(',$sgOpenAiGroupName'));
-    rawConfig[rulesKey] = <dynamic>[...openAiRules, ...rules];
-    rawConfig.remove(rulesKey == 'rule' ? 'rules' : 'rule');
-  } else {
-    groups.removeWhere((g) =>
-        g is Map && g['name']?.toString() == sgOpenAiGroupName);
-    rawConfig['proxy-groups'] = groups;
-    final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
-    if (rawConfig[rulesKey] is List) {
-      (rawConfig[rulesKey] as List).removeWhere((r) =>
-          r is String && r.endsWith(',$sgOpenAiGroupName'));
-    }
-    rawConfig.remove(rulesKey == 'rule' ? 'rules' : 'rule');
-  }
+  final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
+  final rules = List<dynamic>.from(rawConfig[rulesKey] as List? ?? const []);
+  rules.removeWhere((rule) => rule is String && rule.endsWith(',$groupName'));
+  rawConfig[rulesKey] = settings.routeOpenAi
+      ? <dynamic>[...corplinkOpenAiRules, ...rules]
+      : rules;
+  rawConfig.remove(rulesKey == 'rules' ? 'rule' : 'rules');
 }
+
+const corplinkOpenAiRules = <String>[
+  'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,openai.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,chat.openai.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,api.openai.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,platform.openai.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,auth0.openai.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,cdn.openai.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,openaiusercontent.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,oaistatic.com,SG-OpenAI',
+  'DOMAIN-SUFFIX,oaiusercontent.com,SG-OpenAI',
+  'DOMAIN-KEYWORD,openai,SG-OpenAI',
+  'DOMAIN-KEYWORD,chatgpt,SG-OpenAI',
+];
