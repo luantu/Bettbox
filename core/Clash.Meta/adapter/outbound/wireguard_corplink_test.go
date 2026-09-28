@@ -6,13 +6,31 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/dns"
 )
+
+func TestConfiguredDoHEndpointMatchesOnlyHTTPSResolver(t *testing.T) {
+	servers := []string{"https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"}
+	resolver := &C.Metadata{DstIP: netip.MustParseAddr("1.1.1.1"), DstPort: 443}
+	if !configuredDoHEndpoint(resolver, servers) {
+		t.Fatal("configured DoH endpoint was not recognized")
+	}
+	otherPort := &C.Metadata{DstIP: netip.MustParseAddr("1.1.1.1"), DstPort: 80}
+	if configuredDoHEndpoint(otherPort, servers) {
+		t.Fatal("non-DoH port was recognized as a DoH endpoint")
+	}
+	otherIP := &C.Metadata{DstIP: netip.MustParseAddr("9.9.9.9"), DstPort: 443}
+	if configuredDoHEndpoint(otherIP, servers) {
+		t.Fatal("unconfigured address was recognized as a DoH endpoint")
+	}
+}
 
 func writeCorplinkCookieFile(t *testing.T) string {
 	t.Helper()

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,6 +75,7 @@ type WireGuard struct {
 	busyFail           atomic.Int32
 	busyFailResetAt    atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
 	corplinkRecoveryAt atomic.Int64 // unix nano，限制故障风暴期间的会话刷新频率
+	dohTunnelSeen      atomic.Bool  // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
 }
 
 // tcpDialTarget reads the current endpoint instead of retaining the address
@@ -729,6 +731,30 @@ func routeCorplinkDNSThroughTunnel(servers []dns.NameServer, tunnel C.ProxyAdapt
 	return servers
 }
 
+// configuredDoHEndpoint identifies the resolver transport, not an arbitrary
+// destination. The one-time runtime log at DialContext confirms that a DoH
+// socket was opened by the WireGuard IP stack rather than Android's DNS path.
+func configuredDoHEndpoint(metadata *C.Metadata, servers []string) bool {
+	if metadata == nil {
+		return false
+	}
+	remote := metadata.RemoteAddress()
+	for _, raw := range servers {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+			continue
+		}
+		port := u.Port()
+		if port == "" {
+			port = "443"
+		}
+		if remote == net.JoinHostPort(u.Hostname(), port) {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *WireGuard) resolve(ctx context.Context, address M.Socksaddr) (netip.AddrPort, error) {
 	if address.Addr.IsValid() {
 		return address.AddrPort(), nil
@@ -1031,15 +1057,19 @@ func (w *WireGuard) Close() error {
 // dropped and whose read blocks forever, and neither the 90s idle watchdog nor
 // the keepalive probe recovers it quickly enough. Closing the transport here
 // makes the next business dial (or keepalive send) rebuild it via the normal
-// lazy-dial path. The CorpLink session itself is not touched: the assigned
-// tunnel IP / peer endpoint survive a client-side network change, so refreshing
-// here would only add a failing fetch during the offline window.
+// lazy-dial path. A fresh WireGuard handshake is also mandatory: the old
+// Noise keypair can still be valid after TCP is replaced, so keepalives alone
+// would never mark the new transport ready. The CorpLink management session
+// is not touched during the transient offline window.
 func (w *WireGuard) Reconnect() {
 	if !w.option.TCP {
 		return
 	}
 	if tcpBind, ok := w.bind.(interface{ ReconnectTransport() }); ok {
 		tcpBind.ReconnectTransport()
+		if rekeyer, ok := w.device.(interface{ RestartHandshakeForPeers() }); ok {
+			rekeyer.RestartHandshakeForPeers()
+		}
 	}
 	log.Infoln("[WG](%s) transport reset after network change", w.option.Name)
 }
@@ -1103,6 +1133,11 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 			w.invalidateTunnelForBusyFailure()
 		}
 		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
+	}
+	if w.option.Corplink.APIServer != "" &&
+		configuredDoHEndpoint(metadata, w.option.Dns) &&
+		w.dohTunnelSeen.CompareAndSwap(false, true) {
+		log.Infoln("[WG](%s) DoH resolver TCP connected through WireGuard tunnel", w.option.Name)
 	}
 	w.recordBusySuccess()
 	return NewConn(conn, w), nil

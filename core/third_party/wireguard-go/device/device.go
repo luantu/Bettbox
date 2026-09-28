@@ -61,9 +61,9 @@ type Device struct {
 	// (feilian) peers override it via NewDeviceWithIdentifier so the server
 	// can successfully decrypt the initiation/response handshake messages.
 	handshakeParams struct {
-		identifier       []byte
-		initialHash      [blake2s.Size]byte
-		initialChainKey  [blake2s.Size]byte
+		identifier      []byte
+		initialHash     [blake2s.Size]byte
+		initialChainKey [blake2s.Size]byte
 	}
 
 	// handshakeListeners are optional callbacks wired by the embedder (mihomo)
@@ -474,6 +474,27 @@ func (device *Device) SendKeepalivesToPeersWithCurrentKeypair() {
 		}
 	}
 	device.peers.RUnlock()
+}
+
+// RestartHandshakeForPeers is called after an external TCP transport is
+// replaced. The old Noise keypair may still be valid, so a normal keepalive
+// would not produce a handshake-complete event for the new TCP connection.
+// Expiring it and initiating a fresh handshake makes transport readiness
+// correspond to a verified WireGuard session again.
+func (device *Device) RestartHandshakeForPeers() {
+	if !device.isUp() {
+		return
+	}
+	device.ipcMutex.Lock()
+	defer device.ipcMutex.Unlock()
+	device.peers.RLock()
+	defer device.peers.RUnlock()
+	for _, peer := range device.peers.keyMap {
+		peer.ExpireCurrentKeypairs()
+		if err := peer.SendHandshakeInitiation(false); err != nil {
+			device.log.Errorf("Failed to restart handshake after transport reset: %v", err)
+		}
+	}
 }
 
 // closeBindLocked closes the device's net.bind.
