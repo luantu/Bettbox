@@ -626,20 +626,11 @@ Future<void> applyCorplinkSgNode(Map<String, dynamic> rawConfig) async {
           ? rustCookiePath
           : legacyCookiePath)
       : joinPath(home, '${interfaceName}_cookies.json');
-  final nativeLibraryDir = Platform.isAndroid
-      ? await app.getNativeLibraryDir()
-      : null;
-  final refreshCommand = nativeLibraryDir == null
-      ? null
-      : '"${joinPath(nativeLibraryDir, 'libcorplink-rs-login.so')}" '
-          '--refresh-cookie "${joinPath(home, 'config.json')}"';
-
   mergeCorplinkSgOverlay(
     rawConfig,
     settings: settings,
     auth: File(cookiePath).existsSync() ? auth : null,
     cookiePath: cookiePath,
-    refreshCommand: refreshCommand,
   );
 }
 
@@ -660,7 +651,6 @@ void mergeCorplinkSgOverlay(
   required CorplinkSgSettings settings,
   Map<String, dynamic>? auth,
   String? cookiePath,
-  String? refreshCommand,
 }) {
   if (!settings.enabled) return;
   const nodeName = 'SG-Node';
@@ -699,8 +689,6 @@ void mergeCorplinkSgOverlay(
         'corplink-device-name': auth['device_name']?.toString() ?? nodeName,
         'corplink-vpn-server-name': 'FZ-INT-Node',
         'corplink-public-key': publicKey,
-        if (refreshCommand != null)
-          'corplink-refresh-command': refreshCommand,
         'corplink-refresh-threshold-hours': 48,
         'corplink-refresh-hour': 3,
       },
