@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,6 +41,75 @@ import (
 // 客户端必须使用同一个标识符，否则服务端无法解密握手 initiation（表现为
 // TCP 已建立但握手永不完成 / 节点测速 timeout）。
 const corplinkWGIdentifier = "CorpLink v1 vpn@feilian-----------"
+
+type corplinkCachedAddress struct {
+	dialAddress string
+	expiresAt   time.Time
+}
+
+// Android's VpnService.protect applies to the connected socket, not the DNS
+// lookup that net.Dialer performs first. During a VPN reconfiguration Android
+// may resolve the management hostname through the local fake-IP DNS server.
+// Keep the physical address from a successful pre-VPN control connection in
+// memory, so later protected management requests do not depend on that DNS.
+type corplinkAddressCache struct {
+	mu      sync.RWMutex
+	ttl     time.Duration
+	entries map[string]corplinkCachedAddress
+}
+
+var corplinkControlAddresses = newCorplinkAddressCache(30 * time.Minute)
+
+func newCorplinkAddressCache(ttl time.Duration) *corplinkAddressCache {
+	return &corplinkAddressCache{ttl: ttl, entries: make(map[string]corplinkCachedAddress)}
+}
+
+func (c *corplinkAddressCache) lookup(address string) (string, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[address]
+	c.mu.RUnlock()
+	return entry.dialAddress, ok && time.Now().Before(entry.expiresAt)
+}
+
+func (c *corplinkAddressCache) store(address, dialAddress string) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || net.ParseIP(host) != nil {
+		return // Literal-IP node endpoints need no bootstrap DNS cache.
+	}
+	ip, dialPort, err := net.SplitHostPort(dialAddress)
+	if err != nil || port != dialPort || net.ParseIP(ip) == nil {
+		return
+	}
+	// A fake IP is only meaningful inside mihomo's local resolver. Using it
+	// for a protected physical socket would reproduce the VPN self-loop.
+	if parsed := net.ParseIP(ip).To4(); parsed != nil && parsed[0] == 198 && (parsed[1] == 18 || parsed[1] == 19) {
+		return
+	}
+	c.mu.Lock()
+	c.entries[address] = corplinkCachedAddress{dialAddress: dialAddress, expiresAt: time.Now().Add(c.ttl)}
+	c.mu.Unlock()
+}
+
+func (c *corplinkAddressCache) dial(ctx context.Context, network, address string, hook dialer.SocketControl) (net.Conn, error) {
+	d := net.Dialer{Timeout: 5 * time.Second}
+	if hook != nil {
+		d.ControlContext = func(_ context.Context, nw, addr string, socket syscall.RawConn) error {
+			return hook(nw, addr, socket)
+		}
+	}
+	if cached, ok := c.lookup(address); ok {
+		if conn, err := d.DialContext(ctx, network, cached); err == nil {
+			c.store(address, cached) // Extend only after a successful physical dial.
+			return conn, nil
+		}
+	}
+	conn, err := d.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	c.store(address, conn.RemoteAddr().String())
+	return conn, nil
+}
 
 // CorplinkOption 描述 corplink 认证所需参数。
 type CorplinkOption struct {
@@ -164,13 +234,8 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	// dialer.DefaultSocketHook is VpnService.protect on Android and nil on
 	// other platforms, so this is a no-op outside Android.
 	if hook := dialer.DefaultSocketHook; hook != nil {
-		h := hook
 		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{}
-			d.ControlContext = func(_ context.Context, nw, addr string, c syscall.RawConn) error {
-				return h(nw, addr, c)
-			}
-			return d.DialContext(ctx, network, address)
+			return corplinkControlAddresses.dial(ctx, network, address, hook)
 		}
 	}
 	client.Transport = transport
