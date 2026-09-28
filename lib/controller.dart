@@ -244,8 +244,10 @@ class AppController {
             'https://www.apple.com/library/test/success.html');
         }
       }
-      final action = _sgRecoveryPolicy.recordProbe(
-        healthy, DateTime.now());
+      final now = DateTime.now();
+      final action = status.rebuildRequired
+          ? _sgRecoveryPolicy.recordRebuildRequired(now)
+          : _sgRecoveryPolicy.recordProbe(healthy, now);
       switch (action) {
         case SgRecoveryAction.none:
           break;
@@ -472,12 +474,13 @@ class AppController {
     ).firstMatch(message)?.group(0);
     corplinkSgLastCoreErrorCode.value = safeCoreError;
     final sgSettings = await CorplinkSgSettings.load();
-    var sgSuppressed = false;
+    var authRejected = false;
     if (message.isNotEmpty && sgSettings.enabled && sgSettings.isConfigured) {
       // An optional SG outbound must not prevent the rest of the subscription
       // from starting. Retry with the SG group visible but its node withheld.
-      if (message.contains('10220001') ||
-          message.toLowerCase().contains('cookies are missing')) {
+      authRejected = message.contains('10220001') ||
+          message.toLowerCase().contains('cookies are missing');
+      if (authRejected) {
         await invalidateCorplinkAuthorization();
       }
       final retryParams = await globalState.getSetupParams(
@@ -488,7 +491,6 @@ class AppController {
       if (retryMessage.isEmpty) {
         commonPrint.log('[CorpLinkSG] node failed setup; ordinary profile started');
         message = '';
-        sgSuppressed = true;
       } else {
         commonPrint.log('[Core] setup without SG also failed: $retryMessage');
       }
@@ -503,12 +505,14 @@ class AppController {
       final cookiePresent =
           File(joinPath(sgHome, 'corplink_cookies.json')).existsSync() ||
           File(joinPath(sgHome, 'bettbox_cookies.txt')).existsSync();
-      if (sgSuppressed ||
-          !corplinkAuthMatchesSettings(storedAuth, sgSettings) ||
-          !cookiePresent) {
+      if (shouldAutoAuthorizeAfterSgSetup(
+        authRejected: authRejected,
+        authMatches: corplinkAuthMatchesSettings(storedAuth, sgSettings),
+        cookiePresent: cookiePresent,
+      )) {
         // A fail-closed group lets normal proxies start while login runs.
         _sgTaskScheduler.schedule(
-          () => _autoAuthorizeSg(force: sgSuppressed),
+          () => _autoAuthorizeSg(force: authRejected),
         );
       }
     }

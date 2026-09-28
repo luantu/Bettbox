@@ -238,6 +238,27 @@ void main() {
     expect(policy.recordProbe(false, afterCooldown), SgRecoveryAction.none);
   });
 
+  test('explicit core rebuild signal is rate limited but does not wait for three more probes', () {
+    final policy = SgRecoveryPolicy();
+    final start = DateTime.utc(2026, 9, 28);
+    expect(policy.recordRebuildRequired(start), SgRecoveryAction.rebuild);
+    expect(policy.recordRebuildRequired(start.add(const Duration(minutes: 1))),
+        SgRecoveryAction.none);
+    expect(policy.recordProbe(true, start.add(const Duration(minutes: 2))),
+        SgRecoveryAction.none);
+    expect(policy.recordRebuildRequired(start.add(const Duration(minutes: 3))),
+        SgRecoveryAction.rebuild);
+  });
+
+  test('transient SG setup failure does not force a fresh password login', () {
+    expect(shouldAutoAuthorizeAfterSgSetup(
+      authRejected: false, authMatches: true, cookiePresent: true), isFalse);
+    expect(shouldAutoAuthorizeAfterSgSetup(
+      authRejected: true, authMatches: true, cookiePresent: true), isTrue);
+    expect(shouldAutoAuthorizeAfterSgSetup(
+      authRejected: false, authMatches: false, cookiePresent: true), isTrue);
+  });
+
   test('SG status favors actual handshake over website delay', () {
     final ready = SgCoreStatus.fromJson({
       'present': true,

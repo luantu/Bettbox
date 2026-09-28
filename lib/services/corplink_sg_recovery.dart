@@ -2,6 +2,13 @@ import 'dart:async';
 
 enum SgRecoveryAction { none, reconnect, rebuild }
 
+bool shouldAutoAuthorizeAfterSgSetup({
+  required bool authRejected,
+  required bool authMatches,
+  required bool cookiePresent,
+}) =>
+    authRejected || !authMatches || !cookiePresent;
+
 /// Captures the AppController's normal Zone before its reentrant core lock is
 /// acquired. Futures and timers created inside a completed synchronized Zone
 /// carry a stale lock level and cannot safely re-enter that lock later.
@@ -23,6 +30,16 @@ class SgRecoveryPolicy {
   int _failures = 0;
   int _recoveryAttempts = 0;
   DateTime? _nextAllowedAt;
+
+  SgRecoveryAction recordRebuildRequired(DateTime now) {
+    if (_nextAllowedAt != null && now.isBefore(_nextAllowedAt!)) {
+      return SgRecoveryAction.none;
+    }
+    _failures = 0;
+    _recoveryAttempts = 2;
+    _nextAllowedAt = now.add(const Duration(minutes: 5));
+    return SgRecoveryAction.rebuild;
+  }
 
   SgRecoveryAction recordProbe(bool healthy, DateTime now) {
     if (healthy) {

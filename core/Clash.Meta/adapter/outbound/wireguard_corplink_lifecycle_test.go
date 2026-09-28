@@ -86,3 +86,12 @@ func TestTCPBindReadyStatusDoesNotDependOnEndpointSpelling(t *testing.T) {
 		t.Fatal("closed transport reported a ready connection")
 	}
 }
+
+func TestCorplinkSuccessfulDataPlaneClearsPendingRebuild(t *testing.T) {
+	w := &WireGuard{}
+	w.requiresRebuild.Store(true)
+	w.recordBusySuccess()
+	if w.requiresRebuild.Load() {
+		t.Fatal("successful tunneled connection left rebuild request latched")
+	}
+}

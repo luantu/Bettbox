@@ -24,6 +24,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
   String _status = '正在读取飞连设置…';
   String _liveStatus = '正在读取隧道状态…';
   String _dataPlaneStatus = '尚未检测 ChatGPT 访问';
+  SgConnectionPhase _livePhase = SgConnectionPhase.missing;
   String? _lastTunnelIp;
   int _tunnelIpChanges = 0;
   Timer? _statusTimer;
@@ -116,14 +117,17 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       final checkedAt = '${now.hour.toString().padLeft(2, '0')}:'
           '${now.minute.toString().padLeft(2, '0')}:'
           '${now.second.toString().padLeft(2, '0')}';
-      setState(() => _liveStatus = [
+      setState(() {
+        _livePhase = status.phase;
+        _liveStatus = [
             globalState.isStart ? 'Android VPN 已启动' : 'Android VPN 未启动',
             phase,
             if (status.tunnelIp.isNotEmpty) '隧道 IP：${status.tunnelIp}',
             '本页观察到的 IP 变化：$_tunnelIpChanges 次',
             if (status.endpoint.isNotEmpty) '上游端点：${status.endpoint}',
             '更新于 $checkedAt',
-          ].join('\n'));
+          ].join('\n');
+      });
     } catch (error) {
       if (mounted) {
         setState(() => _liveStatus = '状态读取失败：${error.runtimeType}');
@@ -140,9 +144,13 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         'https://chatgpt.com/robots.txt', 'SG-Node');
       final ok = delay.value != null && delay.value! > 0;
       if (mounted) {
+        final now = DateTime.now();
+        final checkedAt = '${now.hour.toString().padLeft(2, '0')}:'
+            '${now.minute.toString().padLeft(2, '0')}:'
+            '${now.second.toString().padLeft(2, '0')}';
         setState(() => _dataPlaneStatus = ok
-            ? 'ChatGPT 域名有 HTTPS 响应，${delay.value} ms（不代表登录成功）'
-            : 'ChatGPT 访问失败；隧道握手状态请看上方');
+            ? '$checkedAt ChatGPT 域名有 HTTPS 响应，${delay.value} ms（不代表登录成功）'
+            : '$checkedAt ChatGPT 访问失败；隧道握手状态请看上方');
       }
       return ok;
     } catch (error) {
@@ -305,7 +313,9 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         const SizedBox(height: 8),
         SelectableText(_liveStatus),
         const SizedBox(height: 4),
-        Text(_dataPlaneStatus),
+        Text(_livePhase == SgConnectionPhase.ready
+            ? _dataPlaneStatus
+            : '当前隧道未就绪；上次检查：$_dataPlaneStatus'),
         ValueListenableBuilder<String?>(
           valueListenable: corplinkSgLastErrorCode,
           builder: (_, code, _) => code == null

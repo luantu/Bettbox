@@ -309,6 +309,7 @@ func (w *WireGuard) registerBusyFailure() bool {
 func (w *WireGuard) recordBusySuccess() {
 	w.busyFail.Store(0)
 	w.busyFailResetAt.Store(time.Now().UnixNano())
+	w.requiresRebuild.Store(false)
 }
 
 // invalidateTunnelForBusyFailure 业务连续失败时失效隧道底层连接并触发重建。
