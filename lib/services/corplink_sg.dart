@@ -23,6 +23,7 @@ const corplinkSgDeviceIdSecureKey = 'corplinkSg.deviceId';
 const corplinkSgDeviceNameSecureKey = 'corplinkSg.deviceName';
 const _secureStorage = FlutterSecureStorage();
 final corplinkSgLastErrorCode = ValueNotifier<String?>(null);
+final corplinkSgLastCoreErrorCode = ValueNotifier<String?>(null);
 
 class CorplinkSgSettings {
   final bool enabled;
@@ -410,8 +411,7 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
               event['code']?.toString() ?? 'LOGIN_FAILED';
           debugPrint(
             '[APP] CorpLink helper event=error '
-            'code=${event['code'] ?? 'unknown'} '
-            'message=${event['message'] ?? 'unknown'}',
+            'code=${event['code'] ?? 'unknown'}',
           );
         } else if (event['event'] == 'refresh_started') {
           debugPrint('[APP] CorpLink helper event=refresh_started');

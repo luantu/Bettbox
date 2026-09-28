@@ -170,6 +170,7 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
         return START_STICKY
     }
     override fun stop() {
+        Log.i(TAG, "stop requested, alreadyStopped=$isStopped")
         if (isStopped) return
         isStopped = true
         hasStartedForeground = false
@@ -341,6 +342,7 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "onDestroy")
         stop()
         unlockReceiver?.let {
             unregisterReceiver(it)

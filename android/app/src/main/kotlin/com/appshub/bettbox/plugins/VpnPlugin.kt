@@ -623,6 +623,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStop(force: Boolean = false) {
+        android.util.Log.i(
+            "VpnPlugin",
+            "handleStop force=$force caller=${Throwable().stackTrace.getOrNull(1)?.methodName ?: "unknown"}",
+        )
         val serviceRef: BaseServiceInterface?
         val wasBound: Boolean
         val shouldForceStop: Boolean

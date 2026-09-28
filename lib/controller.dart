@@ -434,6 +434,11 @@ class AppController {
       pathConfig: realPatchConfig,
     );
     var message = await clashCore.setupConfig(params);
+    final safeCoreError = RegExp(
+      r'corplink vpn list (?:HTTP|code) [0-9]+',
+      caseSensitive: false,
+    ).firstMatch(message)?.group(0);
+    corplinkSgLastCoreErrorCode.value = safeCoreError;
     final sgSettings = await CorplinkSgSettings.load();
     var sgSuppressed = false;
     if (message.isNotEmpty && sgSettings.enabled && sgSettings.isConfigured) {

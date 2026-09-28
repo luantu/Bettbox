@@ -32,7 +32,11 @@ object Core {
     ) {
         startTun(fd, object : TunInterface {
             override fun protect(fd: Int) {
-                runCatching { protect(fd) }
+                runCatching {
+                    if (!protect(fd)) {
+                        Log.w("Core", "VpnService.protect rejected outbound socket")
+                    }
+                }
                     .onFailure { Log.e("Core", "protect JNI callback error: ${it.message}") }
             }
 
