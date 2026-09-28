@@ -13,6 +13,7 @@ import (
 
 	"github.com/metacubex/mihomo/adapter"
 	"github.com/metacubex/mihomo/adapter/inbound"
+	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	"github.com/metacubex/mihomo/component/auth"
 	"github.com/metacubex/mihomo/component/ca"
@@ -318,7 +319,7 @@ func updateProxies(proxies map[string]C.Proxy, providers map[string]P.ProxyProvi
 func closeReplacedCorplinkProxies(old, next map[string]C.Proxy) {
 	for _, proxy := range old {
 		adapter := proxy.Adapter()
-		corplink, ok := adapter.(interface{ IsCorplink() bool })
+		corplink, ok := outbound.UnderlyingProxyAdapter(adapter).(interface{ IsCorplink() bool })
 		if !ok || !corplink.IsCorplink() {
 			continue
 		}

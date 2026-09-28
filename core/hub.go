@@ -321,12 +321,7 @@ func handleResetConnections() bool {
 // stall the remaining ones while the lock is held.
 func handleReconnectTunnels() bool {
 	runLock.Lock()
-	var adapters []interface{ Reconnect() }
-	for _, p := range tunnel.Proxies() {
-		if r, ok := p.Adapter().(interface{ Reconnect() }); ok {
-			adapters = append(adapters, r)
-		}
-	}
+	adapters := collectReconnectable(tunnel.Proxies())
 	runLock.Unlock()
 
 	for _, r := range adapters {
@@ -338,6 +333,17 @@ func handleReconnectTunnels() bool {
 	return len(adapters) > 0
 }
 
+func collectReconnectable(proxies map[string]constant.Proxy) []interface{ Reconnect() } {
+	var adapters []interface{ Reconnect() }
+	for _, proxy := range proxies {
+		underlying := outbound.UnderlyingProxyAdapter(proxy.Adapter())
+		if reconnectable, ok := underlying.(interface{ Reconnect() }); ok {
+			adapters = append(adapters, reconnectable)
+		}
+	}
+	return adapters
+}
+
 type corplinkSgStatus struct {
 	outbound.CorplinkStatus
 	Present bool `json:"present"`
@@ -346,7 +352,8 @@ type corplinkSgStatus struct {
 func corplinkStatusFromProxies(proxies map[string]constant.Proxy) corplinkSgStatus {
 	for _, name := range []string{"SG-Node", "SG-Node-Linux"} {
 		if proxy, ok := proxies[name]; ok {
-			if adapter, ok := proxy.Adapter().(interface {
+			underlying := outbound.UnderlyingProxyAdapter(proxy.Adapter())
+			if adapter, ok := underlying.(interface {
 				CorplinkStatus() outbound.CorplinkStatus
 			}); ok {
 				return corplinkSgStatus{CorplinkStatus: adapter.CorplinkStatus(), Present: true}
@@ -368,7 +375,8 @@ func handleGetCorplinkSgStatus() corplinkSgStatus {
 func reconnectCorplinkFromProxies(proxies map[string]constant.Proxy) bool {
 	for _, name := range []string{"SG-Node", "SG-Node-Linux"} {
 		if proxy, ok := proxies[name]; ok {
-			if adapter, ok := proxy.Adapter().(interface{ Reconnect() }); ok {
+			underlying := outbound.UnderlyingProxyAdapter(proxy.Adapter())
+			if adapter, ok := underlying.(interface{ Reconnect() }); ok {
 				adapter.Reconnect()
 				return true
 			}

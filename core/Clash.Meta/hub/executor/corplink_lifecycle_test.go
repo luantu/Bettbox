@@ -3,6 +3,7 @@ package executor
 import (
 	"testing"
 
+	"github.com/metacubex/mihomo/adapter/outbound"
 	C "github.com/metacubex/mihomo/constant"
 )
 
@@ -14,12 +15,13 @@ type lifecycleProxy struct {
 func (p *lifecycleProxy) Adapter() C.ProxyAdapter { return p.adapter }
 
 type lifecycleAdapter struct {
-	C.ProxyAdapter
+	outbound.ProxyAdapter
 	corplink bool
 	closed   int
 }
 
 func (a *lifecycleAdapter) IsCorplink() bool { return a.corplink }
+func (a *lifecycleAdapter) Name() string     { return "test" }
 func (a *lifecycleAdapter) Close() error {
 	a.closed++
 	return nil
@@ -30,11 +32,11 @@ func TestCloseReplacedCorplinkProxiesClosesOldInstanceOnly(t *testing.T) {
 	newSG := &lifecycleAdapter{corplink: true}
 	oldAirport := &lifecycleAdapter{}
 	old := map[string]C.Proxy{
-		"SG-Node": &lifecycleProxy{adapter: oldSG},
-		"airport": &lifecycleProxy{adapter: oldAirport},
+		"SG-Node": &lifecycleProxy{adapter: outbound.NewAutoCloseProxyAdapter(oldSG)},
+		"airport": &lifecycleProxy{adapter: outbound.NewAutoCloseProxyAdapter(oldAirport)},
 	}
 	newProxies := map[string]C.Proxy{
-		"SG-Node": &lifecycleProxy{adapter: newSG},
+		"SG-Node": &lifecycleProxy{adapter: outbound.NewAutoCloseProxyAdapter(newSG)},
 		"airport": old["airport"],
 	}
 
@@ -46,7 +48,7 @@ func TestCloseReplacedCorplinkProxiesClosesOldInstanceOnly(t *testing.T) {
 
 func TestCloseReplacedCorplinkProxiesPreservesReusedInstance(t *testing.T) {
 	sg := &lifecycleAdapter{corplink: true}
-	proxy := &lifecycleProxy{adapter: sg}
+	proxy := &lifecycleProxy{adapter: outbound.NewAutoCloseProxyAdapter(sg)}
 	closeReplacedCorplinkProxies(
 		map[string]C.Proxy{"SG-Node": proxy},
 		map[string]C.Proxy{"SG-Node": proxy},

@@ -398,3 +398,16 @@ func NewAutoCloseProxyAdapter(adapter ProxyAdapter) ProxyAdapter {
 	runtime.SetFinalizer(proxy, (*autoCloseProxyAdapter).Close)
 	return proxy
 }
+
+// UnderlyingProxyAdapter exposes the adapter behind Mihomo's lifecycle
+// wrapper for type-specific status and reconnect operations. Call Close on
+// the original wrapper so its finalizer is disarmed exactly once.
+func UnderlyingProxyAdapter(adapter C.ProxyAdapter) C.ProxyAdapter {
+	for {
+		wrapper, ok := adapter.(*autoCloseProxyAdapter)
+		if !ok {
+			return adapter
+		}
+		adapter = wrapper.ProxyAdapter
+	}
+}
