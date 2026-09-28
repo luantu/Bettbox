@@ -1065,6 +1065,17 @@ class AppController {
         bool hasChanged = false;
 
         for (final newGroup in newGroups) {
+          if (newGroup.name == 'SG-OpenAI' &&
+              newGroup.type == GroupType.Selector &&
+              newGroup.realNow.isNotEmpty &&
+              shouldReplaceStaleCorplinkSelection(
+                selectedMap[newGroup.name],
+                newGroup.all.map((proxy) => proxy.name),
+              )) {
+            selectedMap[newGroup.name] = newGroup.realNow;
+            hasChanged = true;
+            continue;
+          }
           final oldGroup = currentGroups.firstWhereOrNull(
             (g) => g.name == newGroup.name,
           );

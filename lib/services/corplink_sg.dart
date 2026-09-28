@@ -674,6 +674,18 @@ String? selectCorplinkPhysicalIP(Iterable<String> addresses) {
   return ipv6;
 }
 
+/// A previous failed authorization can leave REJECT stored as the selected
+/// SG group member. Once the authorized group is rebuilt, REJECT is no longer
+/// a member; showing that stale value misrepresents the working core route.
+bool shouldReplaceStaleCorplinkSelection(
+  String? savedSelection,
+  Iterable<String> currentMembers,
+) {
+  return savedSelection != null &&
+      savedSelection.isNotEmpty &&
+      !currentMembers.contains(savedSelection);
+}
+
 bool corplinkAuthMatchesSettings(
   Map<String, dynamic>? auth,
   CorplinkSgSettings settings,

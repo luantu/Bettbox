@@ -122,6 +122,14 @@ void main() {
     expect(selectCorplinkPhysicalIP(['2001:db8::1']), '2001:db8::1');
   });
 
+  test('stale SG group selection is replaced without changing valid choices', () {
+    const members = ['SG-Node', 'Airport-A'];
+    expect(shouldReplaceStaleCorplinkSelection('REJECT', members), isTrue);
+    expect(shouldReplaceStaleCorplinkSelection('SG-Node', members), isFalse);
+    expect(shouldReplaceStaleCorplinkSelection('Airport-A', members), isFalse);
+    expect(shouldReplaceStaleCorplinkSelection(null, members), isFalse);
+  });
+
   test('merges authorized SG node once and preserves subscription routing', () {
     final config = <String, dynamic>{
       'proxies': <dynamic>[
