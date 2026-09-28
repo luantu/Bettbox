@@ -35,7 +35,7 @@
 | --- | --- |
 | 授权与节点 | 只填写三项信息后，`SG-Node` 出现在最终配置；无需手填 Cookie、OTP、设备身份或密钥。 |
 | Android VPN | 点“保存并连接”并完成系统授权后，页面显示 VPN 已启动、WireGuard-TCP 握手就绪；仅有 TCP socket 连通不算通过。 |
-| ChatGPT 分流 | Android 浏览器打开 `chatgpt.com`，请求记录显示 `SG-OpenAI → SG-Node`，页面实际加载且有双向流量。未登录首页不等于已验证登录后的对话。 |
+| ChatGPT 分流 | Android 浏览器打开 `chatgpt.com`，请求记录显示浏览器进程经 `SG-OpenAI → SG-Node`，页面实际加载且有双向流量。若当前 Wi-Fi 本身也能访问 ChatGPT，单看页面打开或公网出口 IP 相同都不能证明走了隧道；还应核对 Android VPN 的 `tun0` 流量，必要时在隔离测试环境临时阻断飞连外层 TCP 端点做反证。未登录首页不等于已验证登录后的对话。 |
 | 隧道内 DNS | 配置的 DoH 解析器绑定 SG WireGuard 出站；临时把内核日志级别设为 `info`，访问未缓存的新域名，应出现“DoH resolver TCP connected through WireGuard tunnel”运行时标记，且域名访问成功。测试后恢复原日志级别。仅看配置字段不足以通过。 |
 | 网络切换自恢复 | VPN 开启时切换 Wi-Fi；恢复联网后不手动操作，SG 应重新握手，并在四分钟内再次连通 ChatGPT。记录切换前后的物理 IP、隧道 IP、飞连 TCP 连接数，不能只看“已连接”字样。普通代理在 SG 故障期间仍可用。 |
 | 订阅兼容 | 更新现有订阅后，原机场节点、代理组和规则仍在，`SG-Node` 与 `SG-OpenAI` 只出现一次。 |
