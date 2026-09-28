@@ -52,6 +52,7 @@ class AppController {
   int _setupGeneration = 0;
   final Set<String> _updatingProfileIds = {};
   final SgRecoveryPolicy _sgRecoveryPolicy = SgRecoveryPolicy();
+  final SgDeferredScheduler _sgTaskScheduler = SgDeferredScheduler();
   Timer? _sgHealthTimer;
   bool _sgHealthCheckInFlight = false;
   bool _sgAutoAuthInFlight = false;
@@ -198,9 +199,10 @@ class AppController {
 
   void _startSgHealthMonitor() {
     if (!system.isAndroid || _sgHealthTimer != null) return;
-    _sgHealthTimer = Timer.periodic(const Duration(seconds: 45), (_) {
-      unawaited(_checkSgHealth());
-    });
+    _sgHealthTimer = _sgTaskScheduler.run(() => Timer.periodic(
+      const Duration(seconds: 45),
+      (_) => unawaited(_checkSgHealth()),
+    ));
   }
 
   Future<void> _checkSgHealth() async {
@@ -478,7 +480,9 @@ class AppController {
           !corplinkAuthMatchesSettings(storedAuth, sgSettings) ||
           !cookiePresent) {
         // A fail-closed group lets normal proxies start while login runs.
-        unawaited(_autoAuthorizeSg(force: sgSuppressed));
+        _sgTaskScheduler.schedule(
+          () => _autoAuthorizeSg(force: sgSuppressed),
+        );
       }
     }
     if (system.isDesktop) {

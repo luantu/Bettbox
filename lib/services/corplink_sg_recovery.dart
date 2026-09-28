@@ -1,4 +1,21 @@
+import 'dart:async';
+
 enum SgRecoveryAction { none, reconnect, reauthorize }
+
+/// Captures the AppController's normal Zone before its reentrant core lock is
+/// acquired. Futures and timers created inside a completed synchronized Zone
+/// carry a stale lock level and cannot safely re-enter that lock later.
+class SgDeferredScheduler {
+  final Zone _ownerZone = Zone.current;
+
+  T run<T>(T Function() action) => _ownerZone.run(action);
+
+  void schedule(Future<void> Function() action) {
+    _ownerZone.run(() {
+      unawaited(Future<void>(action));
+    });
+  }
+}
 
 /// Keeps periodic health checks from turning a transient network outage into
 /// a reconnect or login storm. One successful probe resets the sequence.
