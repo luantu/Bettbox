@@ -133,41 +133,18 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
           Positioned.fill(
             child: CommonCard(
               onPressed: _openSettings,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    height: globalState.measure.titleMediumHeight + 16,
-                    padding: baseInfoEdgeInsets.copyWith(bottom: 0),
-                    child: Row(
-                      children: [
-                        Icon(Icons.vpn_key_outlined,
-                            color: context.colorScheme.onSurfaceVariant),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text('SG-Node',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: context.textTheme.titleSmall?.copyWith(
-                                color: context.colorScheme.onSurfaceVariant,
-                              )),
-                        ),
-                      ],
-                    ),
+              info: const Info(iconData: Icons.vpn_key_outlined, label: 'SG-Node'),
+              child: Container(
+                padding: baseInfoEdgeInsets.copyWith(top: 0),
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Text(
+                    _summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.bodyMedium?.toLight.adjustSize(0),
                   ),
-                  Container(
-                    padding: baseInfoEdgeInsets.copyWith(top: 0),
-                    child: SizedBox(
-                      height: globalState.measure.bodyMediumHeight + 2,
-                      child: Text(
-                        _summary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.textTheme.bodyMedium,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

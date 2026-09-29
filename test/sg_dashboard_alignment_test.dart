@@ -1,82 +1,91 @@
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/common/theme.dart';
+import 'package:bett_box/models/config.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/views/dashboard/widgets/sg_node_status.dart';
 import 'package:bett_box/widgets/widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('SG title and status match a standard half-width card',
       (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: Builder(builder: (context) {
-          globalState.theme = CommonTheme.of(context, 1);
-          globalState.measure = Measure.of(context, 1);
-          return Center(
-            child: SizedBox(
-              width: 240,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SgNodeStatusTile(key: ValueKey('sg-card')),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: 240,
-                    height: getWidgetHeight(1),
-                    child: CommonCard(
-                      key: const ValueKey('reference-card'),
-                      onPressed: () {},
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Container(
-                            height: globalState.measure.titleMediumHeight + 16,
-                            padding: baseInfoEdgeInsets.copyWith(bottom: 0),
-                            child: Row(children: [
-                              const Icon(Icons.network_check),
-                              const SizedBox(width: 8),
-                              Text('参考标题',
-                                  style: context.textTheme.titleSmall),
-                            ]),
+    globalState.config = Config(themeProps: defaultThemeProps);
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(builder: (context) {
+              globalState.theme = CommonTheme.of(context, 1);
+              globalState.measure = Measure.of(context, 1);
+              return Center(
+                child: SizedBox(
+                  width: 240,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SgNodeStatusTile(key: ValueKey('sg-card')),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: 240,
+                        height: getWidgetHeight(1),
+                        child: CommonCard(
+                          key: const ValueKey('reference-card'),
+                          onPressed: () {},
+                          info: const Info(
+                            iconData: Icons.ballot,
+                            label: '参考标题',
                           ),
-                          Container(
+                          child: Container(
                             padding: baseInfoEdgeInsets.copyWith(top: 0),
-                            child: SizedBox(
-                              height: globalState.measure.bodyMediumHeight + 2,
-                              child: Text('参考状态',
-                                  style: context.textTheme.bodyMedium),
+                            child: Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Text(
+                                '参考状态',
+                                style: context.textTheme.bodyMedium?.toLight
+                                    .adjustSize(0),
+                              ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          );
-        }),
+                ),
+              );
+            }),
+          ),
+        ),
       ),
-    ));
+    );
 
     final sgCard = tester.getRect(find.byKey(const ValueKey('sg-card')));
     final referenceCard =
         tester.getRect(find.byKey(const ValueKey('reference-card')));
-    final sgTitle = tester.getRect(find.text('SG-Node'));
-    final referenceTitle = tester.getRect(find.text('参考标题'));
+    final sgHeader = find.descendant(
+      of: find.byType(SgNodeStatusTile),
+      matching: find.byType(InfoHeader),
+    );
+    final referenceHeader = find.descendant(
+      of: find.byKey(const ValueKey('reference-card')),
+      matching: find.byType(InfoHeader),
+    );
+    expect(sgHeader, findsOneWidget);
+    expect(referenceHeader, findsOneWidget);
+    final sgTitle = tester.getRect(find.descendant(
+      of: sgHeader,
+      matching: find.byType(RichText),
+    ).first);
+    final referenceTitle = tester.getRect(find.descendant(
+      of: referenceHeader,
+      matching: find.byType(RichText),
+    ).first);
     final sgStatus = tester.getRect(find.descendant(
       of: find.byType(SgNodeStatusTile),
       matching: find.byType(Text),
     ).last);
     final referenceStatus = tester.getRect(find.text('参考状态'));
-
-    // Keep the reference geometry visible in CI until the first green run.
-    // ignore: avoid_print
-    print('SG geometry: card=$sgCard title=$sgTitle status=$sgStatus; '
-        'reference: card=$referenceCard title=$referenceTitle '
-        'status=$referenceStatus');
 
     expect(sgTitle.left - sgCard.left,
         closeTo(referenceTitle.left - referenceCard.left, 0.5));
