@@ -340,14 +340,10 @@ void mergeCorplinkNodeOverlay(
   }
   for (final selection in selections) {
     final name = selection.serverName;
-    if (activeNames.contains(name) ||
-        (!suppressedNames.contains(name) &&
-            !scriptSuppressedNames.contains(name))) {
-      continue;
-    }
+    if (activeNames.contains(name)) continue;
     // Retain the generated proxy name with a rejecting adapter. Downloaded
-    // groups, sub-rules or dialer-proxy entries may reference this exact name;
-    // removing it would make the whole Profile fail to parse.
+    // groups, sub-rules or dialer-proxy entries may reference this exact name
+    // even while the node is disabled or not yet authorized.
     proxies.add({'name': '$name-WG', 'type': 'reject'});
   }
 
