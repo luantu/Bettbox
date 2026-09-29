@@ -59,7 +59,7 @@ bool requiresCorplinkScriptSafetyFallback(
   required Set<String> originalProxyNames,
   required Map<String, dynamic> expectedManagedObjects,
 }) {
-  if (trustedManagedProxyNames.isEmpty || originalProxyNames.isEmpty) {
+  if (trustedManagedProxyNames.isEmpty) {
     return false;
   }
   final current = <String, dynamic>{
@@ -82,7 +82,8 @@ bool requiresCorplinkScriptSafetyFallback(
   }
   // Replacing an entire proxy list without new names is recoverable. New
   // names cannot be proven independent of a renamed managed proxy.
-  return current.keys.toSet().difference(originalProxyNames).isNotEmpty;
+  return originalProxyNames.isNotEmpty &&
+      current.keys.toSet().difference(originalProxyNames).isNotEmpty;
 }
 
 Map<String, dynamic> failClosedCorplinkScriptResult(

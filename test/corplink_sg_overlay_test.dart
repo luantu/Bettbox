@@ -551,10 +551,12 @@ void main() {
       'server': 'relay.example.invalid', 'port': 1081,
       'dialer-proxy': 'Airport-B',
     });
-    (afterScript['rule-providers'] as Map).addAll({
-      'test-provider': {'type': 'http', 'url': 'https://example.invalid/rules',
-        'path': './test-provider.yaml', 'interval': 3600},
-    });
+    afterScript['rule-providers'] = Map<String, dynamic>.from(
+      afterScript['rule-providers'] as Map,
+    )..['test-provider'] = {
+        'type': 'http', 'url': 'https://example.invalid/rules',
+        'path': './test-provider.yaml', 'interval': 3600,
+      };
     (afterScript['rules'] as List).insert(0,
         'RULE-SET,test-provider,FUZHOU-NODE-1');
     expect(requiresCorplinkScriptSafetyFallback(
