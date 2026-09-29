@@ -2,6 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -46,6 +52,70 @@ func TestCorplinkStatusReportsMissingAndReadyNodes(t *testing.T) {
 		strings.Contains(string(data), "privateKey") ||
 		strings.Contains(string(data), "cookie") {
 		t.Fatalf("invalid or unsafe status JSON: %s", data)
+	}
+}
+
+func TestCorplinkVPNNodeListRejectsMalformedInput(t *testing.T) {
+	_, err := handleListCorplinkVPNNodes("{")
+	if err == nil {
+		t.Fatal("malformed discovery request was accepted")
+	}
+	if strings.Contains(err.Error(), "Cookie") || strings.Contains(err.Error(), "private") {
+		t.Fatal("discovery error exposed authentication material")
+	}
+}
+
+func TestCorplinkVPNNodeListActionRedactsCookiePath(t *testing.T) {
+	got := safeCorplinkNodeListError(errors.New("open /private/cookies.json: secret=do-not-report"))
+	if got != "CORPLINK_NODE_LIST_FAILED" {
+		t.Fatalf("unsafe node-list error: %q", got)
+	}
+}
+
+func TestCorplinkVPNNodeListErrorKeepsNumericCodesOnly(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"corplink vpn list HTTP 401 cookie=do-not-report", "corplink vpn list HTTP 401"},
+		{"corplink vpn list code 10220001 token=do-not-report", "corplink vpn list code 10220001"},
+	}
+	for _, tt := range tests {
+		got := safeCorplinkNodeListError(errors.New(tt.raw))
+		if got != tt.want {
+			t.Fatalf("safe error = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+func TestCorplinkVPNNodeListActionReturnsOnlyPublicNames(t *testing.T) {
+	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/vpn/list" {
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"code":0,"data":[`+
+			`{"name":"FUZHOU-NODE-1","protocol_mode":1,"ip":"192.0.2.11"},`+
+			`{"name":"UDP-NODE","protocol_mode":2,"ip":"192.0.2.12"}]}`)
+	}))
+	defer control.Close()
+	cookiePath := filepath.Join(t.TempDir(), "cookie.json")
+	if err := os.WriteFile(cookiePath, []byte("session=test-session"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(corplinkNodeListParams{
+		APIServer: control.URL, CookieFile: cookiePath,
+		DeviceID: "device-id", DeviceName: "device-name",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := handleListCorplinkVPNNodes(string(request))
+	if err != nil || len(nodes) != 1 || nodes[0].Name != "FUZHOU-NODE-1" {
+		t.Fatalf("wrong action result: nodes=%+v err=%v", nodes, err)
+	}
+	data, err := json.Marshal(nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "192.0.2.") || strings.Contains(string(data), "test-session") {
+		t.Fatal("core action returned internal endpoint or Cookie")
 	}
 }
 

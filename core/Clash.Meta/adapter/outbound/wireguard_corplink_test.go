@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	C "github.com/metacubex/mihomo/constant"
@@ -78,6 +80,83 @@ func TestCorplinkDNSRoutesEveryConfiguredNameServerThroughTunnel(t *testing.T) {
 func TestCorplinkNodeNameMatchesLegacyFuzhouAlias(t *testing.T) {
 	if !corplinkNodeNameMatches("FZ-INT-Node", "FUZHOU_INTL_node") {
 		t.Fatal("the current FZ-INT-Node name should match the legacy FUZHOU_INTL_node selector")
+	}
+}
+
+func TestCorplinkVPNNodeListOnlyTCPAndSanitized(t *testing.T) {
+	var loginCalls atomic.Int32
+	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/login" {
+			loginCalls.Add(1)
+			http.Error(w, "login must not run during discovery", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path != "/api/vpn/list" {
+			t.Errorf("unexpected discovery path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if !strings.Contains(r.Header.Get("Cookie"), "session=integration-test") {
+			t.Error("saved session cookie was not used")
+		}
+		_, _ = io.WriteString(w, `{"code":0,"data":[`+
+			`{"name":"FZ-INT-Node","protocol_mode":1,"ip":"192.0.2.10","api_port":443,"vpn_port":34080},`+
+			`{"name":"UDP-NODE","protocol_mode":2,"ip":"192.0.2.11","api_port":443,"vpn_port":34080},`+
+			`{"name":"FUZHOU-NODE-1","protocol_mode":1,"ip":"192.0.2.12","api_port":443,"vpn_port":34080}]}`)
+	}))
+	defer control.Close()
+
+	got, err := ListCorplinkVPNNodes(CorplinkOption{
+		APIServer:  control.URL,
+		CookieFile: writeCorplinkCookieFile(t),
+		DeviceID:   "android-device-id",
+		DeviceName: "android-device-name",
+	})
+	if err != nil {
+		t.Fatalf("list TCP nodes: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "FZ-INT-Node" || got[0].ProtocolMode != 1 ||
+		got[1].Name != "FUZHOU-NODE-1" || got[1].ProtocolMode != 1 {
+		t.Fatalf("wrong TCP nodes or server order: %+v", got)
+	}
+	if loginCalls.Load() != 0 {
+		t.Fatal("discovery started another account login")
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "192.0.2.") ||
+		strings.Contains(string(encoded), "integration-test") {
+		t.Fatal("discovery response exposed endpoint or cookie material")
+	}
+}
+
+func TestCorplinkVPNNodeListFailureKeepsOnlyStatusCode(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{name: "http", status: http.StatusUnauthorized, body: `{"cookie":"do-not-report"}`, want: "corplink vpn list HTTP 401"},
+		{name: "business", status: http.StatusOK, body: `{"code":1234,"message":"do-not-report"}`, want: "corplink vpn list code 1234"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer control.Close()
+			_, err := ListCorplinkVPNNodes(CorplinkOption{
+				APIServer:  control.URL,
+				CookieFile: writeCorplinkCookieFile(t),
+			})
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("list error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

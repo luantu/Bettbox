@@ -256,6 +256,19 @@ func handleAction(action *Action, result ActionResult) {
 	case reconnectTunnelsMethod:
 		result.success(handleReconnectTunnels())
 		return
+	case listCorplinkVpnNodesMethod:
+		raw, ok := action.Data.(string)
+		if !ok {
+			result.error("INVALID_NODE_LIST_REQUEST")
+			return
+		}
+		nodes, err := handleListCorplinkVPNNodes(raw)
+		if err != nil {
+			result.error(safeCorplinkNodeListError(err))
+			return
+		}
+		result.success(nodes)
+		return
 	case getCorplinkSgStatusMethod:
 		result.success(handleGetCorplinkSgStatus())
 		return

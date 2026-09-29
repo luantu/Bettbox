@@ -368,6 +368,50 @@ func collectReconnectable(proxies map[string]constant.Proxy) []interface{ Reconn
 	return adapters
 }
 
+type corplinkNodeListParams struct {
+	APIServer  string `json:"apiServer"`
+	CookieFile string `json:"cookieFile"`
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"`
+	ControlIP  string `json:"controlIP"`
+}
+
+func handleListCorplinkVPNNodes(raw string) ([]outbound.CorplinkVPNNodeSummary, error) {
+	var params corplinkNodeListParams
+	if err := json.Unmarshal([]byte(raw), &params); err != nil ||
+		strings.TrimSpace(params.APIServer) == "" ||
+		strings.TrimSpace(params.CookieFile) == "" {
+		return nil, fmt.Errorf("INVALID_NODE_LIST_REQUEST")
+	}
+	return outbound.ListCorplinkVPNNodes(outbound.CorplinkOption{
+		APIServer:  params.APIServer,
+		CookieFile: params.CookieFile,
+		DeviceID:   params.DeviceID,
+		DeviceName: params.DeviceName,
+		ControlIP:  params.ControlIP,
+	})
+}
+
+func safeCorplinkNodeListError(err error) string {
+	message := err.Error()
+	if message == "INVALID_NODE_LIST_REQUEST" {
+		return message
+	}
+	for _, prefix := range []string{"corplink vpn list HTTP ", "corplink vpn list code "} {
+		if !strings.HasPrefix(message, prefix) {
+			continue
+		}
+		fields := strings.Fields(strings.TrimPrefix(message, prefix))
+		if len(fields) > 0 {
+			if code, parseErr := strconv.Atoi(fields[0]); parseErr == nil {
+				return prefix + strconv.Itoa(code)
+			}
+		}
+		return "CORPLINK_NODE_LIST_FAILED"
+	}
+	return "CORPLINK_NODE_LIST_FAILED"
+}
+
 type corplinkSgStatus struct {
 	outbound.CorplinkStatus
 	Present bool `json:"present"`

@@ -204,6 +204,13 @@ type corplinkEnvelope[T any] struct {
 	Data T   `json:"data"`
 }
 
+// CorplinkVPNNodeSummary is the only server-list information exposed to the UI.
+// Endpoint addresses and session cookies stay inside the control-plane client.
+type CorplinkVPNNodeSummary struct {
+	Name         string `json:"name"`
+	ProtocolMode int    `json:"protocolMode"`
+}
+
 func corplinkNodeNameMatches(candidate, requested string) bool {
 	candidate = strings.ToLower(strings.TrimSpace(candidate))
 	requested = strings.ToLower(strings.TrimSpace(requested))
@@ -230,8 +237,16 @@ func corplinkNodeNameMatches(candidate, requested string) bool {
 	return false
 }
 
-// fetchCorplinkWgInfo 调用 corplink /vpn/conn API 获取当前会话的 wg 信息。
-func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
+type corplinkControlSession struct {
+	base           string
+	client         *http.Client
+	jar            *cookiejar.Jar
+	controlCookies []*http.Cookie
+	csrf           string
+	cookieHeader   string
+}
+
+func newCorplinkControlSession(opt CorplinkOption) (*corplinkControlSession, error) {
 	if opt.APIServer == "" {
 		return nil, errors.New("corplink api server not set")
 	}
@@ -262,8 +277,8 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	}
 	client.Transport = transport
 	controlURL, err := url.Parse(base)
-	if err != nil {
-		return nil, fmt.Errorf("corplink control server: %v", err)
+	if err != nil || controlURL.Host == "" {
+		return nil, errors.New("corplink control server invalid")
 	}
 	controlCookies := parseCorplinkCookies(cookieStr)
 	if opt.DeviceID != "" {
@@ -277,30 +292,37 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	// corplink client. The jar is still used for Set-Cookie persistence, but
 	// relying on domain matching alone can drop the control-session cookies
 	// after the API base switches to a node IP.
-	requestCookieHeader := cookieStr
-	requestCookieHeader = appendCorplinkCookie(requestCookieHeader, "device_id", opt.DeviceID)
-	requestCookieHeader = appendCorplinkCookie(requestCookieHeader, "device_name", opt.DeviceName)
-	request := func(method, endpoint string, body io.Reader) (*http.Response, error) {
-		req, err := http.NewRequest(method, endpoint, body)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		// Match corplink-rs and the reference Mihomo-SG client. The Feilian
-		// control plane uses this Android CorpLink identity when validating
-		// the session/device binding; okhttp is not equivalent here.
-		req.Header.Set("User-Agent", "CorpLink/201000 (GooglePixel; Android 16; en)")
-		req.Header.Set("Accept", "application/json")
-		if requestCookieHeader != "" {
-			req.Header.Set("Cookie", requestCookieHeader)
-		}
-		if csrf != "" {
-			req.Header.Set("csrf-token", csrf)
-		}
-		return client.Do(req)
+	return &corplinkControlSession{
+		base:           base,
+		client:         client,
+		jar:            jar,
+		controlCookies: controlCookies,
+		csrf:           csrf,
+		cookieHeader:   appendCorplinkCookie(appendCorplinkCookie(cookieStr, "device_id", opt.DeviceID), "device_name", opt.DeviceName),
+	}, nil
+}
+
+func (s *corplinkControlSession) request(method, endpoint string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, endpoint, body)
+	if err != nil {
+		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	// The Feilian control plane validates this Android CorpLink identity.
+	req.Header.Set("User-Agent", "CorpLink/201000 (GooglePixel; Android 16; en)")
+	req.Header.Set("Accept", "application/json")
+	if s.cookieHeader != "" {
+		req.Header.Set("Cookie", s.cookieHeader)
+	}
+	if s.csrf != "" {
+		req.Header.Set("csrf-token", s.csrf)
+	}
+	return s.client.Do(req)
+}
+
+func (s *corplinkControlSession) listVPNNodes() ([]corplinkVPNNode, error) {
 	var nodes corplinkEnvelope[[]corplinkVPNNode]
-	listResp, err := request(http.MethodGet, base+"/api/vpn/list?os=Android&os_version=2", nil)
+	listResp, err := s.request(http.MethodGet, s.base+"/api/vpn/list?os=Android&os_version=2", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -326,28 +348,70 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	// Capture it and attach to the per-request Cookie header used for ping/conn.
 	for _, sc := range listResp.Header.Values("Set-Cookie") {
 		if v := extractCorplinkCookie(sc, "vpn-token"); v != "" {
-			requestCookieHeader = appendCorplinkCookie(requestCookieHeader, "vpn-token", v)
+			s.cookieHeader = appendCorplinkCookie(s.cookieHeader, "vpn-token", v)
 		}
 	}
+	return nodes.Data, nil
+}
+
+// ListCorplinkVPNNodes discovers TCP-capable names without initiating another
+// login or connecting to any data-plane server.
+func ListCorplinkVPNNodes(opt CorplinkOption) ([]CorplinkVPNNodeSummary, error) {
+	session, err := newCorplinkControlSession(opt)
+	if err != nil {
+		return nil, err
+	}
+	defer session.client.CloseIdleConnections()
+	nodes, err := session.listVPNNodes()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(nodes))
+	summaries := make([]CorplinkVPNNodeSummary, 0, len(nodes))
+	for _, node := range nodes {
+		name := strings.TrimSpace(node.Name)
+		if node.ProtocolMode != 1 || name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		summaries = append(summaries, CorplinkVPNNodeSummary{Name: name, ProtocolMode: node.ProtocolMode})
+	}
+	return summaries, nil
+}
+
+// fetchCorplinkWgInfo 调用 corplink /vpn/conn API 获取当前会话的 wg 信息。
+func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
+	session, err := newCorplinkControlSession(opt)
+	if err != nil {
+		return nil, err
+	}
+	defer session.client.CloseIdleConnections()
+	nodeList, err := session.listVPNNodes()
+	if err != nil {
+		return nil, err
+	}
 	var node *corplinkVPNNode
-	for i := range nodes.Data {
-		candidate := &nodes.Data[i]
+	for i := range nodeList {
+		candidate := &nodeList[i]
 		if corplinkNodeNameMatches(candidate.Name, opt.VPNServerName) && candidate.ProtocolMode == 1 {
 			node = candidate
 			break
 		}
 	}
 	if node == nil && opt.VPNServerName == "" {
-		for i := range nodes.Data {
-			if nodes.Data[i].ProtocolMode == 1 {
-				node = &nodes.Data[i]
+		for i := range nodeList {
+			if nodeList[i].ProtocolMode == 1 {
+				node = &nodeList[i]
 				break
 			}
 		}
 	}
 	if node == nil {
-		available := make([]string, 0, len(nodes.Data))
-		for _, candidate := range nodes.Data {
+		available := make([]string, 0, len(nodeList))
+		for _, candidate := range nodeList {
 			available = append(available, fmt.Sprintf("%s(protocol_mode=%d)", candidate.Name, candidate.ProtocolMode))
 		}
 		return nil, fmt.Errorf("corplink vpn node %q not found or not TCP; available: %s", opt.VPNServerName, strings.Join(available, ", "))
@@ -362,9 +426,9 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		if nodeURL, parseErr := url.Parse(candidate); parseErr == nil {
 			// Match corplink-rs: cookies received on the control hostname are
 			// copied into the selected node's host scope before ping/conn.
-			jar.SetCookies(nodeURL, controlCookies)
+			session.jar.SetCookies(nodeURL, session.controlCookies)
 		}
-		pingResp, pingErr := request(http.MethodGet, candidate+"/vpn/ping?os=Android&os_version=2", nil)
+		pingResp, pingErr := session.request(http.MethodGet, candidate+"/vpn/ping?os=Android&os_version=2", nil)
 		if pingErr == nil {
 			raw, _ := io.ReadAll(io.LimitReader(pingResp.Body, 64<<10))
 			pingResp.Body.Close()
@@ -398,7 +462,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		"public_key": reqPubKey,
 		"otp":        corplinkTotpAt(opt.Code, serverTime),
 	})
-	resp, err := request(http.MethodPost, apiURL, strings.NewReader(string(body)))
+	resp, err := session.request(http.MethodPost, apiURL, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}
