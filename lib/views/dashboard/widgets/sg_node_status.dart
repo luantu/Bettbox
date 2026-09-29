@@ -130,18 +130,18 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
       height: getWidgetHeight(1),
       child: CommonCard(
         onPressed: _openSettings,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              height: globalState.measure.titleMediumHeight + 20,
-              padding: baseInfoEdgeInsets.copyWith(top: 8, bottom: 0),
-              child: Row(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14.ap, vertical: 8.ap),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
                   Icon(Icons.vpn_key_outlined,
-                      color: context.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
+                      size: 18, color: context.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text('SG-Node',
                         maxLines: 1,
@@ -150,35 +150,33 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
                           color: context.colorScheme.onSurfaceVariant,
                         )),
                   ),
-                  SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      tooltip: '刷新状态并恢复 SG-Node',
-                      onPressed: _busy ? null : _refresh,
-                      icon: _busy
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.refresh, size: 18),
+                  IconButton(
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
                     ),
+                    padding: EdgeInsets.zero,
+                    tooltip: '刷新状态并恢复 SG-Node',
+                    onPressed: _busy ? null : _refresh,
+                    icon: _busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh, size: 18),
                   ),
                 ],
               ),
-            ),
-            Padding(
-              padding: baseInfoEdgeInsets.copyWith(top: 0),
-              child: Text(
+              const SizedBox(height: 2),
+              Text(
                 _summary,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: context.textTheme.bodyMedium,
+                style: context.textTheme.bodySmall,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
