@@ -131,6 +131,25 @@ void main() {
     expect(raw['rules'], ['MATCH,DIRECT']);
   });
 
+  test('private DNS is not imposed on other selectable TCP servers', () {
+    final raw = config()..['rules'] = <dynamic>['MATCH,DIRECT'];
+    mergeCorplinkNodeOverlay(
+      raw,
+      settings: settings,
+      selections: const [CorplinkNodeSelection(serverName: 'Singapore-Node')],
+      keyPairs: const {
+        'Singapore-Node': CorplinkNodeKeyPair(
+          publicKey: 'other-public', privateKey: 'other-private',
+        ),
+      },
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+    );
+    final proxy = (raw['proxies'] as List)
+        .singleWhere((item) => item['name'] == 'Singapore-Node-WG');
+    expect((proxy['corplink'] as Map).containsKey('corplink-use-vpn-dns'), isFalse);
+  });
+
   test('unchecked node blocks dependent rules without creating a proxy', () {
     final raw = config();
     (raw['proxies'] as List).add({
