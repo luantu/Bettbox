@@ -126,6 +126,18 @@ void main() {
     expect(raw.toString(), before);
   });
 
+  test('a downloaded same-name WireGuard proxy is not silently replaced', () {
+    final raw = config();
+    (raw['proxies'] as List).add({
+      'name': 'FUZHOU-NODE-1-WG',
+      'type': 'wireguard',
+      'corplink': {'corplink-vpn-server-name': 'FUZHOU-NODE-1'},
+    });
+    final before = raw.toString();
+    expect(() => apply(raw), throwsStateError);
+    expect(raw.toString(), before);
+  });
+
   test('trusted first-pass groups survive a script returning a new map', () {
     final original = config();
     apply(original);
@@ -140,6 +152,9 @@ void main() {
       cookiePath: '/private/cookies.json',
       trustedManagedGroupNames: {
         'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      },
+      trustedManagedProxyNames: {
+        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
       },
     );
     expect((afterScript['proxy-groups'] as List)

@@ -5,17 +5,7 @@ import 'package:bett_box/services/corplink_sg_nodes.dart';
 // JavaScript returns a new map, state.dart passes the first pass's names
 // explicitly; a downloaded group is never trusted by its shape alone.
 final Expando<Set<String>> _generatedGroupsByConfig = Expando<Set<String>>();
-
-bool _isManagedProxy(dynamic item) {
-  if (item is! Map || item['type'] != 'wireguard') return false;
-  final name = item['name'];
-  final corplink = item['corplink'];
-  return name is String &&
-      name.endsWith('-WG') &&
-      corplink is Map &&
-      corplink['corplink-vpn-server-name'] ==
-          name.substring(0, name.length - 3);
-}
+final Expando<Set<String>> _generatedProxiesByConfig = Expando<Set<String>>();
 
 bool _isLegacyProxy(dynamic item) =>
     item is Map &&
@@ -35,6 +25,7 @@ void mergeCorplinkNodeOverlay(
   String? controlIP,
   Set<String> suppressedNames = const {},
   Set<String> trustedManagedGroupNames = const {},
+  Set<String> trustedManagedProxyNames = const {},
 }) {
   if (!settings.enabled) return;
   final selectionNames = <String>{};
@@ -56,9 +47,15 @@ void mergeCorplinkNodeOverlay(
     ...trustedManagedGroupNames,
     ...?_generatedGroupsByConfig[rawConfig],
   };
+  final trustedProxyNames = {
+    ...trustedManagedProxyNames,
+    ...?_generatedProxiesByConfig[rawConfig],
+  };
   final managedProxyNames = <String>{
     for (final item in sourceProxies)
-      if (_isManagedProxy(item)) (item as Map)['name'] as String,
+      if (item is Map && item['name'] is String &&
+          trustedProxyNames.contains(item['name']))
+        item['name'] as String,
   };
   final managedGroupNames = <String>{
     for (final item in sourceGroups)
@@ -127,7 +124,8 @@ void mergeCorplinkNodeOverlay(
 
   final proxies = <dynamic>[
     for (final item in sourceProxies)
-      if (!_isManagedProxy(item) && !_isLegacyProxy(item)) item,
+      if (!(item is Map && managedProxyNames.contains(item['name'])) &&
+          !_isLegacyProxy(item)) item,
   ];
   final apiServer = settings.server.trim();
   for (final selection in selections) {
@@ -228,4 +226,5 @@ void mergeCorplinkNodeOverlay(
       : rules;
   rawConfig.remove(rulesKey == 'rules' ? 'rule' : 'rules');
   _generatedGroupsByConfig[rawConfig] = targetGroupNames;
+  _generatedProxiesByConfig[rawConfig] = targetProxyNames;
 }

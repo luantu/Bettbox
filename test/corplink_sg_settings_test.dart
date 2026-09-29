@@ -51,6 +51,33 @@ void main() {
       const CorplinkSgSettings(enabled: true).validationError,
       isNotNull,
     );
+    expect(
+      const CorplinkSgSettings(
+        enabled: true,
+        username: 'user',
+        password: 'secret',
+        server: 'http://example.invalid',
+      ).validationError,
+      isNotNull,
+    );
+    expect(
+      const CorplinkSgSettings(
+        enabled: true,
+        username: 'user',
+        password: 'secret',
+        server: 'http://example.invalid',
+      ).isConfigured,
+      isFalse,
+    );
+    expect(
+      const CorplinkSgSettings(
+        enabled: true,
+        username: 'user',
+        password: 'secret',
+        server: 'https://user:secret@example.invalid',
+      ).validationError,
+      isNotNull,
+    );
   });
 
   test('uses the password machine flow for Android CorpLink login', () {

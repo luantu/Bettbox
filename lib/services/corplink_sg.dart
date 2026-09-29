@@ -43,10 +43,18 @@ class CorplinkSgSettings {
     this.server = '',
   });
 
-  bool get isConfigured =>
-      username.trim().isNotEmpty &&
-      password.isNotEmpty &&
-      server.trim().isNotEmpty;
+  bool get isConfigured {
+    final uri = Uri.tryParse(server.trim());
+    return username.trim().isNotEmpty &&
+        password.isNotEmpty &&
+        uri != null &&
+        uri.scheme == 'https' &&
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty &&
+        !uri.hasQuery &&
+        !uri.hasFragment &&
+        (uri.path.isEmpty || uri.path == '/');
+  }
 
   String? get validationError {
     if (!enabled) return null;
@@ -54,7 +62,15 @@ class CorplinkSgSettings {
     if (password.isEmpty) return '请输入飞连密码';
     if (server.trim().isEmpty) return '请输入上游服务器地址';
     final uri = Uri.tryParse(server.trim());
-    if (uri == null || uri.host.isEmpty) return '上游服务器地址无效';
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        (uri.path.isNotEmpty && uri.path != '/')) {
+      return '上游服务器必须使用 HTTPS 地址';
+    }
     return null;
   }
 
@@ -635,6 +651,7 @@ Future<Set<String>> applyCorplinkSgNode(
   Map<String, dynamic> rawConfig, {
   bool suppressNode = false,
   Set<String> trustedManagedGroupNames = const {},
+  Set<String> trustedManagedProxyNames = const {},
 }) async {
   final settings = await CorplinkSgSettings.load();
   if (!settings.enabled) return <String>{};
@@ -705,9 +722,11 @@ Future<Set<String>> applyCorplinkSgNode(
         ? {for (final selection in selections) selection.serverName}
         : const {},
     trustedManagedGroupNames: trustedManagedGroupNames,
+    trustedManagedProxyNames: trustedManagedProxyNames,
   );
   return {
     for (final selection in selections) selection.serverName,
+    for (final selection in selections) '${selection.serverName}-WG',
     'SG-Node',
     'SG-OpenAI',
   };
