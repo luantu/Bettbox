@@ -63,7 +63,7 @@ void main() {
     );
   }
 
-  test('two independent nodes, exact-name groups and legacy alias are idempotent', () {
+  test('two independent nodes generate only their exact-name groups', () {
     final raw = config();
     apply(raw);
     apply(raw);
@@ -86,10 +86,9 @@ void main() {
         .containsKey('corplink-use-vpn-dns'), isFalse);
     expect(proxies.singleWhere((p) => p['name'] == 'FUZHOU-NODE-1-WG')
         ['corplink']['corplink-use-vpn-dns'], isTrue);
-    expect(groups.singleWhere((g) => g['name'] == 'SG-Node')['proxies'],
-        ['FZ-INT-Node']);
-    expect(groups.singleWhere((g) => g['name'] == 'SG-OpenAI')['proxies'].first,
-        'SG-Node');
+    expect(groups.map((g) => g['name']),
+        ['OpenAI', 'FZ-INT-Node', 'FUZHOU-NODE-1']);
+    expect(raw['rules'], contains('DOMAIN-SUFFIX,chatgpt.com,FZ-INT-Node'));
     expect((raw['rules'] as List).where((r) =>
         r == 'RULE-SET,fuzhou-provider,FUZHOU-NODE-1').length, 1);
     expect((raw['rules'] as List).last, 'MATCH,DIRECT');
@@ -165,9 +164,13 @@ void main() {
         isEmpty);
   });
 
-  test('missing authorization and disabled selection fail closed per group', () {
+  test('missing authorization creates no node, group or reject placeholder', () {
     final raw = config();
-    (raw['proxies'] as List).first['dialer-proxy'] = 'FUZHOU-NODE-1-WG';
+    (raw['proxies'] as List).add({
+      'name': 'Airport-Needs-Fuzhou', 'type': 'socks5',
+      'server': 'airport.example.invalid', 'port': 1080,
+      'dialer-proxy': 'FUZHOU-NODE-1-WG',
+    });
     (raw['proxy-groups'] as List).add({
       'name': 'Downloaded-Uses-WG', 'type': 'select',
       'proxies': <String>['FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG'],
@@ -185,21 +188,13 @@ void main() {
       keyPairs: keyPairs,
     );
     final groups = raw['proxy-groups'] as List;
-    expect(groups.singleWhere((g) => g['name'] == 'FZ-INT-Node')['proxies'], ['REJECT']);
-    expect(groups.singleWhere((g) => g['name'] == 'FUZHOU-NODE-1')['proxies'], ['REJECT']);
-    expect((raw['proxies'] as List).map((p) => p['name']),
-        ['Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
-    for (final name in ['FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']) {
-      expect((raw['proxies'] as List).singleWhere((p) => p['name'] == name)['type'],
-          'reject');
-    }
-    expect(groups.singleWhere((g) => g['name'] == 'Downloaded-Uses-WG')['proxies'],
-        ['FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
-    expect((raw['sub-rules'] as Map)['downloaded'],
-        ['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG']);
+    expect(groups.map((g) => g['name']), ['OpenAI']);
+    expect((raw['proxies'] as List).map((p) => p['name']), ['Airport-A']);
+    expect((raw['sub-rules'] as Map)['downloaded'], isEmpty);
+    expect(raw['rules'], ['MATCH,DIRECT']);
   });
 
-  test('disabled authorized node keeps reject proxy without affecting sibling', () {
+  test('disabled authorized node is absent without affecting sibling', () {
     final raw = config();
     apply(raw, nodes: const [
       CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
@@ -208,8 +203,9 @@ void main() {
     final proxies = raw['proxies'] as List;
     expect(proxies.singleWhere((p) => p['name'] == 'FZ-INT-Node-WG')['type'],
         'wireguard');
-    expect(proxies.singleWhere((p) => p['name'] == 'FUZHOU-NODE-1-WG')['type'],
-        'reject');
+    expect(proxies.where((p) => p['name'] == 'FUZHOU-NODE-1-WG'), isEmpty);
+    expect((raw['proxy-groups'] as List).where((g) => g['name'] == 'FUZHOU-NODE-1'),
+        isEmpty);
   });
 
   test('a downloaded name collision is rejected before touching the config', () {
@@ -337,14 +333,13 @@ void main() {
     );
     expect(conflicts, contains('FUZHOU-NODE-1'));
     final groups = afterScript['proxy-groups'] as List;
-    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    expect(groups.where((item) => item['name'] == 'FUZHOU-NODE-1'), isEmpty);
     expect(groups.singleWhere((item) => item['name'] == 'FZ-INT-Node')['proxies'],
         ['FZ-INT-Node-WG']);
     expect(groups.singleWhere((item) => item['name'] == 'OpenAI')['proxies'],
         contains('Airport-A'));
-    expect((afterScript['proxies'] as List).singleWhere((item) =>
-        item['name'] == 'FUZHOU-NODE-1-WG')['type'], 'reject');
+    expect((afterScript['proxies'] as List).where((item) =>
+        item['name'] == 'FUZHOU-NODE-1-WG'), isEmpty);
   });
 
   test('script-modified managed proxy cannot silently redirect node traffic', () {
@@ -417,12 +412,12 @@ void main() {
     expect(safe['rules'], contains('MATCH,REJECT'));
     expect(safe['sub-rules'], isNull);
     expect((safe['proxies'] as List).map((item) => item['name']),
-        ['Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
+        ['Airport-A']);
     expect((safe['proxies'] as List).first.containsKey('dialer-proxy'), isFalse);
-    expect((safe['proxies'] as List).last['type'], 'reject');
-    expect((safe['proxy-groups'] as List)
-        .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    expect((safe['proxies'] as List).where((item) => item['type'] == 'reject'),
+        isEmpty);
+    expect((safe['proxy-groups'] as List).where((item) =>
+        item['name'] == 'FUZHOU-NODE-1'), isEmpty);
   });
 
   test('partial script deletion of one managed group blocks only that node', () {
@@ -459,13 +454,12 @@ void main() {
     );
     expect(conflicts, contains('FUZHOU-NODE-1'));
     final groups = afterScript['proxy-groups'] as List;
-    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    expect(groups.where((item) => item['name'] == 'FUZHOU-NODE-1'), isEmpty);
     expect(groups.singleWhere((item) => item['name'] == 'FZ-INT-Node')['proxies'],
         ['FZ-INT-Node-WG']);
   });
 
-  test('direct rule targeting a suppressed WG proxy is rewritten to REJECT', () {
+  test('direct rule targeting a suppressed WG proxy is skipped', () {
     final raw = config();
     apply(raw);
     final managed = captureCorplinkManagedNames(raw, {
@@ -500,10 +494,10 @@ void main() {
       originalProxyNames: managed.allProxyNames,
       expectedManagedObjects: expected,
     );
-    expect(afterScript['rules'], contains('DOMAIN-SUFFIX,example.com,REJECT'));
-    expect((afterScript['proxy-groups'] as List)
-        .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    expect(afterScript['rules'],
+        isNot(contains('DOMAIN-SUFFIX,example.com,FUZHOU-NODE-1-WG')));
+    expect((afterScript['proxy-groups'] as List).where((item) =>
+        item['name'] == 'FUZHOU-NODE-1'), isEmpty);
   });
 
   test('whole-list script replacement still restores managed groups', () {
@@ -578,10 +572,8 @@ void main() {
     );
     expect(conflicts, contains('FUZHOU-NODE-1'));
     final groups = afterScript['proxy-groups'] as List;
-    expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
-        ['REJECT']);
-    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    expect(groups.where((item) => item['name'] == 'Other'), isEmpty);
+    expect(groups.where((item) => item['name'] == 'FUZHOU-NODE-1'), isEmpty);
   });
 
   test('renamed proxy with removed CorpLink marker is still fail-closed', () {
@@ -697,19 +689,17 @@ void main() {
       suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
     );
     expect((safe['proxies'] as List).map((item) => item['name']),
-        ['Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
-    expect((safe['proxies'] as List).last['type'], 'reject');
+        ['Airport-A']);
     expect(safe['rules'], contains('MATCH,REJECT'));
     expect(safe['mode'], 'rule');
     expect(safe['rules'], isNot(contains('DOMAIN-SUFFIX,example.com,Airport-B')));
     expect(safe['sub-rules'], isNull);
     expect((safe['rule-providers'] as Map).containsKey('test-provider'), isFalse);
-    expect((safe['proxy-groups'] as List)
-        .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    expect((safe['proxy-groups'] as List).where((item) =>
+        item['name'] == 'FUZHOU-NODE-1'), isEmpty);
   });
 
-  test('fail-closed fallback keeps referenced WG names as reject adapters', () {
+  test('fail-closed fallback drops references to absent WG names', () {
     final raw = config();
     (raw['proxies'] as List).first['dialer-proxy'] = 'FUZHOU-NODE-1-WG';
     (raw['proxy-groups'] as List).add({
@@ -748,15 +738,10 @@ void main() {
       expectedManagedObjects: expected,
     );
     final proxies = safe['proxies'] as List;
-    expect(proxies.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1-WG')['type'],
-        'reject');
-    expect(proxies.singleWhere((item) => item['name'] == 'Airport-A')['dialer-proxy'],
-        'FUZHOU-NODE-1-WG');
-    expect((safe['proxy-groups'] as List)
-        .singleWhere((item) => item['name'] == 'Downloaded-Uses-WG')['proxies'],
-        ['FUZHOU-NODE-1-WG']);
-    expect((safe['sub-rules'] as Map)['downloaded'],
-        ['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG']);
+    expect(proxies, isEmpty);
+    expect((safe['proxy-groups'] as List).where((item) =>
+        item['name'] == 'Downloaded-Uses-WG'), isEmpty);
+    expect((safe['sub-rules'] as Map)['downloaded'], isEmpty);
     expect(safe['rules'], contains('MATCH,REJECT'));
   });
 
@@ -768,10 +753,11 @@ void main() {
         p['name'] == 'FUZHOU-NODE-1-WG'), isEmpty);
     expect((raw['proxy-groups'] as List).where((g) =>
         g['name'] == 'FUZHOU-NODE-1'), isEmpty);
-    expect((raw['rules'] as List), contains('RULE-SET,fuzhou-provider,FUZHOU-NODE-1'));
+    expect((raw['rules'] as List),
+        isNot(contains('RULE-SET,fuzhou-provider,FUZHOU-NODE-1')));
   });
 
-  test('legacy SG alias follows the discovered INTL spelling', () {
+  test('ChatGPT rules follow the discovered INTL spelling directly', () {
     final raw = config();
     mergeCorplinkNodeOverlay(
       raw,
@@ -790,13 +776,12 @@ void main() {
       cookiePath: '/private/cookies.json',
     );
     final groups = raw['proxy-groups'] as List;
-    expect(groups.singleWhere((g) => g['name'] == 'SG-Node')['proxies'],
-        ['FUZHOU_INTL_node']);
-    expect(groups.singleWhere((g) => g['name'] == 'SG-OpenAI')['proxies'].first,
-        'SG-Node');
+    expect(groups.map((g) => g['name']),
+        ['OpenAI', 'FUZHOU_INTL_node', 'FUZHOU-NODE-1']);
+    expect(raw['rules'], contains('DOMAIN-SUFFIX,chatgpt.com,FUZHOU_INTL_node'));
   });
 
-  test('SG alias prefers enabled INTL spelling when both aliases exist', () {
+  test('ChatGPT rules prefer the enabled INTL spelling', () {
     final raw = config();
     mergeCorplinkNodeOverlay(
       raw,
@@ -813,8 +798,8 @@ void main() {
       cookiePath: '/private/cookies.json',
     );
     final groups = raw['proxy-groups'] as List;
-    expect(groups.singleWhere((g) => g['name'] == 'SG-Node')['proxies'],
-        ['FUZHOU_INTL_node']);
+    expect(groups.map((g) => g['name']), ['OpenAI', 'FUZHOU_INTL_node']);
+    expect(raw['rules'], contains('DOMAIN-SUFFIX,chatgpt.com,FUZHOU_INTL_node'));
   });
 
   test('generated node and group names cannot collide with each other', () {

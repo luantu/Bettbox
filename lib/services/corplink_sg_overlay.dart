@@ -182,7 +182,9 @@ Set<String> _pruneUnavailableNodeReferences(
   if (subRules is Map) {
     for (final key in subRules.keys.toList()) {
       final value = subRules[key];
-      if (value is List) {
+      if (value is List<String>) {
+        subRules[key] = List<String>.from(value)..removeWhere(targetsUnavailable);
+      } else if (value is List) {
         subRules[key] = List<dynamic>.from(value)..removeWhere(targetsUnavailable);
       }
     }
@@ -225,10 +227,16 @@ Set<String> mergeCorplinkNodeOverlay(
   if (enabledIntl > 1) {
     throw StateError('CORPLINK_DUPLICATE_INTL_ALIAS');
   }
-  for (final name in selectionNames) {
-    if (selectionNames.contains('$name-WG')) {
-      throw StateError('CORPLINK_GENERATED_NAME_COLLISION');
-    }
+  final plannedGroups = <String>{
+    for (final selection in selections)
+      if (selection.enabled) selection.serverName.toLowerCase(),
+  };
+  final plannedProxies = <String>{
+    for (final selection in selections)
+      if (selection.enabled) '${selection.serverName}-WG'.toLowerCase(),
+  };
+  if (plannedGroups.intersection(plannedProxies).isNotEmpty) {
+    throw StateError('CORPLINK_GENERATED_NAME_COLLISION');
   }
 
   final sourceProxies = List<dynamic>.from(rawConfig['proxies'] as List? ?? const []);
