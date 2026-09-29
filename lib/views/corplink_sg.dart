@@ -234,11 +234,32 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       await settings.save();
       final names = await discoverCorplinkVpnNodeNames(settings);
       if (!mounted) return;
-      final selectedNames = _nodes.map((node) => node.serverName).toSet();
+      String? discoveredIntl;
+      for (final name in names) {
+        if (isIntlCorplinkServerName(name)) {
+          discoveredIntl = name;
+          break;
+        }
+      }
+      final currentNodes = discoveredIntl != null &&
+              !names.contains('FZ-INT-Node') &&
+              !_nodes.any((node) => node.serverName == discoveredIntl)
+          ? [
+              for (final node in _nodes)
+                node.serverName == 'FZ-INT-Node'
+                    ? CorplinkNodeSelection(
+                        serverName: discoveredIntl,
+                        enabled: node.enabled,
+                        healthUrl: node.healthUrl,
+                      )
+                    : node,
+            ]
+          : _nodes;
+      final selectedNames = currentNodes.map((node) => node.serverName).toSet();
       setState(() {
         _discoveredNames = names;
         _nodes = [
-          ..._nodes,
+          ...currentNodes,
           for (final name in names)
             if (!selectedNames.contains(name))
               CorplinkNodeSelection(serverName: name, enabled: false),

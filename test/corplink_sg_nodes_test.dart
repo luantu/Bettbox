@@ -105,6 +105,25 @@ void main() {
     expect(reopened.privateKey, legacyPrivate);
   });
 
+  test('legacy INTL alias reuses the same saved WireGuard key', () async {
+    final secrets = _MemoryNodeSecrets();
+    final legacyPrivate = base64Encode(List<int>.filled(32, 7));
+    final legacyPublic = base64Encode(List<int>.filled(32, 9));
+    final key = await loadOrCreateCorplinkNodeKeyPair(
+      settings,
+      'FUZHOU_INTL_node',
+      secrets: secrets,
+      legacyAuth: {
+        'username': 'test-user',
+        'server': 'https://example.invalid',
+        'private_key': legacyPrivate,
+        'public_key': legacyPublic,
+      },
+    );
+    expect(key.privateKey, legacyPrivate);
+    expect(key.publicKey, legacyPublic);
+  });
+
   test('server and probe validation rejects unsafe names or URLs', () {
     expect(const CorplinkNodeSelection(serverName: '').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'A,B').validationError, isNotNull);

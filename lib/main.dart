@@ -24,6 +24,8 @@ import 'common/external_control.dart';
 import 'common/network_matcher.dart';
 import 'models/models.dart';
 import 'services/corplink_sg.dart';
+import 'services/corplink_sg_nodes.dart';
+import 'services/corplink_sg_runtime.dart';
 import 'services/sg_network_handoff.dart';
 
 ReceivePort? _serviceReceiverPort;
@@ -138,6 +140,20 @@ Future<void> _service(List<String> flags) async {
           // TCP reset is not a completed WireGuard handshake. Check after
           // the initial handshake window, then retry once if still unready.
           await Future.delayed(const Duration(seconds: 8));
+          final selectedNodes = await loadCorplinkNodeSelections();
+          if (selectedNodes != null) {
+            final remaining = await restoreCorplinkNodesAfterNetworkChange(
+              selectedNodes.where((node) => node.enabled)
+                  .map((node) => node.serverName),
+              ensureHandshake: clashCore.ensureCorplinkNode,
+              readStatus: readCorplinkNodeStatus,
+              reconnect: clashCore.reconnectCorplinkNode,
+              rebuild: clashCore.rebuildCorplinkNode,
+            );
+            commonPrint.log('[reconnectTunnels] independent SG nodes '
+                'still unready=${remaining.length}');
+            return;
+          }
           var ready = await clashLibHandler.corplinkSgReady();
           final stillRunning = await vpn?.getStatus();
           if (ready == false && stillRunning == true) {

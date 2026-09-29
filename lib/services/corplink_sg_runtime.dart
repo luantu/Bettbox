@@ -62,6 +62,39 @@ Future<SgCoreStatus> refreshCorplinkNodeStatus(
   );
 }
 
+/// After Android moves to a new physical network, probe each managed
+/// handshake and retry only the outbounds that did not recover. This does
+/// not reload the Profile or disturb an already-ready sibling.
+Future<Set<String>> restoreCorplinkNodesAfterNetworkChange(
+  Iterable<String> serverNames, {
+  required Future<bool> Function(String) ensureHandshake,
+  required Future<SgCoreStatus> Function(String) readStatus,
+  required Future<bool> Function(String) reconnect,
+  required Future<bool> Function(String) rebuild,
+}) async {
+  final unready = <String>{};
+  await Future.wait([
+    for (final name in serverNames.toSet())
+      () async {
+        try {
+          await ensureHandshake(name);
+          var status = await readStatus(name);
+          if (status.phase != SgConnectionPhase.ready) {
+            final accepted = status.rebuildRequired
+                ? await rebuild(name)
+                : await reconnect(name);
+            if (accepted) await ensureHandshake(name);
+            status = await readStatus(name);
+          }
+          if (status.phase != SgConnectionPhase.ready) unready.add(name);
+        } catch (_) {
+          unready.add(name);
+        }
+      }(),
+  ]);
+  return unready;
+}
+
 Future<List<String>> discoverCorplinkVpnNodeNames(CorplinkSgSettings settings) async {
   if (!settings.isConfigured || !(await ensureCorplinkAuthorization(settings))) {
     throw StateError('CORPLINK_AUTH_REQUIRED');

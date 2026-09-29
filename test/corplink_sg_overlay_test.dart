@@ -122,4 +122,29 @@ void main() {
         g['name'] == 'FUZHOU-NODE-1'), isEmpty);
     expect((raw['rules'] as List), contains('RULE-SET,fuzhou-provider,FUZHOU-NODE-1'));
   });
+
+  test('legacy SG alias follows the discovered INTL spelling', () {
+    final raw = config();
+    mergeCorplinkNodeOverlay(
+      raw,
+      settings: settings,
+      selections: const [
+        CorplinkNodeSelection(serverName: 'FUZHOU_INTL_node'),
+        CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1'),
+      ],
+      keyPairs: const {
+        'FUZHOU_INTL_node': CorplinkNodeKeyPair(
+          publicKey: 'intl-public', privateKey: 'intl-private'),
+        'FUZHOU-NODE-1': CorplinkNodeKeyPair(
+          publicKey: 'fuzhou-public', privateKey: 'fuzhou-private'),
+      },
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+    );
+    final groups = raw['proxy-groups'] as List;
+    expect(groups.singleWhere((g) => g['name'] == 'SG-Node')['proxies'],
+        ['FUZHOU_INTL_node']);
+    expect(groups.singleWhere((g) => g['name'] == 'SG-OpenAI')['proxies'].first,
+        'SG-Node');
+  });
 }

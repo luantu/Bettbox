@@ -26,7 +26,9 @@ bool _isManagedGroup(dynamic item, Set<String> knownNames) {
   if (name == 'SG-Node') {
     return item['hidden'] == true &&
         (members.length == 1 &&
-            (members.single == 'FZ-INT-Node' || members.single == 'REJECT'));
+            (members.single == 'REJECT' ||
+                (members.single is String &&
+                    isIntlCorplinkServerName(members.single as String))));
   }
   return knownNames.contains(name) &&
       members.length == 1 &&
@@ -113,6 +115,14 @@ void mergeCorplinkNodeOverlay(
           keyPairs.containsKey(selection.serverName))
         selection.serverName,
   };
+  String? intlName;
+  for (final selection in selections) {
+    if (isIntlCorplinkServerName(selection.serverName)) {
+      intlName = selection.serverName;
+      break;
+    }
+  }
+  final intlActive = intlName != null && activeNames.contains(intlName);
 
   final proxies = <dynamic>[
     for (final item in sourceProxies)
@@ -175,7 +185,7 @@ void mergeCorplinkNodeOverlay(
         (name == 'GLOBAL' || openAiGroup.hasMatch(name))) {
       final members = List<dynamic>.from(group['proxies'] as List);
       members.removeWhere((member) => member == 'SG-Node');
-      if (activeNames.contains('FZ-INT-Node') && settings.routeOpenAi) {
+      if (intlActive && settings.routeOpenAi) {
         members.insert(0, 'SG-Node');
       }
       if (members.isEmpty) members.add('REJECT');
@@ -195,14 +205,14 @@ void mergeCorplinkNodeOverlay(
     'name': 'SG-Node',
     'type': 'select',
     'hidden': true,
-    'proxies': selectionNames.contains('FZ-INT-Node')
-        ? <String>['FZ-INT-Node']
+    'proxies': intlName != null
+        ? <String>[intlName]
         : <String>['REJECT'],
   });
   groups.add({
     'name': 'SG-OpenAI',
     'type': 'select',
-    'proxies': activeNames.contains('FZ-INT-Node')
+    'proxies': intlActive
         ? <String>['SG-Node', if (primarySubscriptionGroup != null) primarySubscriptionGroup]
         : <String>['REJECT'],
   });

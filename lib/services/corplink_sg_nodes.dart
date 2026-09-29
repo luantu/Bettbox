@@ -10,6 +10,11 @@ const _selectionPreferenceKey = 'corplinkSg.nodeSelections.v1';
 const _secretPrefix = 'corplinkSg.nodes.v1';
 const _secureStorage = FlutterSecureStorage();
 
+bool isIntlCorplinkServerName(String serverName) {
+  final canonical = serverName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  return canonical == 'fzintnode' || canonical == 'fuzhouintlnode';
+}
+
 abstract class CorplinkNodeSecretStore {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
@@ -102,7 +107,7 @@ Future<CorplinkNodeKeyPair> loadOrCreateCorplinkNodeKeyPair(
   }
 
   CorplinkNodeKeyPair pair;
-  if (serverName == 'FZ-INT-Node' &&
+  if (isIntlCorplinkServerName(serverName) &&
       corplinkAuthMatchesSettings(legacyAuth, settings)) {
     pair = CorplinkNodeKeyPair(
       publicKey: legacyAuth!['public_key'] as String,
