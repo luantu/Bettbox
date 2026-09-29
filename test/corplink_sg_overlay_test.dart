@@ -476,8 +476,8 @@ void main() {
       originalProxyNames: managed.allProxyNames,
       expectedManagedObjects: expected,
     ), isTrue);
-    final conflicts = <String>{};
-    mergeCorplinkNodeOverlay(
+    final before = afterScript.toString();
+    expect(() => mergeCorplinkNodeOverlay(
       afterScript,
       settings: settings,
       selections: selections,
@@ -488,19 +488,11 @@ void main() {
       trustedManagedProxyNames: managed.proxies,
       originalProxyNames: managed.allProxyNames,
       expectedManagedObjects: expected,
-      onScriptConflict: conflicts.addAll,
-    );
-    expect(conflicts, contains('FUZHOU-NODE-1-WG'));
-    expect((afterScript['proxies'] as List)
-        .where((item) => item['name'] == 'Other-WG'), isEmpty);
-    final groups = afterScript['proxy-groups'] as List;
-    expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
-        ['REJECT']);
-    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
-        ['REJECT']);
+    ), throwsStateError);
+    expect(afterScript.toString(), before);
   });
 
-  test('ambiguous script keeps provider rules and rewrites new direct target', () {
+  test('ambiguous script fallback blocks all traffic and drops dangling refs', () {
     final original = config();
     apply(original);
     final managed = captureCorplinkManagedNames(original, {
@@ -525,6 +517,14 @@ void main() {
       'server': 'airport.example.invalid', 'port': 1080,
     });
     (afterScript['rules'] as List).insert(0, 'DOMAIN-SUFFIX,example.com,Airport-B');
+    afterScript['sub-rules'] = {
+      'test': <String>['DOMAIN-SUFFIX,sub.example.com,Airport-B'],
+    };
+    (afterScript['proxies'] as List).add({
+      'name': 'Relay', 'type': 'socks5',
+      'server': 'relay.example.invalid', 'port': 1081,
+      'dialer-proxy': 'Airport-B',
+    });
     (afterScript['rule-providers'] as Map).addAll({
       'test-provider': {'type': 'http', 'url': 'https://example.invalid/rules',
         'path': './test-provider.yaml', 'interval': 3600},
@@ -538,9 +538,9 @@ void main() {
       expectedManagedObjects: expected,
     ), isTrue);
 
-    final conflicts = <String>{};
+    final safe = failClosedCorplinkScriptResult(original);
     mergeCorplinkNodeOverlay(
-      afterScript,
+      safe,
       settings: settings,
       selections: selections,
       keyPairs: keyPairs,
@@ -550,17 +550,14 @@ void main() {
       trustedManagedProxyNames: managed.proxies,
       originalProxyNames: managed.allProxyNames,
       expectedManagedObjects: expected,
-      onScriptConflict: conflicts.addAll,
+      suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
     );
-    expect(conflicts, contains('Airport-B'));
-    expect((afterScript['proxies'] as List).map((item) => item['name']),
-        contains('Airport-A'));
-    expect((afterScript['proxies'] as List).map((item) => item['name']),
-        isNot(contains('Airport-B')));
-    expect(afterScript['rules'], contains('DOMAIN-SUFFIX,example.com,REJECT'));
-    expect(afterScript['rules'], contains('RULE-SET,test-provider,FUZHOU-NODE-1'));
-    expect((afterScript['rule-providers'] as Map).containsKey('test-provider'), isTrue);
-    expect((afterScript['proxy-groups'] as List)
+    expect((safe['proxies'] as List).map((item) => item['name']), ['Airport-A']);
+    expect(safe['rules'], contains('MATCH,REJECT'));
+    expect(safe['rules'], isNot(contains('DOMAIN-SUFFIX,example.com,Airport-B')));
+    expect(safe['sub-rules'], isNull);
+    expect((safe['rule-providers'] as Map).containsKey('test-provider'), isFalse);
+    expect((safe['proxy-groups'] as List)
         .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
         ['REJECT']);
   });

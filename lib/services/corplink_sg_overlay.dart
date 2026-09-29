@@ -72,6 +72,20 @@ bool hasAmbiguousCorplinkScriptProxyChange(
   return currentNames.difference(originalProxyNames).isNotEmpty;
 }
 
+Map<String, dynamic> failClosedCorplinkScriptResult(
+  Map<String, dynamic> preScriptConfig,
+) {
+  final safe = Map<String, dynamic>.from(
+    jsonDecode(jsonEncode(preScriptConfig)) as Map,
+  );
+  // We cannot know what a removed/renamed managed proxy was changed into.
+  // Drop the entire script result, including its sub-rules and dialer-proxy
+  // references, and block all destinations until the script is corrected.
+  safe['rules'] = <dynamic>['MATCH,REJECT'];
+  safe.remove('rule');
+  return safe;
+}
+
 bool _isLegacyProxy(dynamic item) =>
     item is Map &&
     item['name'] == 'SG-Node' &&
@@ -144,6 +158,14 @@ void mergeCorplinkNodeOverlay(
     ...?_generatedSnapshotsByConfig[rawConfig],
     ...expectedManagedObjects,
   };
+  if (hasAmbiguousCorplinkScriptProxyChange(
+    rawConfig,
+    trustedManagedProxyNames: trustedProxyNames,
+    originalProxyNames: originalProxyNames,
+    expectedManagedObjects: expected,
+  )) {
+    throw StateError('CORPLINK_SCRIPT_PROXY_PROVENANCE_AMBIGUOUS');
+  }
   final scriptConflicts = <String>{};
   final missingManagedProxyNames = <String>{};
   for (final item in [...sourceProxies, ...sourceGroups]) {
@@ -223,23 +245,8 @@ void mergeCorplinkNodeOverlay(
           scriptConflicts.contains('$name-WG'))
         name,
   };
-  final ambiguousNewProxyNames = <String>{
-    if (hasAmbiguousCorplinkScriptProxyChange(
-      rawConfig,
-      trustedManagedProxyNames: trustedProxyNames,
-      originalProxyNames: originalProxyNames,
-      expectedManagedObjects: expected,
-    ))
-      for (final item in sourceProxies)
-        if (item is Map &&
-            item['name'] is String &&
-            !originalProxyNames.contains(item['name']))
-          item['name'] as String,
-  };
-  scriptConflicts.addAll(ambiguousNewProxyNames);
   final suppressedProxyNames = <String>{
     for (final name in scriptSuppressedNames) '$name-WG',
-    ...ambiguousNewProxyNames,
     for (final item in sourceProxies)
       if (item is Map &&
           item['name'] is String &&

@@ -727,7 +727,21 @@ class GlobalState {
         if (item is Map && trustedCorplinkNames.contains(item['name']))
           item['name'] as String: jsonDecode(jsonEncode(item)),
     };
-    final rawConfig = await handleEvaluate(configMap, profile: targetProfile);
+    final preScriptConfig = Map<String, dynamic>.from(
+      jsonDecode(jsonEncode(configMap)) as Map,
+    );
+    var rawConfig = await handleEvaluate(configMap, profile: targetProfile);
+    var effectiveSuppressCorplinkNode = suppressCorplinkNode;
+    if (hasAmbiguousCorplinkScriptProxyChange(
+      rawConfig,
+      trustedManagedProxyNames: managedCorplinkNames.proxies,
+      originalProxyNames: managedCorplinkNames.allProxyNames,
+      expectedManagedObjects: expectedCorplinkObjects,
+    )) {
+      rawConfig = failClosedCorplinkScriptResult(preScriptConfig);
+      effectiveSuppressCorplinkNode = true;
+      showNotifier('覆写脚本无法确认飞连代理来源；本次配置已阻断全部规则流量，请修正脚本');
+    }
     final originalProxyGroups = rawConfig['proxy-groups'];
 
     final realPatchConfig = patchConfig.copyWith(
@@ -1172,7 +1186,7 @@ class GlobalState {
     // after evaluation to keep the final groups consistent as well.
     await applyCorplinkSgNode(
       rawConfig,
-      suppressNode: suppressCorplinkNode,
+      suppressNode: effectiveSuppressCorplinkNode,
       trustedManagedGroupNames: managedCorplinkNames.groups,
       trustedManagedProxyNames: managedCorplinkNames.proxies,
       originalProxyNames: managedCorplinkNames.allProxyNames,
