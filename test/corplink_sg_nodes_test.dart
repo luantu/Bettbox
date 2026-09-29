@@ -135,6 +135,12 @@ void main() {
     expect(const CorplinkNodeSelection(serverName: 'REJECT-DROP').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'COMPATIBLE').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'PASS-RULE').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(
+      serverName: 'https://internal.example.invalid/',
+    ).validationError, isNotNull);
+    expect(const CorplinkNodeSelection(
+      serverName: 'Fuzhou/Node-1',
+    ).validationError, isNotNull);
     expect(
       const CorplinkNodeSelection(
         serverName: 'FUZHOU-NODE-1',
@@ -163,6 +169,22 @@ void main() {
       ).validationError,
       isNull,
     );
+  });
+
+  test('saved URL mistaken for a node is dropped without removing real nodes', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('corplinkSg.nodeSelections.v1', jsonEncode([
+      {'serverName': 'FZ-INT-Node', 'enabled': true},
+      {'serverName': 'Fuzhou-Node-1', 'enabled': true},
+      {'serverName': 'https://internal.example.invalid/', 'enabled': false},
+    ]));
+    final secrets = _MemoryNodeSecrets();
+    final selections = await loadCorplinkNodeSelections(secrets: secrets);
+    expect(selections?.map((node) => node.serverName).toList(),
+        ['FZ-INT-Node', 'Fuzhou-Node-1']);
+    await saveCorplinkNodeSelections(selections!, secrets: secrets);
+    expect(prefs.getString('corplinkSg.nodeSelections.v1'),
+        isNot(contains('internal.example.invalid')));
   });
 
   test('missing selection record keeps legacy mode distinct from empty selection', () async {
