@@ -719,6 +719,13 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	protectedRules := append([]C.Rule(nil), rules...)
+	for _, nested := range subRules {
+		protectedRules = append(protectedRules, nested...)
+	}
+	if err := appendCorplinkDNSPolicies(dnsCfg, proxies, protectedRules, ruleProviders); err != nil {
+		return nil, err
+	}
 	config.DNS = dnsCfg
 
 	err = parseTun(rawCfg.Tun, dnsCfg, config.General)

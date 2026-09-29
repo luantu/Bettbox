@@ -21,7 +21,7 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 			_, _ = io.WriteString(w, `{"code":0,"data":"ok"}`)
 			return
 		}
-		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":"10.21.0.2","ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400}}}`, serverPublic))
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":"10.21.0.2","ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400,"vpn_dns":"10.21.0.53","vpn_dns_domain_split":["corp.example.invalid"]}}}`, serverPublic))
 	}))
 	defer data.Close()
 	_, port, err := net.SplitHostPort(data.Listener.Addr().String())
@@ -54,6 +54,7 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 				"corplink-code":            "JBSWY3DPEHPK3PXP",
 				"corplink-vpn-server-name": name,
 				"corplink-public-key":      privateKey,
+				"corplink-use-vpn-dns":     true,
 			},
 		}
 	}
@@ -68,7 +69,7 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 		{"name": "FZ-INT-Node", "type": "select", "proxies": []string{"FZ-INT-Node-WG"}},
 		{"name": "FUZHOU-NODE-1", "type": "select", "proxies": []string{"FUZHOU-NODE-1-WG"}},
 	}
-	raw.Rule = []string{"MATCH,Airport"}
+	raw.Rule = []string{"DOMAIN-SUFFIX,inside.example.invalid,FZ-INT-Node", "MATCH,Airport"}
 	parsed, err := config.ParseRawConfig(raw)
 	if err != nil {
 		t.Fatalf("one CorpLink failure invalidated the whole profile: %v", err)
@@ -77,6 +78,21 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 		if parsed.Proxies[name] == nil {
 			t.Fatalf("proxy/group %s missing after isolated failure", name)
 		}
+	}
+	protected := map[string]bool{}
+	for _, policy := range parsed.DNS.NameServerPolicy {
+		if policy.Domain != "+.inside.example.invalid" &&
+			policy.Domain != "+.corp.example.invalid" {
+			continue
+		}
+		protected[policy.Domain] = true
+		if len(policy.NameServers) != 1 || !policy.NameServers[0].DynamicAddress ||
+			policy.NameServers[0].ProxyAdapter == nil {
+			t.Fatal("CorpLink private DNS policy was not bound to the active WG")
+		}
+	}
+	if !protected["+.inside.example.invalid"] || !protected["+.corp.example.invalid"] {
+		t.Fatal("private DNS policy missing after complete Profile parse")
 	}
 }
 

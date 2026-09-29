@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -15,10 +16,11 @@ import (
 )
 
 type client struct {
-	port   string
-	host   string
-	dialer *dnsDialer
-	schema string
+	port           string
+	host           string
+	dialer         *dnsDialer
+	schema         string
+	dynamicAddress func() (string, error)
 }
 
 var _ dnsClient = (*client)(nil)
@@ -28,13 +30,27 @@ func (c *client) Address() string {
 	return fmt.Sprintf("%s://%s", c.schema, net.JoinHostPort(c.host, c.port))
 }
 
+func (c *client) dialAddress() (string, error) {
+	if c.dynamicAddress != nil {
+		address, err := c.dynamicAddress()
+		if err != nil || address == "" {
+			return "", errors.New("private VPN DNS unavailable")
+		}
+		return address, nil
+	}
+	return net.JoinHostPort(c.host, c.port), nil
+}
+
 func (c *client) ExchangeContext(ctx context.Context, m *D.Msg) (*D.Msg, error) {
 	network := "udp"
 	if c.schema != "udp" {
 		network = "tcp"
 	}
 
-	addr := net.JoinHostPort(c.host, c.port)
+	addr, err := c.dialAddress()
+	if err != nil {
+		return nil, err
+	}
 	conn, err := c.dialer.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
@@ -88,7 +104,7 @@ func (c *client) ExchangeContext(ctx context.Context, m *D.Msg) (*D.Msg, error) 
 
 func (c *client) ResetConnection() {}
 
-func newClient(addr string, resolver resolver.Resolver, netType string, params map[string]string, proxyAdapter C.ProxyAdapter, proxyName string) *client {
+func newClient(addr string, resolver resolver.Resolver, netType string, params map[string]string, proxyAdapter C.ProxyAdapter, proxyName string, dynamicAddress bool) *client {
 	host, port, _ := net.SplitHostPort(addr)
 	c := &client{
 		port:   port,
@@ -98,6 +114,15 @@ func newClient(addr string, resolver resolver.Resolver, netType string, params m
 	}
 	if strings.HasPrefix(netType, "tcp") {
 		c.schema = "tcp"
+	}
+	if dynamicAddress {
+		if provider, ok := proxyAdapter.(interface{ CorplinkDNSAddress() (string, error) }); ok {
+			c.dynamicAddress = provider.CorplinkDNSAddress
+		} else {
+			c.dynamicAddress = func() (string, error) {
+				return "", errors.New("private VPN DNS provider unavailable")
+			}
+		}
 	}
 	return c
 }

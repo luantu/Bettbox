@@ -149,6 +149,12 @@ type CorplinkOption struct {
 	DeviceName string `proxy:"corplink-device-name,omitempty"`
 	// VPNServerName selects the company VPN node returned by /api/vpn/list.
 	VPNServerName string `proxy:"corplink-vpn-server-name,omitempty"`
+	// UseVPNDNS makes this node use only the private DNS returned by its own
+	// /vpn/conn session. A missing or public server address fails this node.
+	UseVPNDNS bool `proxy:"corplink-use-vpn-dns,omitempty"`
+	// HealthHost is a device-local, HTTPS-only hostname to resolve through
+	// this node's private DNS. It must never appear in logs.
+	HealthHost string `proxy:"corplink-health-host,omitempty"`
 	// PublicKey 为本机 wireguard 公钥（base64），用于 /vpn/conn 请求。
 	PublicKey string `proxy:"corplink-public-key,omitempty"`
 	// RefreshCommand 为刷新 cookie 的可执行命令。
@@ -195,6 +201,26 @@ type corplinkWgInfo struct {
 	Port            int
 	DNSAddresses    []netip.Addr
 	DNSDomains      []string
+}
+
+func applyCorplinkInternalDNS(option *WireGuardOption, info *corplinkWgInfo) error {
+	if !option.Corplink.UseVPNDNS {
+		return nil
+	}
+	if info == nil || len(info.DNSAddresses) == 0 {
+		return errors.New("corplink private VPN DNS unavailable")
+	}
+	servers := make([]string, 0, len(info.DNSAddresses))
+	for _, address := range info.DNSAddresses {
+		if !address.IsValid() || !address.IsPrivate() {
+			return errors.New("corplink private VPN DNS invalid")
+		}
+		servers = append(servers, "udp://"+net.JoinHostPort(address.String(), "53"))
+	}
+	option.Dns = servers
+	option.corplinkDNS = append([]netip.Addr(nil), info.DNSAddresses...)
+	option.corplinkDNSDomains = append([]string(nil), info.DNSDomains...)
+	return nil
 }
 
 func parseCorplinkDNSAddresses(values ...string) ([]netip.Addr, error) {

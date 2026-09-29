@@ -41,7 +41,7 @@ func (d *trackingLifecycleDevice) Close() {
 func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 	const serverPublic = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	var firstNodeCalls atomic.Int32
-	makeData := func(nextIP func() string) (*httptest.Server, string) {
+	makeData := func(next func() (string, string)) (*httptest.Server, string) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/vpn/ping" {
 				_, _ = io.WriteString(w, `{"code":0,"data":"ok"}`)
@@ -51,7 +51,8 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 				http.NotFound(w, r)
 				return
 			}
-			_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":%q,"ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400}}}`, nextIP(), serverPublic))
+			ip, dnsAddress := next()
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":%q,"ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400,"vpn_dns":%q}}}`, ip, serverPublic, dnsAddress))
 		}))
 		_, port, err := net.SplitHostPort(server.Listener.Addr().String())
 		if err != nil {
@@ -59,14 +60,14 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 		}
 		return server, port
 	}
-	dataA, portA := makeData(func() string {
+	dataA, portA := makeData(func() (string, string) {
 		if firstNodeCalls.Add(1) == 1 {
-			return "10.21.0.2"
+			return "10.21.0.2", "10.21.0.53"
 		}
-		return "10.21.0.3"
+		return "10.21.0.3", "10.21.0.54"
 	})
 	defer dataA.Close()
-	dataB, portB := makeData(func() string { return "10.22.0.2" })
+	dataB, portB := makeData(func() (string, string) { return "10.22.0.2", "10.22.0.53" })
 	defer dataB.Close()
 	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":[`+
@@ -86,6 +87,7 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 			Corplink: CorplinkOption{
 				APIServer: control.URL, CookieFile: cookiePath,
 				VPNServerName: name,
+				UseVPNDNS:     true,
 				PublicKey:     base64.StdEncoding.EncodeToString([]byte(strings.Repeat("d", 32))),
 				Code:          "JBSWY3DPEHPK3PXP",
 			},
@@ -101,6 +103,12 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 		t.Fatalf("build node B: %v", err)
 	}
 	defer b.Close()
+	if address, err := a.CorplinkDNSAddress(); err != nil || address != "10.21.0.53:53" {
+		t.Fatal("node A did not use its first DNS address")
+	}
+	if address, err := b.CorplinkDNSAddress(); err != nil || address != "10.22.0.53:53" {
+		t.Fatal("node B did not use its own DNS address")
+	}
 	oldA := &trackingLifecycleDevice{wireguardGoDevice: a.device}
 	a.device = oldA
 	oldB := b.device
@@ -116,6 +124,12 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 	}
 	if b.device != oldB || b.option.Ip != "10.22.0.2/32" {
 		t.Fatalf("node B changed during A rebuild: ip=%s", b.option.Ip)
+	}
+	if address, err := a.CorplinkDNSAddress(); err != nil || address != "10.21.0.54:53" {
+		t.Fatal("node A kept the DNS address from before rebuild")
+	}
+	if address, err := b.CorplinkDNSAddress(); err != nil || address != "10.22.0.53:53" {
+		t.Fatal("node B DNS changed during A rebuild")
 	}
 	var operations sync.WaitGroup
 	start := make(chan struct{})

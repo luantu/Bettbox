@@ -376,6 +376,24 @@ type autoCloseProxyAdapter struct {
 	closeErr  error
 }
 
+func (p *autoCloseProxyAdapter) CorplinkDNSPolicyInfo() CorplinkDNSPolicyInfo {
+	if provider, ok := UnderlyingProxyAdapter(p).(interface {
+		CorplinkDNSPolicyInfo() CorplinkDNSPolicyInfo
+	}); ok {
+		return provider.CorplinkDNSPolicyInfo()
+	}
+	return CorplinkDNSPolicyInfo{}
+}
+
+func (p *autoCloseProxyAdapter) CorplinkDNSAddress() (string, error) {
+	if provider, ok := UnderlyingProxyAdapter(p).(interface {
+		CorplinkDNSAddress() (string, error)
+	}); ok {
+		return provider.CorplinkDNSAddress()
+	}
+	return "", fmt.Errorf("private VPN DNS provider unavailable")
+}
+
 func (p *autoCloseProxyAdapter) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
 	c, err := p.ProxyAdapter.DialContext(ctx, metadata)
 	if err != nil {

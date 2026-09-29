@@ -84,6 +84,41 @@ type WireGuard struct {
 	dohTunnelSeen   atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
 }
 
+type CorplinkDNSPolicyInfo struct {
+	ServerName string
+	Domains    []string
+	HealthHost string
+}
+
+func (w *WireGuard) CorplinkDNSPolicyInfo() CorplinkDNSPolicyInfo {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
+	if !w.option.Corplink.UseVPNDNS || w.option.Corplink.VPNServerName == "" {
+		return CorplinkDNSPolicyInfo{}
+	}
+	return CorplinkDNSPolicyInfo{
+		ServerName: w.option.Corplink.VPNServerName,
+		Domains:    append([]string(nil), w.option.corplinkDNSDomains...),
+		HealthHost: w.option.Corplink.HealthHost,
+	}
+}
+
+// CorplinkDNSAddress exposes only the currently assigned resolver socket to
+// DNS transports bound to this same WireGuard instance. A targeted rebuild
+// updates the address with the IP stack, so no stale server can be queried.
+func (w *WireGuard) CorplinkDNSAddress() (string, error) {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
+	if w.closed.Load() || !w.option.Corplink.UseVPNDNS || len(w.option.corplinkDNS) == 0 {
+		return "", E.New("corplink private VPN DNS unavailable")
+	}
+	address := w.option.corplinkDNS[0]
+	if !address.IsValid() || !address.IsPrivate() {
+		return "", E.New("corplink private VPN DNS invalid")
+	}
+	return net.JoinHostPort(address.String(), "53"), nil
+}
+
 // tcpDialTarget reads the current endpoint instead of retaining the address
 // from before CorpLink /vpn/conn selected the live VPN node.
 func (w *WireGuard) tcpDialTarget() string {
@@ -427,8 +462,10 @@ type WireGuardOption struct {
 
 	Peers []WireGuardPeerOption `proxy:"peers,omitempty"`
 
-	RemoteDnsResolve bool     `proxy:"remote-dns-resolve,omitempty"`
-	Dns              []string `proxy:"dns,omitempty"`
+	RemoteDnsResolve   bool         `proxy:"remote-dns-resolve,omitempty"`
+	Dns                []string     `proxy:"dns,omitempty"`
+	corplinkDNS        []netip.Addr `proxy:"-"`
+	corplinkDNSDomains []string     `proxy:"-"`
 
 	RefreshServerIPInterval int `proxy:"refresh-server-ip-interval,omitempty"`
 }
@@ -952,6 +989,9 @@ func refreshCorplinkOption(option *WireGuardOption) error {
 	if err != nil {
 		return E.Cause(err, "corplink fetch peer info")
 	}
+	if err := applyCorplinkInternalDNS(option, info); err != nil {
+		return err
+	}
 	if info.IP != "" {
 		option.Ip = info.IP
 		if info.IPMask != "" && !strings.Contains(option.Ip, "/") {
@@ -1267,6 +1307,11 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 	w.requiresRebuild.Store(false)
 	w.busyFail.Store(0)
 	w.dohTunnelSeen.Store(false)
+	if w.option.Corplink.UseVPNDNS {
+		// DNS policies refer to this stable adapter, but cached answers may have
+		// come from the previous CorpLink session's internal resolver.
+		resolver.ClearCache()
+	}
 	if oldDevice != nil {
 		oldDevice.Close()
 	} else if oldBind != nil {

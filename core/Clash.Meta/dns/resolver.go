@@ -411,12 +411,13 @@ func (r *Resolver) ResetConnection() {
 }
 
 type NameServer struct {
-	Net          string
-	Addr         string
-	ProxyAdapter C.ProxyAdapter
-	ProxyName    string
-	Params       map[string]string
-	PreferH3     bool
+	Net            string
+	Addr           string
+	ProxyAdapter   C.ProxyAdapter
+	ProxyName      string
+	Params         map[string]string
+	PreferH3       bool
+	DynamicAddress bool
 }
 
 func (ns NameServer) Equal(ns2 NameServer) bool {
@@ -429,7 +430,8 @@ func (ns NameServer) Equal(ns2 NameServer) bool {
 		ns.ProxyAdapter == ns2.ProxyAdapter &&
 		ns.ProxyName == ns2.ProxyName &&
 		maps.Equal(ns.Params, ns2.Params) &&
-		ns.PreferH3 == ns2.PreferH3 {
+		ns.PreferH3 == ns2.PreferH3 &&
+		ns.DynamicAddress == ns2.DynamicAddress {
 		return true
 	}
 	return false
@@ -458,6 +460,7 @@ func (ns NameServer) transportEqual(ns2 NameServer) bool {
 		ns.ProxyAdapter == ns2.ProxyAdapter &&
 		ns.ProxyName == ns2.ProxyName &&
 		ns.PreferH3 == ns2.PreferH3 &&
+		ns.DynamicAddress == ns2.DynamicAddress &&
 		paramsEqual(ns.Params, ns2.Params) &&
 		paramsEqual(ns2.Params, ns.Params)
 }

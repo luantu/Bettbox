@@ -312,6 +312,42 @@ func TestParseCorplinkDNSAddressesRejectsNonLiteralAndUnsafeIP(t *testing.T) {
 	}
 }
 
+func TestCorplinkInternalDNSRequiresPrivateAddressAndNoPublicFallback(t *testing.T) {
+	publicDoH := []string{"https://1.1.1.1/dns-query"}
+	private := &corplinkWgInfo{
+		DNSAddresses: []netip.Addr{netip.MustParseAddr("10.104.0.53")},
+	}
+	option := WireGuardOption{
+		Corplink: CorplinkOption{UseVPNDNS: true},
+		Dns:      append([]string(nil), publicDoH...),
+	}
+	if err := applyCorplinkInternalDNS(&option, private); err != nil {
+		t.Fatalf("private VPN DNS was rejected: %v", err)
+	}
+	if len(option.Dns) != 1 || option.Dns[0] != "udp://10.104.0.53:53" {
+		t.Fatalf("private DNS was not used as the only in-tunnel resolver")
+	}
+	for _, addresses := range [][]netip.Addr{
+		nil,
+		{netip.MustParseAddr("8.8.8.8")},
+	} {
+		attempt := WireGuardOption{
+			Corplink: CorplinkOption{UseVPNDNS: true},
+			Dns:      append([]string(nil), publicDoH...),
+		}
+		if err := applyCorplinkInternalDNS(&attempt, &corplinkWgInfo{DNSAddresses: addresses}); err == nil {
+			t.Fatal("missing or public VPN DNS did not fail closed")
+		}
+		if attempt.Dns[0] != publicDoH[0] {
+			t.Fatal("failed DNS selection mutated the original resolver")
+		}
+	}
+	intl := WireGuardOption{Dns: append([]string(nil), publicDoH...)}
+	if err := applyCorplinkInternalDNS(&intl, private); err != nil || intl.Dns[0] != publicDoH[0] {
+		t.Fatal("INTL public DoH was replaced")
+	}
+}
+
 func TestCorplinkVPNConnFailureDoesNotExposeServerMessage(t *testing.T) {
 	for _, response := range []struct {
 		status int
