@@ -220,6 +220,8 @@ func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
 	}
 	names := []string{"FZ-INT-Node", "FUZHOU-NODE-1"}
 	ips := []string{"10.21.0.2", "10.22.0.3"}
+	dnsIPs := []string{"10.21.0.53", "10.22.0.53"}
+	var connCalls [2]atomic.Int32
 	ports := make([]string, 2)
 	for index := range names {
 		index := index
@@ -236,13 +238,14 @@ func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
 				http.NotFound(w, r)
 				return
 			}
+			connCalls[index].Add(1)
 			var request struct {
 				PublicKey string `json:"public_key"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.PublicKey != publicKeys[index] {
 				t.Errorf("node %d got wrong public key or invalid request: %v", index, err)
 			}
-			_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":%q,"ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400}}}`, ips[index], serverPublic))
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":%q,"ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400,"vpn_dns":%q,"vpn_dns_backup":"","vpn_dns_domain_split":["corp.example.invalid"]}}}`, ips[index], serverPublic, dnsIPs[index]))
 		}))
 		defer server.Close()
 		_, port, err := net.SplitHostPort(server.Listener.Addr().String())
@@ -279,9 +282,33 @@ func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
 		if info.IP != ips[index] || info.Port != 34080+index {
 			t.Fatalf("node %s used another tunnel IP or endpoint: %+v", name, info)
 		}
+		if len(info.DNSAddresses) != 1 || info.DNSAddresses[0].String() != dnsIPs[index] ||
+			len(info.DNSDomains) != 1 || info.DNSDomains[0] != "corp.example.invalid" {
+			t.Fatalf("node %s did not retain its private DNS metadata", name)
+		}
 	}
 	if listCalls.Load() != 2 {
 		t.Fatalf("list calls = %d, want one per node and no second account login", listCalls.Load())
+	}
+	for index := range connCalls {
+		if connCalls[index].Load() != 1 {
+			t.Fatalf("node %d /vpn/conn calls = %d, want one", index, connCalls[index].Load())
+		}
+	}
+}
+
+func TestParseCorplinkDNSAddressesRejectsNonLiteralAndUnsafeIP(t *testing.T) {
+	for _, value := range []string{
+		"dns.example.invalid", "0.0.0.0", "127.0.0.1", "224.0.0.1", "10.0.0.53/path",
+	} {
+		if _, err := parseCorplinkDNSAddresses(value); err == nil {
+			t.Fatalf("accepted invalid VPN DNS input")
+		}
+	}
+	addresses, err := parseCorplinkDNSAddresses("10.0.0.53", "10.0.0.54")
+	if err != nil || len(addresses) != 2 || addresses[0].String() != "10.0.0.53" ||
+		addresses[1].String() != "10.0.0.54" {
+		t.Fatalf("valid primary and backup DNS were not retained")
 	}
 }
 

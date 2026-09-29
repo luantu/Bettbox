@@ -19,10 +19,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,7 +176,10 @@ type corplinkRespWgInfo struct {
 		Mode      int    `json:"mode"`
 		PublicKey string `json:"public_key"`
 		Setting   *struct {
-			VPNMTU int `json:"vpn_mtu"`
+			VPNMTU            int      `json:"vpn_mtu"`
+			VPNDNS            string   `json:"vpn_dns"`
+			VPNDNSBackup      string   `json:"vpn_dns_backup"`
+			VPNDNSDomainSplit []string `json:"vpn_dns_domain_split"`
 		} `json:"setting"`
 	} `json:"data"`
 }
@@ -188,6 +193,53 @@ type corplinkWgInfo struct {
 	MTU             int
 	Server          string
 	Port            int
+	DNSAddresses    []netip.Addr
+	DNSDomains      []string
+}
+
+func parseCorplinkDNSAddresses(values ...string) ([]netip.Addr, error) {
+	addresses := make([]netip.Addr, 0, len(values))
+	for _, value := range values {
+		for _, item := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n'
+		}) {
+			address, err := netip.ParseAddr(item)
+			if err != nil || !address.IsValid() || address.IsUnspecified() ||
+				address.IsLoopback() || address.IsMulticast() || address.IsLinkLocalUnicast() {
+				return nil, errors.New("corplink vpn DNS address invalid")
+			}
+			address = address.Unmap()
+			if !slices.Contains(addresses, address) {
+				addresses = append(addresses, address)
+			}
+		}
+	}
+	return addresses, nil
+}
+
+func normalizeCorplinkDNSDomains(values []string) ([]string, error) {
+	domains := make([]string, 0, len(values))
+	for _, raw := range values {
+		domain := strings.ToLower(strings.Trim(strings.TrimSpace(raw), "."))
+		domain = strings.TrimPrefix(domain, "*.")
+		if len(domain) == 0 || len(domain) > 253 {
+			return nil, errors.New("corplink vpn DNS domain invalid")
+		}
+		for _, label := range strings.Split(domain, ".") {
+			if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+				return nil, errors.New("corplink vpn DNS domain invalid")
+			}
+			for _, char := range label {
+				if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-') {
+					return nil, errors.New("corplink vpn DNS domain invalid")
+				}
+			}
+		}
+		if !slices.Contains(domains, domain) {
+			domains = append(domains, domain)
+		}
+	}
+	return domains, nil
 }
 
 type corplinkVPNNode struct {
@@ -500,6 +552,16 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	}
 	if wg.Data.Setting != nil {
 		info.MTU = wg.Data.Setting.VPNMTU
+		info.DNSAddresses, err = parseCorplinkDNSAddresses(
+			wg.Data.Setting.VPNDNS, wg.Data.Setting.VPNDNSBackup,
+		)
+		if err != nil {
+			return nil, err
+		}
+		info.DNSDomains, err = normalizeCorplinkDNSDomains(wg.Data.Setting.VPNDNSDomainSplit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	log.Infoln("[WG-Corplink] fetched wg_info: ip=%s", info.IP)
 	return info, nil
