@@ -52,6 +52,25 @@ CorplinkManagedNames captureCorplinkManagedNames(
   );
 }
 
+bool hasAmbiguousCorplinkScriptProxyChange(
+  Map<String, dynamic> scriptConfig, {
+  required Set<String> trustedManagedProxyNames,
+  required Set<String> originalProxyNames,
+  required Map<String, dynamic> expectedManagedObjects,
+}) {
+  if (trustedManagedProxyNames.isEmpty || originalProxyNames.isEmpty) {
+    return false;
+  }
+  final currentNames = <String>{
+    for (final item in scriptConfig['proxies'] as List? ?? const [])
+      if (item is Map && item['name'] is String) item['name'] as String,
+  };
+  final missingManaged = trustedManagedProxyNames.any((name) =>
+      expectedManagedObjects.containsKey(name) && !currentNames.contains(name));
+  if (!missingManaged) return false;
+  return currentNames.difference(originalProxyNames).isNotEmpty;
+}
+
 bool _isLegacyProxy(dynamic item) =>
     item is Map &&
     item['name'] == 'SG-Node' &&
@@ -124,6 +143,14 @@ void mergeCorplinkNodeOverlay(
     ...?_generatedSnapshotsByConfig[rawConfig],
     ...expectedManagedObjects,
   };
+  if (hasAmbiguousCorplinkScriptProxyChange(
+    rawConfig,
+    trustedManagedProxyNames: trustedProxyNames,
+    originalProxyNames: originalProxyNames,
+    expectedManagedObjects: expected,
+  )) {
+    throw StateError('CORPLINK_SCRIPT_PROXY_PROVENANCE_AMBIGUOUS');
+  }
   final scriptConflicts = <String>{};
   final missingManagedProxyNames = <String>{};
   for (final item in [...sourceProxies, ...sourceGroups]) {
@@ -203,22 +230,8 @@ void mergeCorplinkNodeOverlay(
           scriptConflicts.contains('$name-WG'))
         name,
   };
-  final ambiguousNewProxyNames = <String>{
-    // Once a managed proxy disappears, a newly named proxy may be that
-    // object with its CorpLink marker and type stripped by the script.
-    // There is no reliable provenance left, so block new proxies in this
-    // conflicted pass rather than allowing an unverified egress route.
-    if (missingManagedProxyNames.isNotEmpty && originalProxyNames.isNotEmpty)
-      for (final item in sourceProxies)
-        if (item is Map &&
-            item['name'] is String &&
-            !originalProxyNames.contains(item['name']))
-          item['name'] as String,
-  };
-  scriptConflicts.addAll(ambiguousNewProxyNames);
   final suppressedProxyNames = <String>{
     for (final name in scriptSuppressedNames) '$name-WG',
-    ...ambiguousNewProxyNames,
     for (final item in sourceProxies)
       if (item is Map &&
           item['name'] is String &&

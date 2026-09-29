@@ -727,7 +727,24 @@ class GlobalState {
         if (item is Map && trustedCorplinkNames.contains(item['name']))
           item['name'] as String: jsonDecode(jsonEncode(item)),
     };
-    final rawConfig = await handleEvaluate(configMap, profile: targetProfile);
+    final preScriptConfig = Map<String, dynamic>.from(
+      jsonDecode(jsonEncode(configMap)) as Map,
+    );
+    var rawConfig = await handleEvaluate(configMap, profile: targetProfile);
+    var effectiveSuppressCorplinkNode = suppressCorplinkNode;
+    if (hasAmbiguousCorplinkScriptProxyChange(
+      rawConfig,
+      trustedManagedProxyNames: managedCorplinkNames.proxies,
+      originalProxyNames: managedCorplinkNames.allProxyNames,
+      expectedManagedObjects: expectedCorplinkObjects,
+    )) {
+      // A renamed CorpLink proxy with its marker stripped is indistinguishable
+      // from a script-added airport proxy. Revert the entire script result so
+      // its new direct rules cannot dangle; keep ordinary downloaded proxies.
+      rawConfig = preScriptConfig;
+      effectiveSuppressCorplinkNode = true;
+      showNotifier('覆写脚本改名或移除了飞连代理，已回退脚本结果并阻断飞连组');
+    }
     final originalProxyGroups = rawConfig['proxy-groups'];
 
     final realPatchConfig = patchConfig.copyWith(
@@ -1172,7 +1189,7 @@ class GlobalState {
     // after evaluation to keep the final groups consistent as well.
     await applyCorplinkSgNode(
       rawConfig,
-      suppressNode: suppressCorplinkNode,
+      suppressNode: effectiveSuppressCorplinkNode,
       trustedManagedGroupNames: managedCorplinkNames.groups,
       trustedManagedProxyNames: managedCorplinkNames.proxies,
       originalProxyNames: managedCorplinkNames.allProxyNames,

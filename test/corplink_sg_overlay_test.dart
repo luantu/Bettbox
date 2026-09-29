@@ -424,8 +424,14 @@ void main() {
     (afterScript['proxy-groups'] as List).add({
       'name': 'Other', 'type': 'select', 'proxies': <String>['Other-WG'],
     });
-    final conflicts = <String>{};
-    mergeCorplinkNodeOverlay(
+    expect(hasAmbiguousCorplinkScriptProxyChange(
+      afterScript,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
+    ), isTrue);
+    final before = afterScript.toString();
+    expect(() => mergeCorplinkNodeOverlay(
       afterScript,
       settings: settings,
       selections: selections,
@@ -436,15 +442,64 @@ void main() {
       trustedManagedProxyNames: managed.proxies,
       originalProxyNames: managed.allProxyNames,
       expectedManagedObjects: expected,
-      onScriptConflict: conflicts.addAll,
+    ), throwsStateError);
+    expect(afterScript.toString(), before);
+  });
+
+  test('ambiguous script falls back before its new direct rule can dangle', () {
+    final original = config();
+    apply(original);
+    final managed = captureCorplinkManagedNames(original, {
+      'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+    });
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(original['proxy-groups'] as List),
+        ...(original['proxies'] as List),
+      ])
+        if (item is Map &&
+            {...managed.groups, ...managed.proxies}.contains(item['name']))
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(original)) as Map);
+    (afterScript['proxies'] as List).removeWhere(
+        (item) => item['name'] == 'FUZHOU-NODE-1-WG');
+    (afterScript['proxies'] as List).add({
+      'name': 'Airport-B', 'type': 'socks5',
+      'server': 'airport.example.invalid', 'port': 1080,
+    });
+    (afterScript['rules'] as List).insert(0, 'DOMAIN-SUFFIX,example.com,Airport-B');
+    expect(hasAmbiguousCorplinkScriptProxyChange(
+      afterScript,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
+    ), isTrue);
+
+    // state.patchRawConfig uses the pre-script snapshot and suppresses SG
+    // before continuing normal app patches; prove the resulting targets exist.
+    final fallback = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(original)) as Map);
+    mergeCorplinkNodeOverlay(
+      fallback,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: managed.groups,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
+      suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
     );
-    expect(conflicts, contains('FUZHOU-NODE-1-WG'));
-    expect((afterScript['proxies'] as List).where((item) =>
-        item['name'] == 'Other-WG'), isEmpty);
-    final groups = afterScript['proxy-groups'] as List;
-    expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
-        ['REJECT']);
-    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
+    expect((fallback['proxies'] as List).map((item) => item['name']),
+        ['Airport-A']);
+    expect((fallback['rules'] as List), isNot(contains('DOMAIN-SUFFIX,example.com,Airport-B')));
+    expect((fallback['proxy-groups'] as List)
+        .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
         ['REJECT']);
   });
 
