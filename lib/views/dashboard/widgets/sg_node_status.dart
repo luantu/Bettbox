@@ -130,14 +130,13 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
       height: getWidgetHeight(1),
       child: CommonCard(
         onPressed: _openSettings,
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 14.ap, vertical: 8.ap),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(14.ap, 12.ap, 14.ap, 0),
+              child: Row(
                 children: [
                   Icon(Icons.vpn_key_outlined,
                       size: 18, color: context.colorScheme.onSurfaceVariant),
@@ -168,15 +167,17 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(14.ap, 0, 14.ap, 12.ap),
+              child: Text(
                 _summary,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: context.textTheme.bodySmall,
+                style: context.textTheme.bodyMedium,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
