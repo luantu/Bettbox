@@ -23,6 +23,7 @@ void main() {
                   const SgNodeStatusTile(key: ValueKey('sg-card')),
                   const SizedBox(height: 16),
                   SizedBox(
+                    width: 240,
                     height: getWidgetHeight(1),
                     child: CommonCard(
                       key: const ValueKey('reference-card'),
@@ -70,6 +71,12 @@ void main() {
       matching: find.byType(Text),
     ).last);
     final referenceStatus = tester.getRect(find.text('参考状态'));
+
+    // Keep the reference geometry visible in CI until the first green run.
+    // ignore: avoid_print
+    print('SG geometry: card=$sgCard title=$sgTitle status=$sgStatus; '
+        'reference: card=$referenceCard title=$referenceTitle '
+        'status=$referenceStatus');
 
     expect(sgTitle.left - sgCard.left,
         closeTo(referenceTitle.left - referenceCard.left, 0.5));
