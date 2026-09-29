@@ -82,6 +82,10 @@ void main() {
         'intl-private');
     expect(proxies.singleWhere((p) => p['name'] == 'FUZHOU-NODE-1-WG')['private-key'],
         'fuzhou-private');
+    expect(proxies.singleWhere((p) => p['name'] == 'FZ-INT-Node-WG')['corplink']
+        .containsKey('corplink-use-vpn-dns'), isFalse);
+    expect(proxies.singleWhere((p) => p['name'] == 'FUZHOU-NODE-1-WG')
+        ['corplink']['corplink-use-vpn-dns'], isTrue);
     expect(groups.singleWhere((g) => g['name'] == 'SG-Node')['proxies'],
         ['FZ-INT-Node']);
     expect(groups.singleWhere((g) => g['name'] == 'SG-OpenAI')['proxies'].first,
