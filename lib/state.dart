@@ -732,6 +732,7 @@ class GlobalState {
     );
     var rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     var effectiveSuppressCorplinkNode = suppressCorplinkNode;
+    var scriptFallbackUsed = false;
     if (hasAmbiguousCorplinkScriptProxyChange(
       rawConfig,
       trustedManagedProxyNames: managedCorplinkNames.proxies,
@@ -743,6 +744,7 @@ class GlobalState {
       // its new direct rules cannot dangle; keep ordinary downloaded proxies.
       rawConfig = preScriptConfig;
       effectiveSuppressCorplinkNode = true;
+      scriptFallbackUsed = true;
       showNotifier('覆写脚本改名或移除了飞连代理，已回退脚本结果并阻断飞连组');
     }
     final originalProxyGroups = rawConfig['proxy-groups'];
@@ -1095,7 +1097,7 @@ class GlobalState {
       rawConfig.remove('rule');
     }
 
-    final scriptActive =
+    final scriptActive = !scriptFallbackUsed &&
         config.scriptProps.currentScript != null &&
         targetProfile.useScriptOverride;
 
