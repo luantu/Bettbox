@@ -3,6 +3,7 @@ package outbound
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -208,6 +209,79 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 	}
 	if got.Server != "127.0.0.1" || got.Port != 34080 || got.IP != "10.113.65.196" || got.IPMask != "24" || got.MTU != 1400 {
 		t.Fatalf("unexpected dynamic info: %+v", got)
+	}
+}
+
+func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
+	const serverPublic = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	publicKeys := []string{
+		base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 32))),
+		base64.StdEncoding.EncodeToString([]byte(strings.Repeat("b", 32))),
+	}
+	names := []string{"FZ-INT-Node", "FUZHOU-NODE-1"}
+	ips := []string{"10.21.0.2", "10.22.0.3"}
+	ports := make([]string, 2)
+	for index := range names {
+		index := index
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.Contains(r.Header.Get("Cookie"), fmt.Sprintf("vpn-token=node-%d", index)) {
+				t.Errorf("node %d received another session token", index)
+			}
+			if r.URL.Path == "/vpn/ping" {
+				_, _ = io.WriteString(w, `{"code":0,"data":"ok"}`)
+				return
+			}
+			if r.URL.Path != "/vpn/conn" {
+				t.Errorf("unexpected path for node %d: %s", index, r.URL.Path)
+				http.NotFound(w, r)
+				return
+			}
+			var request struct {
+				PublicKey string `json:"public_key"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.PublicKey != publicKeys[index] {
+				t.Errorf("node %d got wrong public key or invalid request: %v", index, err)
+			}
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":%q,"ip_mask":"32","public_key":%q,"setting":{"vpn_mtu":1400}}}`, ips[index], serverPublic))
+		}))
+		defer server.Close()
+		_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ports[index] = port
+	}
+	var listCalls atomic.Int32
+	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		index := int(listCalls.Add(1)) - 1
+		if index >= len(names) {
+			t.Errorf("unexpected extra list call %d", index)
+			http.Error(w, "extra list", http.StatusBadRequest)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "vpn-token", Value: fmt.Sprintf("node-%d", index)})
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":[`+
+			`{"api_port":%s,"vpn_port":34080,"ip":"127.0.0.1","protocol_mode":1,"name":"FZ-INT-Node"},`+
+			`{"api_port":%s,"vpn_port":34081,"ip":"127.0.0.1","protocol_mode":1,"name":"FUZHOU-NODE-1"}]}`,
+			ports[0], ports[1]))
+	}))
+	defer control.Close()
+	cookieFile := writeCorplinkCookieFile(t)
+	for index, name := range names {
+		info, err := fetchCorplinkWgInfo(CorplinkOption{
+			APIServer: control.URL, CookieFile: cookieFile,
+			VPNServerName: name, PublicKey: publicKeys[index],
+			Code: "JBSWY3DPEHPK3PXP", DeviceID: "shared-device",
+		})
+		if err != nil {
+			t.Fatalf("node %s failed: %v", name, err)
+		}
+		if info.IP != ips[index] || info.Port != 34080+index {
+			t.Fatalf("node %s used another tunnel IP or endpoint: %+v", name, info)
+		}
+	}
+	if listCalls.Load() != 2 {
+		t.Fatalf("list calls = %d, want one per node and no second account login", listCalls.Load())
 	}
 }
 

@@ -25,10 +25,12 @@ func (p statusProxy) Adapter() C.ProxyAdapter { return p.adapter }
 type statusAdapter struct {
 	outbound.ProxyAdapter
 	status     outbound.CorplinkStatus
+	serverName string
 	reconnects int
 }
 
 func (a *statusAdapter) CorplinkStatus() outbound.CorplinkStatus { return a.status }
+func (a *statusAdapter) CorplinkServerName() string              { return a.serverName }
 func (a *statusAdapter) Reconnect()                              { a.reconnects++ }
 func (a *statusAdapter) Name() string                            { return "test" }
 func (a *statusAdapter) Close() error                            { return nil }
@@ -52,6 +54,56 @@ func TestCorplinkStatusReportsMissingAndReadyNodes(t *testing.T) {
 		strings.Contains(string(data), "privateKey") ||
 		strings.Contains(string(data), "cookie") {
 		t.Fatalf("invalid or unsafe status JSON: %s", data)
+	}
+}
+
+func TestCorplinkNodeStatusesAreIndependent(t *testing.T) {
+	intl := &statusAdapter{serverName: "FZ-INT-Node", status: outbound.CorplinkStatus{
+		Initialized: true, Ready: true, TunnelIP: "10.0.0.2/32", Endpoint: "192.0.2.10:443",
+	}}
+	fuzhou := &statusAdapter{serverName: "FUZHOU-NODE-1", status: outbound.CorplinkStatus{
+		Initialized: true, Ready: false, TunnelIP: "10.0.1.3/32", Endpoint: "192.0.2.11:443",
+	}}
+	proxies := map[string]C.Proxy{
+		"FZ-INT-Node-WG":   statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(intl)},
+		"FUZHOU-NODE-1-WG": statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(fuzhou)},
+		"Airport-A":        statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(&statusAdapter{})},
+	}
+	statuses := corplinkNodeStatusesFromProxies(proxies)
+	if len(statuses) != 2 || statuses[0].ServerName != "FUZHOU-NODE-1" ||
+		statuses[1].ServerName != "FZ-INT-Node" {
+		t.Fatalf("wrong named status list: %+v", statuses)
+	}
+	if statuses[0].TunnelIP != "10.0.1.3/32" || statuses[0].Ready ||
+		statuses[1].TunnelIP != "10.0.0.2/32" || !statuses[1].Ready {
+		t.Fatalf("node status crossed another tunnel: %+v", statuses)
+	}
+	legacy := corplinkStatusFromProxies(proxies)
+	if !legacy.Present || legacy.TunnelIP != "10.0.0.2/32" {
+		t.Fatalf("legacy SG status no longer follows INTL: %+v", legacy)
+	}
+	data, err := json.Marshal(statuses)
+	if err != nil || strings.Contains(string(data), "private") || strings.Contains(string(data), "cookie") {
+		t.Fatalf("unsafe status JSON: %s, %v", data, err)
+	}
+}
+
+func TestCorplinkNamedReconnectTouchesOnlyOneNode(t *testing.T) {
+	intl := &statusAdapter{serverName: "FZ-INT-Node"}
+	fuzhou := &statusAdapter{serverName: "FUZHOU-NODE-1"}
+	proxies := map[string]C.Proxy{
+		"FZ-INT-Node-WG":   statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(intl)},
+		"FUZHOU-NODE-1-WG": statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(fuzhou)},
+	}
+	if !reconnectCorplinkNodeFromProxies(proxies, "FUZHOU-NODE-1") {
+		t.Fatal("selected node did not reconnect")
+	}
+	if fuzhou.reconnects != 1 || intl.reconnects != 0 {
+		t.Fatalf("reconnect crossed node boundary: intl=%d fuzhou=%d", intl.reconnects, fuzhou.reconnects)
+	}
+	if reconnectCorplinkNodeFromProxies(proxies, "unknown") ||
+		reconnectCorplinkNodeFromProxies(proxies, "FUZHOU-NODE-1-WG") {
+		t.Fatal("unknown or proxy-name input unexpectedly reconnected")
 	}
 }
 

@@ -417,8 +417,79 @@ type corplinkSgStatus struct {
 	Present bool `json:"present"`
 }
 
+type corplinkNodeStatus struct {
+	outbound.CorplinkStatus
+	ServerName string `json:"serverName"`
+	Present    bool   `json:"present"`
+}
+
+func corplinkNodeStatusesFromProxies(proxies map[string]constant.Proxy) []corplinkNodeStatus {
+	statuses := make([]corplinkNodeStatus, 0)
+	for proxyName, proxy := range proxies {
+		adapter := outbound.UnderlyingProxyAdapter(proxy.Adapter())
+		named, ok := adapter.(interface {
+			CorplinkServerName() string
+			CorplinkStatus() outbound.CorplinkStatus
+		})
+		if !ok {
+			continue
+		}
+		serverName := named.CorplinkServerName()
+		if serverName == "" || proxyName != serverName+"-WG" {
+			continue
+		}
+		statuses = append(statuses, corplinkNodeStatus{
+			CorplinkStatus: named.CorplinkStatus(),
+			ServerName:     serverName,
+			Present:        true,
+		})
+	}
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].ServerName < statuses[j].ServerName
+	})
+	return statuses
+}
+
+func handleGetCorplinkNodeStatuses() []corplinkNodeStatus {
+	runLock.Lock()
+	defer runLock.Unlock()
+	if !isInit {
+		return []corplinkNodeStatus{}
+	}
+	return corplinkNodeStatusesFromProxies(tunnel.Proxies())
+}
+
+func reconnectCorplinkNodeFromProxies(proxies map[string]constant.Proxy, serverName string) bool {
+	if serverName == "" {
+		return false
+	}
+	proxy, ok := proxies[serverName+"-WG"]
+	if !ok {
+		return false
+	}
+	adapter := outbound.UnderlyingProxyAdapter(proxy.Adapter())
+	named, ok := adapter.(interface {
+		CorplinkServerName() string
+		Reconnect()
+	})
+	if !ok || named.CorplinkServerName() != serverName {
+		return false
+	}
+	named.Reconnect()
+	return true
+}
+
+func handleReconnectCorplinkNode(serverName string) bool {
+	runLock.Lock()
+	defer runLock.Unlock()
+	if !isInit {
+		return false
+	}
+	return reconnectCorplinkNodeFromProxies(tunnel.Proxies(), serverName)
+}
+
 func corplinkStatusFromProxies(proxies map[string]constant.Proxy) corplinkSgStatus {
-	for _, name := range []string{"SG-Node", "SG-Node-Linux"} {
+	for _, name := range []string{"FZ-INT-Node-WG", "SG-Node", "SG-Node-Linux"} {
 		if proxy, ok := proxies[name]; ok {
 			underlying := outbound.UnderlyingProxyAdapter(proxy.Adapter())
 			if adapter, ok := underlying.(interface {
@@ -441,7 +512,7 @@ func handleGetCorplinkSgStatus() corplinkSgStatus {
 }
 
 func reconnectCorplinkFromProxies(proxies map[string]constant.Proxy) bool {
-	for _, name := range []string{"SG-Node", "SG-Node-Linux"} {
+	for _, name := range []string{"FZ-INT-Node-WG", "SG-Node", "SG-Node-Linux"} {
 		if proxy, ok := proxies[name]; ok {
 			underlying := outbound.UnderlyingProxyAdapter(proxy.Adapter())
 			if adapter, ok := underlying.(interface{ Reconnect() }); ok {

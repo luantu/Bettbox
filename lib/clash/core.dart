@@ -38,6 +38,12 @@ class ClashCore {
   Future<List<dynamic>> listCorplinkVpnNodes(Map<String, dynamic> request) =>
       clashInterface.listCorplinkVpnNodes(request);
 
+  Future<List<dynamic>> getCorplinkNodeStatuses() =>
+      clashInterface.getCorplinkNodeStatuses();
+
+  Future<bool> reconnectCorplinkNode(String serverName) =>
+      clashInterface.reconnectCorplinkNode(serverName);
+
   Future<bool> reconnectCorplinkTunnel() =>
       clashInterface.reconnectCorplinkTunnel();
 

@@ -132,6 +132,8 @@ const (
 	reconnectTunnelsMethod               Method = "reconnectTunnels"
 	listCorplinkVpnNodesMethod           Method = "listCorplinkVpnNodes"
 	getCorplinkSgStatusMethod            Method = "getCorplinkSgStatus"
+	getCorplinkNodeStatusesMethod        Method = "getCorplinkNodeStatuses"
+	reconnectCorplinkNodeMethod          Method = "reconnectCorplinkNode"
 	reconnectCorplinkTunnelMethod        Method = "reconnectCorplinkTunnel"
 	generateAgeKeyPairMethod             Method = "generateAgeKeyPair"
 	convertAgeSecretKeyToPublicKeyMethod Method = "convertAgeSecretKeyToPublicKey"

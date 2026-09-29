@@ -272,6 +272,17 @@ func handleAction(action *Action, result ActionResult) {
 	case getCorplinkSgStatusMethod:
 		result.success(handleGetCorplinkSgStatus())
 		return
+	case getCorplinkNodeStatusesMethod:
+		result.success(handleGetCorplinkNodeStatuses())
+		return
+	case reconnectCorplinkNodeMethod:
+		serverName, ok := action.Data.(string)
+		if !ok {
+			result.success(false)
+			return
+		}
+		result.success(handleReconnectCorplinkNode(serverName))
+		return
 	case reconnectCorplinkTunnelMethod:
 		result.success(handleReconnectCorplinkTunnel())
 		return

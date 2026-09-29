@@ -1183,6 +1183,15 @@ func (w *WireGuard) IsCorplink() bool {
 	return w.option.Corplink.APIServer != ""
 }
 
+// CorplinkServerName is the exact control-plane name selected for this
+// outbound. It is intentionally independent of the proxy-group alias.
+func (w *WireGuard) CorplinkServerName() string {
+	if !w.IsCorplink() {
+		return ""
+	}
+	return w.option.Corplink.VPNServerName
+}
+
 // Reconnect forces the WireGuard transport to tear down and re-establish its
 // underlying connection. It is invoked after an Android network change: the
 // previous TCP transport becomes a half-open socket whose writes are silently
