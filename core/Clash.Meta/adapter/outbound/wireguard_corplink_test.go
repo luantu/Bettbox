@@ -285,6 +285,42 @@ func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
 	}
 }
 
+func TestCorplinkVPNConnFailureDoesNotExposeServerMessage(t *testing.T) {
+	for _, response := range []struct {
+		status int
+		body   string
+	}{
+		{status: http.StatusUnauthorized, body: `{"cookie":"private-session"}`},
+		{status: http.StatusOK, body: `{"code":1234,"message":"private-session"}`},
+	} {
+		data := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/vpn/ping" {
+				_, _ = io.WriteString(w, `{"code":0,"data":"ok"}`)
+				return
+			}
+			w.WriteHeader(response.status)
+			_, _ = io.WriteString(w, response.body)
+		}))
+		_, port, err := net.SplitHostPort(data.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":[{"api_port":%s,"vpn_port":34080,"ip":"127.0.0.1","protocol_mode":1,"name":"FZ-INT-Node"}]}`, port))
+		}))
+		_, err = fetchCorplinkWgInfo(CorplinkOption{
+			APIServer: control.URL, CookieFile: writeCorplinkCookieFile(t),
+			VPNServerName: "FZ-INT-Node", Code: "JBSWY3DPEHPK3PXP",
+			PublicKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		})
+		control.Close()
+		data.Close()
+		if err == nil || strings.Contains(err.Error(), "private-session") {
+			t.Fatalf("unsafe /vpn/conn error: %v", err)
+		}
+	}
+}
+
 func TestFetchCorplinkWgInfoReportsSafeVpnListErrorCode(t *testing.T) {
 	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"code":10220001,"message":"session token=private-value"}`)

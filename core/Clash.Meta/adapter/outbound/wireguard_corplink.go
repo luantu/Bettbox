@@ -472,7 +472,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("corplink api status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return nil, fmt.Errorf("corplink vpn conn HTTP %d", resp.StatusCode)
 	}
 
 	var wg corplinkRespWgInfo
@@ -480,7 +480,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		return nil, fmt.Errorf("corplink api parse error: %v", err)
 	}
 	if wg.Code != 0 || wg.Data == nil {
-		return nil, fmt.Errorf("corplink api code %d: %s", wg.Code, wg.Message)
+		return nil, fmt.Errorf("corplink vpn conn code %d", wg.Code)
 	}
 
 	serverPubB64 := wg.Data.PublicKey
