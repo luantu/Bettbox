@@ -100,15 +100,19 @@ void mergeCorplinkNodeOverlay(
 
   final targetProxyNames = <String>{for (final name in selectionNames) '$name-WG'};
   final targetGroupNames = <String>{...selectionNames, 'SG-Node', 'SG-OpenAI'};
+  final foldedTargetProxyNames = targetProxyNames.map((name) => name.toLowerCase()).toSet();
+  final foldedTargetGroupNames = targetGroupNames.map((name) => name.toLowerCase()).toSet();
   final seenProxyNames = <String>{};
   for (final item in sourceProxies) {
     if (item is! Map || item['name'] is! String) continue;
     final name = item['name'] as String;
     if (!seenProxyNames.add(name)) throw StateError('DUPLICATE_PROXY_NAME');
-    if (targetProxyNames.contains(name) && !managedProxyNames.contains(name)) {
+    if (foldedTargetProxyNames.contains(name.toLowerCase()) &&
+        !managedProxyNames.contains(name)) {
       throw StateError('CORPLINK_PROXY_NAME_COLLISION');
     }
-    if (targetGroupNames.contains(name) && !_isLegacyProxy(item)) {
+    if (foldedTargetGroupNames.contains(name.toLowerCase()) &&
+        !_isLegacyProxy(item)) {
       throw StateError('CORPLINK_GROUP_NAME_COLLISION');
     }
   }
@@ -117,10 +121,10 @@ void mergeCorplinkNodeOverlay(
     if (item is! Map || item['name'] is! String) continue;
     final name = item['name'] as String;
     if (!seenGroupNames.add(name)) throw StateError('DUPLICATE_GROUP_NAME');
-    if (targetProxyNames.contains(name)) {
+    if (foldedTargetProxyNames.contains(name.toLowerCase())) {
       throw StateError('CORPLINK_PROXY_NAME_COLLISION');
     }
-    if (targetGroupNames.contains(name) &&
+    if (foldedTargetGroupNames.contains(name.toLowerCase()) &&
         name != 'SG-OpenAI' &&
         !managedGroupNames.contains(name)) {
       throw StateError('CORPLINK_GROUP_NAME_COLLISION');

@@ -138,6 +138,18 @@ void main() {
     expect(raw.toString(), before);
   });
 
+  test('case-folded downloaded name collisions are rejected', () {
+    final raw = config();
+    (raw['proxy-groups'] as List).add({
+      'name': 'fuzhou-node-1',
+      'type': 'select',
+      'proxies': <dynamic>['REJECT'],
+    });
+    final before = raw.toString();
+    expect(() => apply(raw), throwsStateError);
+    expect(raw.toString(), before);
+  });
+
   test('trusted first-pass groups survive a script returning a new map', () {
     final original = config();
     apply(original);
