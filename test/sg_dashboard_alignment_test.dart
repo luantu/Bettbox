@@ -38,6 +38,7 @@ void main() {
                             label: '参考标题',
                           ),
                           child: Container(
+                            width: double.infinity,
                             padding: baseInfoEdgeInsets.copyWith(top: 0),
                             child: Align(
                               alignment: Alignment.bottomLeft,

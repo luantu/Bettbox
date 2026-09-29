@@ -135,6 +135,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
               onPressed: _openSettings,
               info: const Info(iconData: Icons.vpn_key_outlined, label: 'SG-Node'),
               child: Container(
+                width: double.infinity,
                 padding: baseInfoEdgeInsets.copyWith(top: 0),
                 child: Align(
                   alignment: Alignment.bottomLeft,
