@@ -49,3 +49,10 @@ APK 已下载到本地 `outputs/android-sg-arm64-2026-09-29-upstream-merge/app-r
 - 手机 Chrome 已打开 ChatGPT 页面并显示可输入界面。Bettbox“请求”历史中有 3 条 Chrome 发往 `chatgpt.com` 或 `ws.chatgpt.com` 的记录；逐条检查其节点链，均含 `SG-OpenAI` 与 `SG-Node`。命令行请求 ChatGPT 首页时，直连和经 SG 都收到 403，因此不把这个状态码单独判为隧道失败；经 SG 访问公开 trace 页为 200。
 
 边界：这次复测使用手机原有设置，没有清空数据模拟首次安装；“重新授权”已验证保存的凭据可再次登录。DNS 路径已核对到实际拨号实现：覆写脚本执行后再次注入的 SG 节点启用 `remote-dns-resolve`，DoH 上游使用数字 IP；WireGuard 解析器把每个上游绑定到自身出站，DoH 的 TCP 拨号由该出站交给 WireGuard IP 栈。对应 Go 回归测试通过。不过本次没有取得可单独证明手机上真实 DNS 包路径的运行时日志或抓包；跨天 Cookie 续期、长期后台保活和实际发送 ChatGPT 对话也未测试。`outputs/` 是本地未跟踪产物，不包含在 Git 提交里。
+
+## 多服务器节点增量（`codex/corplink-multi-node-impl`，待设备验收）
+
+- 在不改变现有公开测试签名、包名和 release 的前提下，控制面新增只返回 TCP 服务器名称的发现动作；设置页可以多选上游节点或手动补充准确名称。账号只登录一次，Cookie、OTP 和设备身份共用；WireGuard 密钥按账号、上游和服务器名分别保存在安全存储，并迁移旧 INTL 密钥。每节点可单独设置 HTTPS 探针，留空时只检查握手。主要代码：`lib/services/corplink_sg_nodes.dart`、`lib/services/corplink_sg.dart`、`core/Clash.Meta/adapter/outbound/wireguard_corplink.go`。
+- 覆盖层生成 `<服务器名称>-WG` 代理及与上游服务器同名的组；旧 `SG-Node` 保留为隐藏别名，`SG-OpenAI` 和原自动规则继续指向 INTL。脚本新增的 `RULE-SET` 保持原样；订阅里已有同名组（包括指向 `REJECT` 的组）会触发冲突，不被静默覆盖。首次注入与脚本处理后的二次注入通过可信的托管名称交接。主要代码：`lib/services/corplink_sg_overlay.dart`、`lib/state.dart`。
+- Mihomo-SG 返回每节点状态，支持定向重连、无公网网站的握手检查与单节点 IP 栈重建。一个节点在配置载入时无法连接飞连控制面，会留作不可直连、可重试的占位出站，不再令机场代理和另一健康节点整份配置失效。首页磁贴显示已连接数量，设置页显示每节点 IP、端点及变化次数；Wi‑Fi/蜂窝切换后只对未就绪节点补偿重连。主要代码：`core/Clash.Meta/adapter/outbound/wireguard.go`、`core/hub.go`、`lib/services/corplink_sg_runtime.dart`、`lib/controller.dart`、`lib/main.dart`、`lib/views/corplink_sg.dart`、`lib/views/dashboard/widgets/sg_node_status.dart`。
+- 新增回归用例覆盖双节点密钥/令牌/IP 隔离、单节点 401 时完整配置仍加载、同名组与同名代理保护、IP 变化只替换一个设备、并发重建/关闭及网络切换补偿。Go 低并发测试和重建路径的竞态检测已通过。最终候选提交 `e7295e8` 的 [Android SG APK 工作流](https://github.com/luantu/Bettbox/actions/runs/36555032514) 全部成功；APK SHA-256 为 `4ec0db639ce8a2dace869082d1ec59cc5b4282262b5e886993e98efb1ba4a95f`。外置盘空白模拟器已验证授权失败时的 `REJECT` 占位组和 VPN 启动；最终包已在另一 AVD 覆盖安装并打开界面。真机双节点和真实路由均未验收。逐项结果见 `docs/03-Bettbox飞连多节点验证用例与结果.md`，不能沿用上文单节点真机结果判定多节点完成。
