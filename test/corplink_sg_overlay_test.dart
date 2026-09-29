@@ -91,6 +91,34 @@ void main() {
     expect((raw['rules'] as List).last, 'MATCH,DIRECT');
   });
 
+  test('only checked nodes create groups and ChatGPT targets checked INTL', () {
+    final raw = config()..['rules'] = <dynamic>['MATCH,DIRECT'];
+    apply(raw, nodes: const [
+      CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+      CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1', enabled: false),
+    ]);
+    expect((raw['proxies'] as List).map((proxy) => proxy['name']),
+        ['Airport-A', 'FZ-INT-Node-WG']);
+    expect((raw['proxy-groups'] as List).map((group) => group['name']),
+        ['OpenAI', 'FZ-INT-Node']);
+    expect(raw['rules'], contains('DOMAIN-SUFFIX,chatgpt.com,FZ-INT-Node'));
+    expect((raw['rules'] as List).where((rule) =>
+        rule.toString().contains('SG-OpenAI')), isEmpty);
+  });
+
+  test('no checked INTL means no generated ChatGPT group or rules', () {
+    final raw = config()..['rules'] = <dynamic>['MATCH,DIRECT'];
+    apply(raw, nodes: const [
+      CorplinkNodeSelection(serverName: 'FZ-INT-Node', enabled: false),
+      CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1'),
+    ]);
+    expect((raw['proxy-groups'] as List).map((group) => group['name']),
+        ['OpenAI', 'FUZHOU-NODE-1']);
+    expect((raw['proxies'] as List).map((proxy) => proxy['name']),
+        ['Airport-A', 'FUZHOU-NODE-1-WG']);
+    expect(raw['rules'], ['MATCH,DIRECT']);
+  });
+
   test('missing authorization and disabled selection fail closed per group', () {
     final raw = config();
     (raw['proxies'] as List).first['dialer-proxy'] = 'FUZHOU-NODE-1-WG';
