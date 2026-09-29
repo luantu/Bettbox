@@ -299,6 +299,16 @@ void main() {
       auth: auth,
       cookiePath: '/private/cookies.json',
       suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
+      trustedManagedGroupNames: {
+        'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      },
+      trustedManagedProxyNames: {
+        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      originalProxyNames: {
+        'Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      expectedManagedObjects: expected,
     );
     expect(safe['rules'], contains('MATCH,REJECT'));
     expect(safe['sub-rules'], isNull);
