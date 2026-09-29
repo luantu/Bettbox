@@ -13,6 +13,45 @@ final Expando<Map<String, dynamic>> _generatedSnapshotsByConfig =
     Expando<Map<String, dynamic>>();
 const _managedObjectEquality = DeepCollectionEquality();
 
+class CorplinkManagedNames {
+  const CorplinkManagedNames({
+    required this.groups,
+    required this.proxies,
+    required this.allProxyNames,
+  });
+
+  final Set<String> groups;
+  final Set<String> proxies;
+  final Set<String> allProxyNames;
+}
+
+CorplinkManagedNames captureCorplinkManagedNames(
+  Map<String, dynamic> config,
+  Set<String> generatedNames,
+) {
+  final proxies = <String>{
+    for (final item in config['proxies'] as List? ?? const [])
+      if (item is Map && item['name'] is String &&
+          generatedNames.contains(item['name']))
+        item['name'] as String,
+  };
+  final groups = <String>{
+    for (final item in config['proxy-groups'] as List? ?? const [])
+      if (item is Map && item['name'] is String &&
+          generatedNames.contains(item['name']))
+        item['name'] as String,
+  };
+  final allProxyNames = <String>{
+    for (final item in config['proxies'] as List? ?? const [])
+      if (item is Map && item['name'] is String) item['name'] as String,
+  };
+  return CorplinkManagedNames(
+    groups: groups,
+    proxies: proxies,
+    allProxyNames: allProxyNames,
+  );
+}
+
 bool _isLegacyProxy(dynamic item) =>
     item is Map &&
     item['name'] == 'SG-Node' &&
@@ -32,6 +71,7 @@ void mergeCorplinkNodeOverlay(
   Set<String> suppressedNames = const {},
   Set<String> trustedManagedGroupNames = const {},
   Set<String> trustedManagedProxyNames = const {},
+  Set<String> originalProxyNames = const {},
   Map<String, dynamic> expectedManagedObjects = const {},
   void Function(Set<String>)? onScriptConflict,
 }) {
@@ -85,6 +125,7 @@ void mergeCorplinkNodeOverlay(
     ...expectedManagedObjects,
   };
   final scriptConflicts = <String>{};
+  final missingManagedProxyNames = <String>{};
   for (final item in [...sourceProxies, ...sourceGroups]) {
     if (item is! Map || item['name'] is! String) continue;
     final name = item['name'] as String;
@@ -108,10 +149,11 @@ void mergeCorplinkNodeOverlay(
       );
     }
     if (managedProxyNames.isNotEmpty) {
-      scriptConflicts.addAll(
+      missingManagedProxyNames.addAll(
         trustedProxyNames.where((name) =>
             expected.containsKey(name) && !managedProxyNames.contains(name)),
       );
+      scriptConflicts.addAll(missingManagedProxyNames);
     }
   }
 
@@ -161,8 +203,22 @@ void mergeCorplinkNodeOverlay(
           scriptConflicts.contains('$name-WG'))
         name,
   };
+  final ambiguousNewProxyNames = <String>{
+    // Once a managed proxy disappears, a newly named proxy may be that
+    // object with its CorpLink marker and type stripped by the script.
+    // There is no reliable provenance left, so block new proxies in this
+    // conflicted pass rather than allowing an unverified egress route.
+    if (missingManagedProxyNames.isNotEmpty && originalProxyNames.isNotEmpty)
+      for (final item in sourceProxies)
+        if (item is Map &&
+            item['name'] is String &&
+            !originalProxyNames.contains(item['name']))
+          item['name'] as String,
+  };
+  scriptConflicts.addAll(ambiguousNewProxyNames);
   final suppressedProxyNames = <String>{
     for (final name in scriptSuppressedNames) '$name-WG',
+    ...ambiguousNewProxyNames,
     for (final item in sourceProxies)
       if (item is Map &&
           item['name'] is String &&

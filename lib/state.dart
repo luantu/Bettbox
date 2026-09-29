@@ -27,6 +27,7 @@ import 'common/common.dart';
 import 'controller.dart';
 import 'models/models.dart';
 import 'services/corplink_sg.dart';
+import 'services/corplink_sg_overlay.dart';
 
 typedef UpdateTasks = List<FutureOr Function()>;
 
@@ -714,6 +715,10 @@ class GlobalState {
       configMap,
       suppressNode: suppressCorplinkNode,
     );
+    final managedCorplinkNames = captureCorplinkManagedNames(
+      configMap,
+      trustedCorplinkNames,
+    );
     final expectedCorplinkObjects = <String, dynamic>{
       for (final item in [
         ...?(configMap['proxies'] as List?),
@@ -1168,8 +1173,9 @@ class GlobalState {
     await applyCorplinkSgNode(
       rawConfig,
       suppressNode: suppressCorplinkNode,
-      trustedManagedGroupNames: trustedCorplinkNames,
-      trustedManagedProxyNames: trustedCorplinkNames,
+      trustedManagedGroupNames: managedCorplinkNames.groups,
+      trustedManagedProxyNames: managedCorplinkNames.proxies,
+      originalProxyNames: managedCorplinkNames.allProxyNames,
       expectedManagedObjects: expectedCorplinkObjects,
       onScriptConflict: (names) {
         commonPrint.log('[CorpLinkSG] script changed ${names.length} managed entries; '

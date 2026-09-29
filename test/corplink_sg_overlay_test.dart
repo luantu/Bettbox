@@ -153,8 +153,22 @@ void main() {
   test('trusted first-pass groups survive a script returning a new map', () {
     final original = config();
     apply(original);
+    final managed = captureCorplinkManagedNames(original, {
+      'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+    });
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(original['proxy-groups'] as List),
+        ...(original['proxies'] as List),
+      ])
+        if (item is Map &&
+            {...managed.groups, ...managed.proxies}.contains(item['name']))
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
     final afterScript = Map<String, dynamic>.from(
         jsonDecode(jsonEncode(original)) as Map);
+    final conflicts = <String>{};
     mergeCorplinkNodeOverlay(
       afterScript,
       settings: settings,
@@ -162,15 +176,18 @@ void main() {
       keyPairs: keyPairs,
       auth: auth,
       cookiePath: '/private/cookies.json',
-      trustedManagedGroupNames: {
-        'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
-      },
-      trustedManagedProxyNames: {
-        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
-      },
+      trustedManagedGroupNames: managed.groups,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
+      onScriptConflict: conflicts.addAll,
     );
+    expect(conflicts, isEmpty);
     expect((afterScript['proxy-groups'] as List)
         .where((group) => group['name'] == 'FUZHOU-NODE-1').length, 1);
+    expect((afterScript['proxy-groups'] as List)
+        .singleWhere((group) => group['name'] == 'FUZHOU-NODE-1')['proxies'],
+        ['FUZHOU-NODE-1-WG']);
   });
 
   test('script-modified managed group fails closed without changing sibling', () {
@@ -372,6 +389,58 @@ void main() {
       onScriptConflict: conflicts.addAll,
     );
     expect(conflicts, contains('FUZHOU-NODE-1'));
+    final groups = afterScript['proxy-groups'] as List;
+    expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
+        ['REJECT']);
+    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
+        ['REJECT']);
+  });
+
+  test('renamed proxy with removed CorpLink marker is still fail-closed', () {
+    final raw = config();
+    apply(raw);
+    final managed = captureCorplinkManagedNames(raw, {
+      'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+    });
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(raw['proxy-groups'] as List),
+        ...(raw['proxies'] as List),
+      ])
+        if (item is Map &&
+            {...managed.groups, ...managed.proxies}.contains(item['name']))
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(raw)) as Map);
+    final renamed = (afterScript['proxies'] as List).singleWhere(
+        (item) => item['name'] == 'FUZHOU-NODE-1-WG') as Map;
+    renamed['name'] = 'Other-WG';
+    renamed['type'] = 'socks5';
+    renamed.remove('corplink');
+    renamed['server'] = 'different.example.invalid';
+    renamed['port'] = 1080;
+    (afterScript['proxy-groups'] as List).add({
+      'name': 'Other', 'type': 'select', 'proxies': <String>['Other-WG'],
+    });
+    final conflicts = <String>{};
+    mergeCorplinkNodeOverlay(
+      afterScript,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: managed.groups,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
+      onScriptConflict: conflicts.addAll,
+    );
+    expect(conflicts, contains('FUZHOU-NODE-1-WG'));
+    expect((afterScript['proxies'] as List).where((item) =>
+        item['name'] == 'Other-WG'), isEmpty);
     final groups = afterScript['proxy-groups'] as List;
     expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
         ['REJECT']);

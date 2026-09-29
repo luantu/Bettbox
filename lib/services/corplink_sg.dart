@@ -652,6 +652,7 @@ Future<Set<String>> applyCorplinkSgNode(
   bool suppressNode = false,
   Set<String> trustedManagedGroupNames = const {},
   Set<String> trustedManagedProxyNames = const {},
+  Set<String> originalProxyNames = const {},
   Map<String, dynamic> expectedManagedObjects = const {},
   void Function(Set<String>)? onScriptConflict,
 }) async {
@@ -725,6 +726,7 @@ Future<Set<String>> applyCorplinkSgNode(
         : const {},
     trustedManagedGroupNames: trustedManagedGroupNames,
     trustedManagedProxyNames: trustedManagedProxyNames,
+    originalProxyNames: originalProxyNames,
     expectedManagedObjects: expectedManagedObjects,
     onScriptConflict: onScriptConflict,
   );
