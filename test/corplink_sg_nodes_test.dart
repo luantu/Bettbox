@@ -194,6 +194,19 @@ void main() {
     expect(await loadCorplinkNodeSelections(secrets: secrets), isEmpty);
   });
 
+  test('node probes keep ChatGPT for INTL and private HTTPS for Fuzhou', () {
+    expect(effectiveCorplinkNodeProbeUrl(
+      const CorplinkNodeSelection(serverName: 'FZ-INT-Node')),
+      'https://chatgpt.com/robots.txt');
+    expect(effectiveCorplinkNodeProbeUrl(const CorplinkNodeSelection(
+      serverName: 'Fuzhou-Node-1',
+      healthUrl: 'https://inside.example.invalid/ready',
+    )), 'https://inside.example.invalid/ready');
+    expect(effectiveCorplinkNodeProbeUrl(
+      const CorplinkNodeSelection(serverName: 'Fuzhou-Node-1')),
+      isEmpty);
+  });
+
   test('removed saved node remains a disabled REJECT placeholder', () async {
     final secrets = _MemoryNodeSecrets();
     await saveCorplinkNodeSelections(const [
