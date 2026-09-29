@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:bett_box/enum/enum.dart';
 import 'package:bett_box/models/models.dart';
 import 'package:collection/collection.dart';
 
@@ -110,8 +111,9 @@ bool _isLegacyProxy(dynamic item) =>
 bool _isManagedOpenAiRule(dynamic rule) {
   if (rule is! String) return false;
   final parsed = ParsedRule.parseString(rule);
-  if (parsed.ruleTarget != 'SG-OpenAI' &&
-      !isIntlCorplinkServerName(parsed.ruleTarget)) {
+  final target = parsed.ruleTarget;
+  if (target == null ||
+      (target != 'SG-OpenAI' && !isIntlCorplinkServerName(target))) {
     return false;
   }
   return corplinkOpenAiRules.contains(
