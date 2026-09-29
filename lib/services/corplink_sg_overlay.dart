@@ -97,11 +97,31 @@ void mergeCorplinkNodeOverlay(
       scriptConflicts.add(name);
     }
   }
+  if (expected.isNotEmpty) {
+    // A script may replace the entire group/proxy list; in that case the
+    // second pass restores managed entries as designed. A partial deletion
+    // or rename, however, is an explicit change to one managed route.
+    if (managedGroupNames.isNotEmpty) {
+      scriptConflicts.addAll(
+        trustedNames.where((name) =>
+            expected.containsKey(name) && !managedGroupNames.contains(name)),
+      );
+    }
+    if (managedProxyNames.isNotEmpty) {
+      scriptConflicts.addAll(
+        trustedProxyNames.where((name) =>
+            expected.containsKey(name) && !managedProxyNames.contains(name)),
+      );
+    }
+  }
 
   final targetProxyNames = <String>{for (final name in selectionNames) '$name-WG'};
   final targetGroupNames = <String>{...selectionNames, 'SG-Node', 'SG-OpenAI'};
   final foldedTargetProxyNames = targetProxyNames.map((name) => name.toLowerCase()).toSet();
   final foldedTargetGroupNames = targetGroupNames.map((name) => name.toLowerCase()).toSet();
+  if (foldedTargetProxyNames.intersection(foldedTargetGroupNames).isNotEmpty) {
+    throw StateError('CORPLINK_GENERATED_NAME_COLLISION');
+  }
   final seenProxyNames = <String>{};
   for (final item in sourceProxies) {
     if (item is! Map || item['name'] is! String) continue;
@@ -141,6 +161,16 @@ void mergeCorplinkNodeOverlay(
           scriptConflicts.contains('$name-WG'))
         name,
   };
+  final suppressedProxyNames = <String>{
+    for (final name in scriptSuppressedNames) '$name-WG',
+    for (final item in sourceProxies)
+      if (item is Map &&
+          item['name'] is String &&
+          item['corplink'] is Map &&
+          scriptSuppressedNames.contains(
+              (item['corplink'] as Map)['corplink-vpn-server-name']))
+        item['name'] as String,
+  };
   final activeNames = <String>{
     for (final selection in selections)
       if (selection.enabled &&
@@ -172,6 +202,7 @@ void mergeCorplinkNodeOverlay(
   final proxies = <dynamic>[
     for (final item in sourceProxies)
       if (!(item is Map && managedProxyNames.contains(item['name'])) &&
+          !(item is Map && suppressedProxyNames.contains(item['name'])) &&
           !_isLegacyProxy(item)) item,
   ];
   final apiServer = settings.server.trim();
@@ -220,6 +251,12 @@ void mergeCorplinkNodeOverlay(
     final name = item['name']?.toString() ?? '';
     if (name == 'SG-OpenAI' || managedGroupNames.contains(name)) continue;
     final group = Map<String, dynamic>.from(item);
+    if (group['proxies'] is List && suppressedProxyNames.isNotEmpty) {
+      group['proxies'] = [
+        for (final member in group['proxies'] as List)
+          if (suppressedProxyNames.contains(member)) 'REJECT' else member,
+      ];
+    }
     final kind = group['type']?.toString().toLowerCase();
     if (primarySubscriptionGroup == null &&
         name != 'GLOBAL' &&

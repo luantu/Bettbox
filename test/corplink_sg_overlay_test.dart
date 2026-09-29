@@ -261,6 +261,124 @@ void main() {
         .where((item) => item['name'] == 'FUZHOU-NODE-1-WG'), isEmpty);
   });
 
+  test('partial script deletion of one managed group blocks only that node', () {
+    final raw = config();
+    apply(raw);
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(raw['proxy-groups'] as List),
+        ...(raw['proxies'] as List),
+      ])
+        if (item is Map && item['name'] is String)
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(raw)) as Map);
+    (afterScript['proxy-groups'] as List).removeWhere(
+        (item) => item['name'] == 'FUZHOU-NODE-1');
+    final conflicts = <String>{};
+    mergeCorplinkNodeOverlay(
+      afterScript,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: {
+        'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      },
+      trustedManagedProxyNames: {
+        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      expectedManagedObjects: expected,
+      onScriptConflict: conflicts.addAll,
+    );
+    expect(conflicts, contains('FUZHOU-NODE-1'));
+    final groups = afterScript['proxy-groups'] as List;
+    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
+        ['REJECT']);
+    expect(groups.singleWhere((item) => item['name'] == 'FZ-INT-Node')['proxies'],
+        ['FZ-INT-Node-WG']);
+  });
+
+  test('whole-list script replacement still restores managed groups', () {
+    final raw = config();
+    apply(raw);
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(raw['proxy-groups'] as List),
+        ...(raw['proxies'] as List),
+      ])
+        if (item is Map && item['name'] is String)
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(raw)) as Map);
+    afterScript['proxy-groups'] = <dynamic>[];
+    final conflicts = <String>{};
+    mergeCorplinkNodeOverlay(
+      afterScript,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: {
+        'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      },
+      trustedManagedProxyNames: {
+        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      expectedManagedObjects: expected,
+      onScriptConflict: conflicts.addAll,
+    );
+    expect(conflicts, isEmpty);
+    final groups = afterScript['proxy-groups'] as List;
+    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
+        ['FUZHOU-NODE-1-WG']);
+  });
+
+  test('renamed managed group does not leave a dangling WG reference', () {
+    final raw = config();
+    apply(raw);
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(raw['proxy-groups'] as List),
+        ...(raw['proxies'] as List),
+      ])
+        if (item is Map && item['name'] is String)
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(raw)) as Map);
+    final renamed = (afterScript['proxy-groups'] as List).singleWhere(
+        (item) => item['name'] == 'FUZHOU-NODE-1') as Map;
+    renamed['name'] = 'Other';
+    final conflicts = <String>{};
+    mergeCorplinkNodeOverlay(
+      afterScript,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: {
+        'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      },
+      trustedManagedProxyNames: {
+        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      expectedManagedObjects: expected,
+      onScriptConflict: conflicts.addAll,
+    );
+    expect(conflicts, contains('FUZHOU-NODE-1'));
+    final groups = afterScript['proxy-groups'] as List;
+    expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
+        ['REJECT']);
+    expect(groups.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
+        ['REJECT']);
+  });
+
   test('changing selected server removes obsolete generated node and group', () {
     final raw = config();
     apply(raw);
@@ -327,6 +445,21 @@ void main() {
       selections: const [
         CorplinkNodeSelection(serverName: 'A'),
         CorplinkNodeSelection(serverName: 'A-WG'),
+      ],
+      keyPairs: const {},
+    ), throwsStateError);
+    expect(raw.toString(), before);
+  });
+
+  test('generated proxy and group names cannot collide after case folding', () {
+    final raw = config();
+    final before = raw.toString();
+    expect(() => mergeCorplinkNodeOverlay(
+      raw,
+      settings: settings,
+      selections: const [
+        CorplinkNodeSelection(serverName: 'A'),
+        CorplinkNodeSelection(serverName: 'a-WG'),
       ],
       keyPairs: const {},
     ), throwsStateError);
