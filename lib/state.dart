@@ -709,7 +709,10 @@ class GlobalState {
     final configMap = await getProfileConfig(profileId);
     // Inject before the user's JavaScript override runs, so an override can
     // reference SG-Node in proxy-groups/rules just like an airport node.
-    await applyCorplinkSgNode(configMap, suppressNode: suppressCorplinkNode);
+    final trustedCorplinkGroups = await applyCorplinkSgNode(
+      configMap,
+      suppressNode: suppressCorplinkNode,
+    );
     final rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     final originalProxyGroups = rawConfig['proxy-groups'];
 
@@ -1153,7 +1156,11 @@ class GlobalState {
     rawConfig['rules'] = rules;
     // The override may create or replace proxy-groups, so re-apply the node
     // after evaluation to keep the final groups consistent as well.
-    await applyCorplinkSgNode(rawConfig, suppressNode: suppressCorplinkNode);
+    await applyCorplinkSgNode(
+      rawConfig,
+      suppressNode: suppressCorplinkNode,
+      trustedManagedGroupNames: trustedCorplinkGroups,
+    );
     return rawConfig;
   }
 

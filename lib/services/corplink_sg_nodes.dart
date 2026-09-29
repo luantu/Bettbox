@@ -43,9 +43,13 @@ class CorplinkNodeSelection {
   });
 
   String? get validationError {
+    const reservedNames = {
+      'SG-NODE', 'SG-OPENAI', 'DIRECT', 'REJECT', 'GLOBAL', 'PASS',
+    };
     if (serverName.isEmpty ||
         serverName.trim() != serverName ||
-        RegExp(r'[,\r\n\x00-\x1f]').hasMatch(serverName)) {
+        RegExp(r'[,\r\n\x00-\x1f]').hasMatch(serverName) ||
+        reservedNames.contains(serverName.toUpperCase())) {
       return '服务器节点名称无效';
     }
     if (healthUrl.isEmpty) return null;
@@ -127,8 +131,12 @@ Future<CorplinkNodeKeyPair> loadOrCreateCorplinkNodeKeyPair(
   return pair;
 }
 
-String _probeSecretKey(String serverName) =>
-    '$_secretPrefix.probe.${sha256.convert(utf8.encode(serverName))}';
+String _probeSecretKey(String username, String upstream, String serverName) =>
+    '$_secretPrefix.probe.${sha256.convert(utf8.encode(jsonEncode([
+      username.trim(),
+      upstream.trim().replaceFirst(RegExp(r'/$'), ''),
+      serverName,
+    ])))}';
 
 Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({
   CorplinkNodeSecretStore? secrets,
@@ -136,6 +144,8 @@ Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({
   final prefs = await SharedPreferences.getInstance();
   final raw = prefs.getString(_selectionPreferenceKey);
   if (raw == null) return null;
+  final username = prefs.getString(corplinkSgUsernameKey) ?? '';
+  final upstream = prefs.getString(corplinkSgServerKey) ?? '';
   final store = secrets ?? const _PlatformNodeSecrets();
   try {
     final decoded = jsonDecode(raw);
@@ -147,7 +157,7 @@ Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({
       final selection = CorplinkNodeSelection(
         serverName: name,
         enabled: item['enabled'] != false,
-        healthUrl: await store.read(_probeSecretKey(name)) ?? '',
+        healthUrl: await store.read(_probeSecretKey(username, upstream, name)) ?? '',
       );
       if (selection.validationError == null) selections.add(selection);
     }
@@ -170,10 +180,15 @@ Future<void> saveCorplinkNodeSelections(
     }
   }
   final store = secrets ?? const _PlatformNodeSecrets();
-  for (final selection in selections) {
-    await store.write(_probeSecretKey(selection.serverName), selection.healthUrl);
-  }
   final prefs = await SharedPreferences.getInstance();
+  final username = prefs.getString(corplinkSgUsernameKey) ?? '';
+  final upstream = prefs.getString(corplinkSgServerKey) ?? '';
+  for (final selection in selections) {
+    await store.write(
+      _probeSecretKey(username, upstream, selection.serverName),
+      selection.healthUrl,
+    );
+  }
   await prefs.setString(_selectionPreferenceKey, jsonEncode([
     for (final selection in selections)
       {'serverName': selection.serverName, 'enabled': selection.enabled},

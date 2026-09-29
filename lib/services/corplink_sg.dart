@@ -631,12 +631,13 @@ Future<Map<String, dynamic>?> loadCorplinkConfig() async {
   }
 }
 
-Future<void> applyCorplinkSgNode(
+Future<Set<String>> applyCorplinkSgNode(
   Map<String, dynamic> rawConfig, {
   bool suppressNode = false,
+  Set<String> trustedManagedGroupNames = const {},
 }) async {
   final settings = await CorplinkSgSettings.load();
-  if (!settings.enabled) return;
+  if (!settings.enabled) return <String>{};
 
   // The downloaded profile is read afresh for every apply. This overlay is
   // deliberately repeatable because scripts may replace the group list.
@@ -679,7 +680,7 @@ Future<void> applyCorplinkSgNode(
       controlIP: controlIP,
       suppressNode: suppressNode,
     );
-    return;
+    return <String>{};
   }
   final keyPairs = <String, CorplinkNodeKeyPair>{};
   if (usableAuth != null && !suppressNode) {
@@ -703,7 +704,13 @@ Future<void> applyCorplinkSgNode(
     suppressedNames: suppressNode
         ? {for (final selection in selections) selection.serverName}
         : const {},
+    trustedManagedGroupNames: trustedManagedGroupNames,
   );
+  return {
+    for (final selection in selections) selection.serverName,
+    'SG-Node',
+    'SG-OpenAI',
+  };
 }
 
 String? selectCorplinkPhysicalIP(Iterable<String> addresses) {

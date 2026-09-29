@@ -501,7 +501,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	if wg.Data.Setting != nil {
 		info.MTU = wg.Data.Setting.VPNMTU
 	}
-	log.Infoln("[WG-Corplink] fetched wg_info: ip=%s server_pubkey=%s", info.IP, serverPubB64)
+	log.Infoln("[WG-Corplink] fetched wg_info: ip=%s", info.IP)
 	return info, nil
 }
 

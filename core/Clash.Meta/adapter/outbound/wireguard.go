@@ -534,6 +534,10 @@ func (option WireGuardOption) Prefixes() ([]netip.Prefix, error) {
 }
 
 func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
+	return newWireGuard(option, true)
+}
+
+func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuard, error) {
 	outbound := &WireGuard{
 		Base: NewBase(BaseOption{
 			Name:         option.Name,
@@ -569,7 +573,7 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		// TCP transport：直接连服务器（不依赖 sing dialer），兼容 corplink-rs 的 TCP 封装
 		log.Infoln("[WG](%s) using TCP transport, target=%s", option.Name, outbound.connectAddr)
 		if option.Corplink.APIServer != "" {
-			log.Infoln("[WG](%s) corplink auth enabled: api=%s cookie=%s", option.Name, option.Corplink.APIServer, option.Corplink.CookieFile)
+			log.Infoln("[WG](%s) corplink auth enabled", option.Name)
 		} else {
 			log.Infoln("[WG](%s) corplink auth NOT enabled", option.Name)
 		}
@@ -675,7 +679,17 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	// 此时 option.PublicKey 已统一为 hex 格式，fetch 返回的 hex 直接可用。
 	if option.Corplink.APIServer != "" {
 		if err := refreshCorplinkOption(&option); err != nil {
-			return nil, err
+			if !allowDegradedCorplink {
+				_ = outbound.bind.Close()
+				return nil, err
+			}
+			// A VPN server outage must not reject the entire profile, which would
+			// also remove healthy CorpLink and airport proxies. This outbound
+			// remains fail-closed until a targeted rebuild obtains its own IP.
+			outbound.option = option
+			outbound.requiresRebuild.Store(true)
+			log.Warnln("[WG](%s) CorpLink node unavailable at config load; keeping retryable outbound", option.Name)
+			return outbound, nil
 		}
 		// Keep readiness checks aligned with the endpoint selected by
 		// /vpn/conn, not the bootstrap address from the raw config.
@@ -875,7 +889,7 @@ func (w *WireGuard) init0(ctx context.Context) error {
 	}
 
 	if debug.Enabled {
-		log.SingLogger.Trace(fmt.Sprintf("[WG](%s) created wireguard ipc conf: \n %s", w.option.Name, ipcConf))
+		log.SingLogger.Trace(fmt.Sprintf("[WG](%s) created wireguard ipc configuration", w.option.Name))
 	}
 	err = w.device.IpcSet(ipcConf)
 	if err != nil {
@@ -961,7 +975,7 @@ func refreshCorplinkOption(option *WireGuardOption) error {
 		// directly; keeping the same value is required for payload parity.
 		option.MTU = info.MTU
 	}
-	log.Infoln("[WG](%s) corplink refreshed: ip=%s public_key=%s mtu=%d", option.Name, option.Ip, option.PublicKey, option.MTU)
+	log.Infoln("[WG](%s) corplink refreshed: ip=%s mtu=%d", option.Name, option.Ip, option.MTU)
 	return nil
 }
 
@@ -1152,6 +1166,8 @@ func (w *WireGuard) Close() error {
 	w.closed.Store(true)
 	if w.device != nil {
 		w.device.Close()
+	} else if w.bind != nil {
+		_ = w.bind.Close()
 	}
 	return nil
 }
@@ -1160,10 +1176,22 @@ func (w *WireGuard) Close() error {
 // outbound's WireGuard device/IP stack. The old device remains usable until
 // the replacement has been fully constructed; another outbound is untouched.
 func (w *WireGuard) RebuildCorplink(ctx context.Context) error {
+	return w.rebuildCorplink(ctx, false)
+}
+
+func (w *WireGuard) activateDegradedCorplink(ctx context.Context) error {
+	return w.rebuildCorplink(ctx, true)
+}
+
+func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) error {
 	w.rebuildMu.Lock()
 	defer w.rebuildMu.Unlock()
 
 	w.lifecycleMu.RLock()
+	if onlyIfMissing && (w.device != nil || !w.requiresRebuild.Load()) {
+		w.lifecycleMu.RUnlock()
+		return nil
+	}
 	if w.closed.Load() || !w.IsCorplink() || !w.option.TCP {
 		w.lifecycleMu.RUnlock()
 		return E.New("corplink outbound is closed or not TCP")
@@ -1186,7 +1214,7 @@ func (w *WireGuard) RebuildCorplink(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	replacement, err := NewWireGuard(option)
+	replacement, err := newWireGuard(option, false)
 	if err != nil {
 		return err
 	}
@@ -1225,6 +1253,7 @@ func (w *WireGuard) RebuildCorplink(ctx context.Context) error {
 		return E.New("corplink outbound closed during rebuild")
 	}
 	oldDevice := w.device
+	oldBind := w.bind
 	w.device = replacement.device
 	w.tunDevice = replacement.tunDevice
 	w.bind = replacement.bind
@@ -1240,6 +1269,8 @@ func (w *WireGuard) RebuildCorplink(ctx context.Context) error {
 	w.dohTunnelSeen.Store(false)
 	if oldDevice != nil {
 		oldDevice.Close()
+	} else if oldBind != nil {
+		_ = oldBind.Close()
 	}
 	return nil
 }
@@ -1263,6 +1294,10 @@ func (w *WireGuard) CorplinkStatus() CorplinkStatus {
 		Closed:          w.closed.Load(),
 		TunnelIP:        w.option.Ip,
 		Endpoint:        w.tcpDialTarget(),
+	}
+	if w.device == nil && w.requiresRebuild.Load() && !w.initOk.Load() {
+		status.TunnelIP = ""
+		status.Endpoint = ""
 	}
 	if status.Initialized && !status.RebuildRequired && !status.Closed {
 		if bind, ok := w.bind.(interface{ HasReadyConn() bool }); ok {
@@ -1295,6 +1330,9 @@ func (w *WireGuard) CorplinkServerName() string {
 // any public website. This is the default health path when no HTTPS probe is
 // configured for the node.
 func (w *WireGuard) EnsureCorplinkReady(ctx context.Context) bool {
+	if w.activateDegradedCorplink(ctx) != nil {
+		return false
+	}
 	w.lifecycleMu.RLock()
 	defer w.lifecycleMu.RUnlock()
 	if w.closed.Load() || !w.IsCorplink() {
@@ -1329,6 +1367,9 @@ func (w *WireGuard) Reconnect() {
 }
 
 func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
+	if err = w.activateDegradedCorplink(ctx); err != nil {
+		return nil, err
+	}
 	w.lifecycleMu.RLock()
 	var conn net.Conn
 	if err = w.init(ctx); err != nil {
@@ -1424,6 +1465,9 @@ func corplinkTunnelDialContext(ctx context.Context, tcp bool) (context.Context, 
 }
 
 func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (_ C.PacketConn, err error) {
+	if err = w.activateDegradedCorplink(ctx); err != nil {
+		return nil, err
+	}
 	w.lifecycleMu.RLock()
 	var pc net.PacketConn
 	if err = w.init(ctx); err != nil {

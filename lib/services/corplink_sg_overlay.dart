@@ -1,6 +1,11 @@
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
 
+// Object identity is trustworthy for a second pass over the same map. When
+// JavaScript returns a new map, state.dart passes the first pass's names
+// explicitly; a downloaded group is never trusted by its shape alone.
+final Expando<Set<String>> _generatedGroupsByConfig = Expando<Set<String>>();
+
 bool _isManagedProxy(dynamic item) {
   if (item is! Map || item['type'] != 'wireguard') return false;
   final name = item['name'];
@@ -18,23 +23,6 @@ bool _isLegacyProxy(dynamic item) =>
     item['type'] == 'wireguard' &&
     item['corplink'] is Map;
 
-bool _isManagedGroup(dynamic item, Set<String> knownNames) {
-  if (item is! Map || item['type'] != 'select') return false;
-  final name = item['name'];
-  final members = item['proxies'];
-  if (name is! String || members is! List) return false;
-  if (name == 'SG-Node') {
-    return item['hidden'] == true &&
-        (members.length == 1 &&
-            (members.single == 'REJECT' ||
-                (members.single is String &&
-                    isIntlCorplinkServerName(members.single as String))));
-  }
-  return knownNames.contains(name) &&
-      members.length == 1 &&
-      (members.single == '$name-WG' || members.single == 'REJECT');
-}
-
 /// Adds one WireGuard outbound and one same-name select group per server.
 /// All collision checks happen before any write to [rawConfig].
 void mergeCorplinkNodeOverlay(
@@ -46,6 +34,7 @@ void mergeCorplinkNodeOverlay(
   String? cookiePath,
   String? controlIP,
   Set<String> suppressedNames = const {},
+  Set<String> trustedManagedGroupNames = const {},
 }) {
   if (!settings.enabled) return;
   final selectionNames = <String>{};
@@ -55,23 +44,27 @@ void mergeCorplinkNodeOverlay(
       throw StateError('INVALID_CORPLINK_NODE_SELECTION');
     }
   }
+  for (final name in selectionNames) {
+    if (selectionNames.contains('$name-WG')) {
+      throw StateError('CORPLINK_GENERATED_NAME_COLLISION');
+    }
+  }
 
   final sourceProxies = List<dynamic>.from(rawConfig['proxies'] as List? ?? const []);
   final sourceGroups = List<dynamic>.from(rawConfig['proxy-groups'] as List? ?? const []);
-  final priorManagedNames = <String>{};
-  for (final item in sourceProxies) {
-    if (_isManagedProxy(item)) {
-      priorManagedNames.add((item as Map)['corplink']['corplink-vpn-server-name'] as String);
-    }
-  }
-  final knownNames = {...selectionNames, ...priorManagedNames};
+  final trustedNames = {
+    ...trustedManagedGroupNames,
+    ...?_generatedGroupsByConfig[rawConfig],
+  };
   final managedProxyNames = <String>{
     for (final item in sourceProxies)
       if (_isManagedProxy(item)) (item as Map)['name'] as String,
   };
   final managedGroupNames = <String>{
     for (final item in sourceGroups)
-      if (_isManagedGroup(item, knownNames)) (item as Map)['name'] as String,
+      if (item is Map && item['name'] is String &&
+          trustedNames.contains(item['name']))
+        item['name'] as String,
   };
 
   final targetProxyNames = <String>{for (final name in selectionNames) '$name-WG'};
@@ -117,9 +110,17 @@ void mergeCorplinkNodeOverlay(
   };
   String? intlName;
   for (final selection in selections) {
-    if (isIntlCorplinkServerName(selection.serverName)) {
+    if (selection.enabled && isIntlCorplinkServerName(selection.serverName)) {
       intlName = selection.serverName;
       break;
+    }
+  }
+  if (intlName == null) {
+    for (final selection in selections) {
+      if (isIntlCorplinkServerName(selection.serverName)) {
+        intlName = selection.serverName;
+        break;
+      }
     }
   }
   final intlActive = intlName != null && activeNames.contains(intlName);
@@ -226,4 +227,5 @@ void mergeCorplinkNodeOverlay(
       ? <dynamic>[...corplinkOpenAiRules, ...rules]
       : rules;
   rawConfig.remove(rulesKey == 'rules' ? 'rule' : 'rules');
+  _generatedGroupsByConfig[rawConfig] = targetGroupNames;
 }

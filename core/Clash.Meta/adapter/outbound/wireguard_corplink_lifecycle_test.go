@@ -146,6 +146,59 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 	}
 }
 
+func TestCorplinkUnavailableAtLoadCanRebuildAfterServerRecovery(t *testing.T) {
+	const serverPublic = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	data := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/vpn/ping" {
+			_, _ = io.WriteString(w, `{"code":0,"data":"ok"}`)
+			return
+		}
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"ip":"10.31.0.4","ip_mask":"32","public_key":%q}}`, serverPublic))
+	}))
+	defer data.Close()
+	_, port, err := net.SplitHostPort(data.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var available atomic.Bool
+	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !available.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":0,"data":[{"api_port":%s,"vpn_port":34080,"ip":"127.0.0.1","protocol_mode":1,"name":"FZ-INT-Node"}]}`, port))
+	}))
+	defer control.Close()
+	localKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	w, err := NewWireGuard(WireGuardOption{
+		Name: "FZ-INT-Node-WG", TCP: true, Ip: "0.0.0.0/32",
+		PrivateKey: localKey,
+		WireGuardPeerOption: WireGuardPeerOption{
+			Server: "127.0.0.1", Port: 34080, PublicKey: serverPublic,
+			AllowedIPs: []string{"0.0.0.0/0"},
+		},
+		Corplink: CorplinkOption{
+			APIServer: control.URL, CookieFile: writeCorplinkCookieFile(t),
+			VPNServerName: "FZ-INT-Node", PublicKey: localKey,
+			Code: "JBSWY3DPEHPK3PXP",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unavailable node rejected at profile load: %v", err)
+	}
+	defer w.Close()
+	if w.device != nil || !w.CorplinkStatus().RebuildRequired || w.CorplinkStatus().TunnelIP != "" {
+		t.Fatalf("unavailable node did not stay fail-closed: %+v", w.CorplinkStatus())
+	}
+	available.Store(true)
+	if err := w.RebuildCorplink(context.Background()); err != nil {
+		t.Fatalf("server recovery could not rebuild the node: %v", err)
+	}
+	if w.device == nil || w.option.Ip != "10.31.0.4/32" || w.CorplinkStatus().RebuildRequired {
+		t.Fatalf("recovered node did not adopt its own new stack: %+v", w.CorplinkStatus())
+	}
+}
+
 func (d *lifecycleDevice) IpcSet(string) error {
 	d.ipcSets++
 	return nil

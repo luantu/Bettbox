@@ -128,6 +128,9 @@ void main() {
     expect(const CorplinkNodeSelection(serverName: '').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'A,B').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'A\nB').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(serverName: 'SG-Node').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(serverName: 'SG-OpenAI').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(serverName: 'DIRECT').validationError, isNotNull);
     expect(
       const CorplinkNodeSelection(
         serverName: 'FUZHOU-NODE-1',
@@ -182,6 +185,23 @@ void main() {
     for (final key in prefs.getKeys()) {
       expect(prefs.get(key).toString(), isNot(contains('health.example.invalid')));
     }
+  });
+
+  test('probe URL does not carry into another account on the same node', () async {
+    final secrets = _MemoryNodeSecrets();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(corplinkSgUsernameKey, 'first-user');
+    await prefs.setString(corplinkSgServerKey, 'https://example.invalid');
+    await saveCorplinkNodeSelections(
+      const [CorplinkNodeSelection(
+        serverName: 'FUZHOU-NODE-1',
+        healthUrl: 'https://private.example.invalid/ready',
+      )],
+      secrets: secrets,
+    );
+    await prefs.setString(corplinkSgUsernameKey, 'second-user');
+    final loaded = await loadCorplinkNodeSelections(secrets: secrets);
+    expect(loaded?.single.healthUrl, isEmpty);
   });
 
   test('concurrent node startup shares one account login', () async {

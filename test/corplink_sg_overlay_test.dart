@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_overlay.dart';
@@ -112,6 +114,38 @@ void main() {
     expect(raw.toString(), before);
   });
 
+  test('a downloaded fail-closed group is not mistaken for our managed group', () {
+    final raw = config();
+    (raw['proxy-groups'] as List).add({
+      'name': 'FUZHOU-NODE-1',
+      'type': 'select',
+      'proxies': <dynamic>['REJECT'],
+    });
+    final before = raw.toString();
+    expect(() => apply(raw), throwsStateError);
+    expect(raw.toString(), before);
+  });
+
+  test('trusted first-pass groups survive a script returning a new map', () {
+    final original = config();
+    apply(original);
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(original)) as Map);
+    mergeCorplinkNodeOverlay(
+      afterScript,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: {
+        'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      },
+    );
+    expect((afterScript['proxy-groups'] as List)
+        .where((group) => group['name'] == 'FUZHOU-NODE-1').length, 1);
+  });
+
   test('changing selected server removes obsolete generated node and group', () {
     final raw = config();
     apply(raw);
@@ -146,5 +180,41 @@ void main() {
         ['FUZHOU_INTL_node']);
     expect(groups.singleWhere((g) => g['name'] == 'SG-OpenAI')['proxies'].first,
         'SG-Node');
+  });
+
+  test('SG alias prefers enabled INTL spelling when both aliases exist', () {
+    final raw = config();
+    mergeCorplinkNodeOverlay(
+      raw,
+      settings: settings,
+      selections: const [
+        CorplinkNodeSelection(serverName: 'FZ-INT-Node', enabled: false),
+        CorplinkNodeSelection(serverName: 'FUZHOU_INTL_node'),
+      ],
+      keyPairs: const {
+        'FUZHOU_INTL_node': CorplinkNodeKeyPair(
+          publicKey: 'intl-public', privateKey: 'intl-private'),
+      },
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+    );
+    final groups = raw['proxy-groups'] as List;
+    expect(groups.singleWhere((g) => g['name'] == 'SG-Node')['proxies'],
+        ['FUZHOU_INTL_node']);
+  });
+
+  test('generated node and group names cannot collide with each other', () {
+    final raw = config();
+    final before = raw.toString();
+    expect(() => mergeCorplinkNodeOverlay(
+      raw,
+      settings: settings,
+      selections: const [
+        CorplinkNodeSelection(serverName: 'A'),
+        CorplinkNodeSelection(serverName: 'A-WG'),
+      ],
+      keyPairs: const {},
+    ), throwsStateError);
+    expect(raw.toString(), before);
   });
 }

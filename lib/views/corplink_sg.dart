@@ -234,37 +234,17 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       await settings.save();
       final names = await discoverCorplinkVpnNodeNames(settings);
       if (!mounted) return;
-      String? discoveredIntl;
-      for (final name in names) {
-        if (isIntlCorplinkServerName(name)) {
-          discoveredIntl = name;
-          break;
-        }
-      }
-      final currentNodes = discoveredIntl != null &&
-              !names.contains('FZ-INT-Node') &&
-              !_nodes.any((node) => node.serverName == discoveredIntl)
-          ? [
-              for (final node in _nodes)
-                node.serverName == 'FZ-INT-Node'
-                    ? CorplinkNodeSelection(
-                        serverName: discoveredIntl,
-                        enabled: node.enabled,
-                        healthUrl: node.healthUrl,
-                      )
-                    : node,
-            ]
-          : _nodes;
-      final selectedNames = currentNodes.map((node) => node.serverName).toSet();
+      final selectedNames = _nodes.map((node) => node.serverName).toSet();
       setState(() {
         _discoveredNames = names;
         _nodes = [
-          ...currentNodes,
+          ..._nodes,
           for (final name in names)
             if (!selectedNames.contains(name))
               CorplinkNodeSelection(serverName: name, enabled: false),
         ];
-        _status = '发现 ${names.length} 个 TCP 节点；勾选要同时连接的节点后保存';
+        _status = '发现 ${names.length} 个 TCP 节点；旧 INTL 名称不会自动改动，'
+            '请自行勾选要同时连接的节点后保存';
       });
     } catch (error) {
       if (mounted) setState(() => _status = '发现节点失败：${error.runtimeType}');
@@ -476,6 +456,8 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         if (_discoveredNames.isNotEmpty)
           Text('已发现：${_discoveredNames.join('、')}',
               style: Theme.of(context).textTheme.bodySmall),
+        Text('取消勾选会保留 REJECT 占位组，避免覆写脚本中的规则失去目标。',
+            style: Theme.of(context).textTheme.bodySmall),
         for (final node in _nodes) ...[
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
@@ -488,14 +470,6 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
                 enabled: value ?? false,
                 healthUrl: node.healthUrl,
               ),
-            ),
-            secondary: IconButton(
-              tooltip: '移除 ${node.serverName}',
-              onPressed: _busy ? null : () => setState(() {
-                _nodes = _nodes.where((item) =>
-                    item.serverName != node.serverName).toList();
-              }),
-              icon: const Icon(Icons.close),
             ),
           ),
           TextFormField(
