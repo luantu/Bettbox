@@ -22,9 +22,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   bool _reading = false;
   bool _busy = false;
   bool? _lastProbeOk;
-  DateTime? _lastProbeAt;
   SgCoreStatus? _status;
-  DateTime? _updatedAt;
   String? _error;
 
   @override
@@ -53,11 +51,9 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
             _status?.phase != status?.phase ||
             _status?.tunnelIp != status?.tunnelIp) {
           _lastProbeOk = null;
-          _lastProbeAt = null;
         }
         _enabled = settings.enabled;
         _status = status;
-        _updatedAt = DateTime.now();
         _error = null;
       });
     } catch (error) {
@@ -84,14 +80,12 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
         probe: () async {
           final ok = await probeCorplinkSgChatGpt();
           _lastProbeOk = ok;
-          _lastProbeAt = DateTime.now();
           return ok;
         },
       );
       if (!mounted) return;
       setState(() {
         _status = status;
-        _updatedAt = DateTime.now();
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.runtimeType.toString());
@@ -112,46 +106,38 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   }
 
   String get _summary {
-    if (_error != null) return '状态读取或恢复失败：$_error';
-    if (!_enabled) return '飞连未启用，点按配置';
-    if (!globalState.isStart) return 'Android VPN 未启动';
+    if (_error != null) return '状态异常 · 点击刷新';
+    if (!_enabled) return '未启用 · 点击配置';
+    if (!globalState.isStart) return 'VPN 未启动 · 点击刷新';
     final phase = _status?.phase;
     final text = switch (phase) {
-      SgConnectionPhase.ready => 'WireGuard 握手就绪',
+      SgConnectionPhase.ready => _lastProbeOk == null
+          ? '隧道已连接'
+          : _lastProbeOk!
+              ? '已连接 · 上次检查可达'
+              : '已连接 · 上次检查失败',
       SgConnectionPhase.waitingForTraffic => '等待首次握手',
-      SgConnectionPhase.connecting => '隧道尚未就绪',
-      SgConnectionPhase.needsRebuild => '需要重建隧道',
-      SgConnectionPhase.missing || null => 'SG 节点未创建',
+      SgConnectionPhase.connecting => '正在连接',
+      SgConnectionPhase.needsRebuild => '连接异常 · 点击刷新',
+      SgConnectionPhase.missing || null => '节点未创建 · 点击配置',
     };
     return text;
   }
 
   @override
   Widget build(BuildContext context) {
-    final updatedAt = _updatedAt;
-    final timeText = updatedAt == null
-        ? ''
-        : '${updatedAt.hour.toString().padLeft(2, '0')}:'
-          '${updatedAt.minute.toString().padLeft(2, '0')}:'
-          '${updatedAt.second.toString().padLeft(2, '0')}';
-    final tunnelIp = _status?.tunnelIp ?? '';
-    final lastProbeAt = _lastProbeAt;
-    final probeText = _lastProbeOk == null || lastProbeAt == null
-        ? ''
-        : '上次 ChatGPT 检查 '
-          '${lastProbeAt.hour.toString().padLeft(2, '0')}:'
-          '${lastProbeAt.minute.toString().padLeft(2, '0')} '
-          '${_lastProbeOk! ? '有响应' : '未连通'}';
     return SizedBox(
-      height: getWidgetHeight(2),
+      height: getWidgetHeight(1),
       child: CommonCard(
         onPressed: _openSettings,
-        child: Padding(
-          padding: baseInfoEdgeInsets,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: globalState.measure.titleMediumHeight + 20,
+              padding: baseInfoEdgeInsets.copyWith(top: 8, bottom: 0),
+              child: Row(
                 children: [
                   Icon(Icons.vpn_key_outlined,
                       color: context.colorScheme.onSurfaceVariant),
@@ -160,44 +146,39 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
                     child: Text('SG-Node',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: context.textTheme.titleSmall),
+                        style: context.textTheme.titleSmall?.copyWith(
+                          color: context.colorScheme.onSurfaceVariant,
+                        )),
                   ),
-                  IconButton(
-                    tooltip: '刷新状态并恢复 SG-Node',
-                    onPressed: _busy ? null : _refresh,
-                    icon: _busy
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh),
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      tooltip: '刷新状态并恢复 SG-Node',
+                      onPressed: _busy ? null : _refresh,
+                      icon: _busy
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh, size: 18),
+                    ),
                   ),
                 ],
               ),
-              const Spacer(),
-              Text(_summary, maxLines: 1, overflow: TextOverflow.ellipsis),
-              if (probeText.isNotEmpty)
-                Text(
-                  probeText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.textTheme.bodySmall,
-                ),
-              if (tunnelIp.isNotEmpty || timeText.isNotEmpty)
-                Text(
-                  [
-                    if (tunnelIp.isNotEmpty) '隧道 IP：$tunnelIp',
-                    if (timeText.isNotEmpty) '更新于 $timeText',
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.textTheme.bodySmall?.copyWith(
-                    color: context.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-            ],
-          ),
+            ),
+            Padding(
+              padding: baseInfoEdgeInsets.copyWith(top: 0),
+              child: Text(
+                _summary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.textTheme.bodyMedium,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -3,6 +3,11 @@ import 'package:bett_box/models/config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('SG tile occupies one standard half-width dashboard cell', () {
+    expect(DashboardWidget.sgNode.widget.crossAxisCellCount, 4);
+    expect(DashboardWidget.sgNode.widget.mainAxisCellCount, 1);
+  });
+
   test('existing Android layout gains SG tile once before the start button', () {
     final original = [
       DashboardWidget.networkSpeed,

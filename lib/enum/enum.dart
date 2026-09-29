@@ -334,7 +334,7 @@ enum DashboardWidget {
   providersInfo(GridItem(crossAxisCellCount: 4, child: ProvidersInfo())),
   fcmStatus(GridItem(crossAxisCellCount: 4, child: FcmStatus())),
   sgNode(
-    GridItem(crossAxisCellCount: 8, mainAxisCellCount: 2, child: SgNodeStatusTile()),
+    GridItem(crossAxisCellCount: 4, mainAxisCellCount: 1, child: SgNodeStatusTile()),
     platforms: [SupportPlatform.Android],
   ),
   onlinePanel(GridItem(crossAxisCellCount: 4, child: OnlinePanel())),
