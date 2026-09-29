@@ -56,10 +56,12 @@ type wireGuardBind interface {
 
 type WireGuard struct {
 	*Base
-	bind      wireGuardBind
-	device    wireguardGoDevice
-	tunDevice wireguardDevice
-	resolver  resolver.Resolver
+	lifecycleMu sync.RWMutex // protects the live stack during targeted rebuild/close
+	rebuildMu   sync.Mutex
+	bind        wireGuardBind
+	device      wireguardGoDevice
+	tunDevice   wireguardDevice
+	resolver    resolver.Resolver
 
 	initOk        atomic.Bool
 	initMutex     sync.Mutex
@@ -1142,9 +1144,102 @@ func (w *WireGuard) genIpcConf(ctx context.Context, updateOnly bool) (string, er
 
 // Close implements C.ProxyAdapter
 func (w *WireGuard) Close() error {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	if w.closed.Load() {
+		return nil
+	}
 	w.closed.Store(true)
 	if w.device != nil {
 		w.device.Close()
+	}
+	return nil
+}
+
+// RebuildCorplink obtains fresh /vpn/conn parameters and replaces only this
+// outbound's WireGuard device/IP stack. The old device remains usable until
+// the replacement has been fully constructed; another outbound is untouched.
+func (w *WireGuard) RebuildCorplink(ctx context.Context) error {
+	w.rebuildMu.Lock()
+	defer w.rebuildMu.Unlock()
+
+	w.lifecycleMu.RLock()
+	if w.closed.Load() || !w.IsCorplink() || !w.option.TCP {
+		w.lifecycleMu.RUnlock()
+		return E.New("corplink outbound is closed or not TCP")
+	}
+	option := w.option
+	w.lifecycleMu.RUnlock()
+	if len(option.Peers) != 0 {
+		return E.New("corplink multi-peer rebuild is unsupported")
+	}
+	privateKey, err := hex.DecodeString(option.PrivateKey)
+	if err != nil || len(privateKey) != 32 {
+		return E.New("corplink private key invalid for rebuild")
+	}
+	peerKey, err := hex.DecodeString(option.PublicKey)
+	if err != nil || len(peerKey) != 32 {
+		return E.New("corplink peer key invalid for rebuild")
+	}
+	option.PrivateKey = base64.StdEncoding.EncodeToString(privateKey)
+	option.PublicKey = base64.StdEncoding.EncodeToString(peerKey)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	replacement, err := NewWireGuard(option)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = replacement.Close()
+		return err
+	}
+
+	// NewWireGuard binds its resolver to the newly allocated adapter. Rebind
+	// DoH to the stable, externally referenced adapter so subsequent rebuilds
+	// never send DNS through a stale stack.
+	var nextResolver resolver.Resolver
+	if replacement.option.RemoteDnsResolve && len(replacement.option.Dns) > 0 {
+		nameservers, parseErr := dns.ParseNameServer(replacement.option.Dns)
+		if parseErr != nil {
+			_ = replacement.Close()
+			return parseErr
+		}
+		hasIPv6 := false
+		for _, prefix := range replacement.localPrefixes {
+			if !prefix.Addr().Unmap().Is4() {
+				hasIPv6 = true
+				break
+			}
+		}
+		nextResolver = dns.NewResolver(dns.Config{
+			Main: routeCorplinkDNSThroughTunnel(nameservers, w),
+			IPv6: hasIPv6,
+		})
+	}
+
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	if w.closed.Load() {
+		_ = replacement.Close()
+		return E.New("corplink outbound closed during rebuild")
+	}
+	oldDevice := w.device
+	w.device = replacement.device
+	w.tunDevice = replacement.tunDevice
+	w.bind = replacement.bind
+	w.resolver = nextResolver
+	w.option = replacement.option
+	w.localPrefixes = replacement.localPrefixes
+	w.connectAddr = replacement.connectAddr
+	w.serverAddrMap = nil
+	w.initErr = nil
+	w.initOk.Store(false)
+	w.requiresRebuild.Store(false)
+	w.busyFail.Store(0)
+	w.dohTunnelSeen.Store(false)
+	if oldDevice != nil {
+		oldDevice.Close()
 	}
 	return nil
 }
@@ -1160,6 +1255,8 @@ type CorplinkStatus struct {
 }
 
 func (w *WireGuard) CorplinkStatus() CorplinkStatus {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
 	status := CorplinkStatus{
 		Initialized:     w.initOk.Load(),
 		RebuildRequired: w.requiresRebuild.Load(),
@@ -1186,6 +1283,8 @@ func (w *WireGuard) IsCorplink() bool {
 // CorplinkServerName is the exact control-plane name selected for this
 // outbound. It is intentionally independent of the proxy-group alias.
 func (w *WireGuard) CorplinkServerName() string {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
 	if !w.IsCorplink() {
 		return ""
 	}
@@ -1203,6 +1302,8 @@ func (w *WireGuard) CorplinkServerName() string {
 // would never mark the new transport ready. The CorpLink management session
 // is not touched during the transient offline window.
 func (w *WireGuard) Reconnect() {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
 	if !w.option.TCP {
 		return
 	}
@@ -1216,11 +1317,13 @@ func (w *WireGuard) Reconnect() {
 }
 
 func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
+	w.lifecycleMu.RLock()
 	var conn net.Conn
 	if err = w.init(ctx); err != nil {
 		if isTunnelFailure(err) && w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()
 		}
+		w.lifecycleMu.RUnlock()
 		return nil, err
 	}
 	// Wait for the WireGuard handshake to complete *before* resolving or
@@ -1234,69 +1337,88 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 		if w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()
 		}
+		w.lifecycleMu.RUnlock()
 		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
 	}
-	if !metadata.Resolved() || w.resolver != nil {
+	// DNS may recursively dial this adapter for in-tunnel DoH. Release the
+	// lifecycle read lock before entering the resolver: otherwise a pending
+	// rebuild/close writer can block the nested read lock indefinitely.
+	tunDevice := w.tunDevice
+	activeResolver := w.resolver
+	activeOption := w.option
+	w.lifecycleMu.RUnlock()
+	if !metadata.Resolved() || activeResolver != nil {
 		r := resolver.DefaultResolver
-		if w.resolver != nil {
-			r = w.resolver
+		if activeResolver != nil {
+			r = activeResolver
 		}
 		options := w.DialOptions()
 		options = append(options, dialer.WithResolver(r))
-		options = append(options, dialer.WithNetDialer(wgNetDialer{tunDevice: w.tunDevice}))
-		dialCtx, cancel := w.tunnelDialContext(ctx)
+		options = append(options, dialer.WithNetDialer(wgNetDialer{tunDevice: tunDevice}))
+		dialCtx, cancel := corplinkTunnelDialContext(ctx, activeOption.TCP)
 		conn, err = dialer.NewDialer(options...).DialContext(dialCtx, "tcp", metadata.RemoteAddress())
 		cancel()
 	} else {
-		dialCtx, cancel := w.tunnelDialContext(ctx)
-		conn, err = w.tunDevice.DialTCP(dialCtx, "tcp", netip.AddrPort{}, metadata.AddrPort())
+		dialCtx, cancel := corplinkTunnelDialContext(ctx, activeOption.TCP)
+		conn, err = tunDevice.DialTCP(dialCtx, "tcp", netip.AddrPort{}, metadata.AddrPort())
 		cancel()
 	}
 	if err != nil {
 		// 业务 dial 失败：区分 DNS 失败与隧道数据面失败。
 		// 仅隧道数据面失败累计到阈值才触发重建，避免 DNS 抖动反复重建。
 		if isTunnelFailure(err) && w.registerBusyFailure() {
+			w.lifecycleMu.RLock()
 			w.invalidateTunnelForBusyFailure()
+			w.lifecycleMu.RUnlock()
 		}
 		return nil, err
 	}
 	if conn == nil {
 		if w.registerBusyFailure() {
+			w.lifecycleMu.RLock()
 			w.invalidateTunnelForBusyFailure()
+			w.lifecycleMu.RUnlock()
 		}
 		return nil, E.New("conn is nil")
 	}
 	// TCP 建连成功，但需等待 WireGuard 握手完成（隧道 ready）业务才可用
-	if !w.waitTunnelReady(ctx) {
-		log.Warnln("[WG](%s) tunnel not ready within %v after TCP connect, treating as failure", w.option.Name, tunnelFailureDialTimeout())
+	w.lifecycleMu.RLock()
+	ready := w.waitTunnelReady(ctx)
+	w.lifecycleMu.RUnlock()
+	if !ready {
+		log.Warnln("[WG](%s) tunnel not ready within %v after TCP connect, treating as failure", activeOption.Name, tunnelFailureDialTimeout())
 		_ = conn.Close()
 		if w.registerBusyFailure() {
+			w.lifecycleMu.RLock()
 			w.invalidateTunnelForBusyFailure()
+			w.lifecycleMu.RUnlock()
 		}
 		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
 	}
-	if w.option.Corplink.APIServer != "" &&
-		configuredDoHEndpoint(metadata, w.option.Dns) &&
+	if activeOption.Corplink.APIServer != "" &&
+		configuredDoHEndpoint(metadata, activeOption.Dns) &&
 		w.dohTunnelSeen.CompareAndSwap(false, true) {
-		log.Infoln("[WG](%s) DoH resolver TCP connected through WireGuard tunnel", w.option.Name)
+		log.Infoln("[WG](%s) DoH resolver TCP connected through WireGuard tunnel", activeOption.Name)
 	}
 	w.recordBusySuccess()
 	return NewConn(conn, w), nil
 }
 
-func (w *WireGuard) tunnelDialContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if !w.option.TCP {
+func corplinkTunnelDialContext(ctx context.Context, tcp bool) (context.Context, context.CancelFunc) {
+	if !tcp {
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, tunnelFailureDialTimeout())
 }
 
 func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (_ C.PacketConn, err error) {
+	w.lifecycleMu.RLock()
 	var pc net.PacketConn
 	if err = w.init(ctx); err != nil {
 		if isTunnelFailure(err) && w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()
 		}
+		w.lifecycleMu.RUnlock()
 		return nil, err
 	}
 	// Same ordering guarantee as DialContext: wait for handshake before any
@@ -1306,22 +1428,29 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 		if w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()
 		}
+		w.lifecycleMu.RUnlock()
 		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
 	}
+	tunDevice := w.tunDevice
+	w.lifecycleMu.RUnlock()
 	if err = w.ResolveUDP(ctx, metadata); err != nil {
 		// DNS 解析失败不计入隧道健康
 		return nil, err
 	}
-	pc, err = w.tunDevice.ListenUDP(ctx, "udp", netip.AddrPort{})
+	pc, err = tunDevice.ListenUDP(ctx, "udp", netip.AddrPort{})
 	if err != nil {
 		if isTunnelFailure(err) && w.registerBusyFailure() {
+			w.lifecycleMu.RLock()
 			w.invalidateTunnelForBusyFailure()
+			w.lifecycleMu.RUnlock()
 		}
 		return nil, err
 	}
 	if pc == nil {
 		if w.registerBusyFailure() {
+			w.lifecycleMu.RLock()
 			w.invalidateTunnelForBusyFailure()
+			w.lifecycleMu.RUnlock()
 		}
 		return nil, E.New("packetConn is nil")
 	}
@@ -1330,10 +1459,13 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 }
 
 func (w *WireGuard) ResolveUDP(ctx context.Context, metadata *C.Metadata) error {
-	if (!metadata.Resolved() || w.resolver != nil) && metadata.Host != "" {
+	w.lifecycleMu.RLock()
+	activeResolver := w.resolver
+	w.lifecycleMu.RUnlock()
+	if (!metadata.Resolved() || activeResolver != nil) && metadata.Host != "" {
 		r := resolver.DefaultResolver
-		if w.resolver != nil {
-			r = w.resolver
+		if activeResolver != nil {
+			r = activeResolver
 		}
 		ip, err := resolveIPWithResolver(ctx, metadata.Host, w.prefer, r)
 		if err != nil {
@@ -1346,6 +1478,8 @@ func (w *WireGuard) ResolveUDP(ctx context.Context, metadata *C.Metadata) error 
 
 // ProxyInfo implements C.ProxyAdapter
 func (w *WireGuard) ProxyInfo() C.ProxyInfo {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
 	info := w.Base.ProxyInfo()
 	info.DialerProxy = w.option.DialerProxy
 	return info

@@ -134,6 +134,7 @@ const (
 	getCorplinkSgStatusMethod            Method = "getCorplinkSgStatus"
 	getCorplinkNodeStatusesMethod        Method = "getCorplinkNodeStatuses"
 	reconnectCorplinkNodeMethod          Method = "reconnectCorplinkNode"
+	rebuildCorplinkNodeMethod            Method = "rebuildCorplinkNode"
 	reconnectCorplinkTunnelMethod        Method = "reconnectCorplinkTunnel"
 	generateAgeKeyPairMethod             Method = "generateAgeKeyPair"
 	convertAgeSecretKeyToPublicKeyMethod Method = "convertAgeSecretKeyToPublicKey"

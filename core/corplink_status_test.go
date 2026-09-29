@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,11 +28,13 @@ type statusAdapter struct {
 	status     outbound.CorplinkStatus
 	serverName string
 	reconnects int
+	rebuilds   int
 }
 
 func (a *statusAdapter) CorplinkStatus() outbound.CorplinkStatus { return a.status }
 func (a *statusAdapter) CorplinkServerName() string              { return a.serverName }
 func (a *statusAdapter) Reconnect()                              { a.reconnects++ }
+func (a *statusAdapter) RebuildCorplink(context.Context) error   { a.rebuilds++; return nil }
 func (a *statusAdapter) Name() string                            { return "test" }
 func (a *statusAdapter) Close() error                            { return nil }
 
@@ -104,6 +107,24 @@ func TestCorplinkNamedReconnectTouchesOnlyOneNode(t *testing.T) {
 	if reconnectCorplinkNodeFromProxies(proxies, "unknown") ||
 		reconnectCorplinkNodeFromProxies(proxies, "FUZHOU-NODE-1-WG") {
 		t.Fatal("unknown or proxy-name input unexpectedly reconnected")
+	}
+}
+
+func TestCorplinkNamedRebuildTouchesOnlyOneNode(t *testing.T) {
+	intl := &statusAdapter{serverName: "FZ-INT-Node"}
+	fuzhou := &statusAdapter{serverName: "FUZHOU-NODE-1"}
+	proxies := map[string]C.Proxy{
+		"FZ-INT-Node-WG":   statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(intl)},
+		"FUZHOU-NODE-1-WG": statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(fuzhou)},
+	}
+	if !rebuildCorplinkNodeFromProxies(context.Background(), proxies, "FZ-INT-Node") {
+		t.Fatal("selected node was not rebuilt")
+	}
+	if intl.rebuilds != 1 || fuzhou.rebuilds != 0 {
+		t.Fatalf("rebuild crossed node boundary: intl=%d fuzhou=%d", intl.rebuilds, fuzhou.rebuilds)
+	}
+	if rebuildCorplinkNodeFromProxies(context.Background(), proxies, "missing") {
+		t.Fatal("unknown node unexpectedly rebuilt")
 	}
 }
 

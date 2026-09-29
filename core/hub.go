@@ -488,6 +488,38 @@ func handleReconnectCorplinkNode(serverName string) bool {
 	return reconnectCorplinkNodeFromProxies(tunnel.Proxies(), serverName)
 }
 
+func rebuildCorplinkNodeFromProxies(ctx context.Context, proxies map[string]constant.Proxy, serverName string) bool {
+	if serverName == "" {
+		return false
+	}
+	proxy, ok := proxies[serverName+"-WG"]
+	if !ok {
+		return false
+	}
+	adapter := outbound.UnderlyingProxyAdapter(proxy.Adapter())
+	named, ok := adapter.(interface {
+		CorplinkServerName() string
+		RebuildCorplink(context.Context) error
+	})
+	if !ok || named.CorplinkServerName() != serverName {
+		return false
+	}
+	return named.RebuildCorplink(ctx) == nil
+}
+
+func handleRebuildCorplinkNode(serverName string) bool {
+	runLock.Lock()
+	if !isInit {
+		runLock.Unlock()
+		return false
+	}
+	proxies := tunnel.Proxies()
+	runLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return rebuildCorplinkNodeFromProxies(ctx, proxies, serverName)
+}
+
 func corplinkStatusFromProxies(proxies map[string]constant.Proxy) corplinkSgStatus {
 	for _, name := range []string{"FZ-INT-Node-WG", "SG-Node", "SG-Node-Linux"} {
 		if proxy, ok := proxies[name]; ok {
