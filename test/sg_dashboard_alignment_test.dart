@@ -26,6 +26,7 @@ void main() {
                     height: getWidgetHeight(1),
                     child: CommonCard(
                       key: const ValueKey('reference-card'),
+                      onPressed: () {},
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
