@@ -66,8 +66,17 @@ const List<DashboardWidget> defaultAndroidDashboardWidgets = [
   DashboardWidget.networkDetection,
   DashboardWidget.connectionsCount,
   DashboardWidget.memoryInfo,
+  DashboardWidget.sgNode,
   DashboardWidget.startButton,
 ];
+
+List<DashboardWidget> insertDefaultSgTile(List<DashboardWidget> current) {
+  if (current.contains(DashboardWidget.sgNode)) return current;
+  final next = [...current];
+  final startIndex = next.indexOf(DashboardWidget.startButton);
+  next.insert(startIndex < 0 ? next.length : startIndex, DashboardWidget.sgNode);
+  return next;
+}
 
 List<DashboardWidget> dashboardWidgetsSafeFromJson(
   List<dynamic>? dashboardWidgets,

@@ -15,4 +15,5 @@ export 'ntp_override.dart';
 export 'providers_info.dart';
 export 'fcm_status.dart';
 export 'online_panel.dart';
+export 'sg_node_status.dart';
 export 'wakelock_switch.dart';

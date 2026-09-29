@@ -76,3 +76,48 @@ Future<bool> recoverInitialSgConnection({
   await rebuild();
   return probe();
 }
+
+/// Shared recovery path for the SG settings page and the dashboard tile.
+Future<SgCoreStatus> recoverSgStatus({
+  required Future<void> Function() ensureVpn,
+  required Future<SgCoreStatus> Function() readStatus,
+  required Future<bool> Function() probe,
+  required Future<bool> Function() reconnect,
+  required Future<void> Function() rebuild,
+  required Future<void> Function() settle,
+}) async {
+  await ensureVpn();
+  final status = await readStatus();
+  switch (status.recovery) {
+    case SgStatusRecovery.none:
+      final firstProbeOk = await probe();
+      if (!firstProbeOk) {
+        final accepted = await reconnect();
+        final retryOk = accepted && await probe();
+        if (!retryOk) {
+          await rebuild();
+          await probe();
+        }
+      }
+      break;
+    case SgStatusRecovery.probe:
+      await recoverInitialSgConnection(
+        probe: probe,
+        readStatus: readStatus,
+        reconnect: reconnect,
+        rebuild: rebuild,
+        settle: settle,
+      );
+      break;
+    case SgStatusRecovery.reconnect:
+      final accepted = await reconnect();
+      if (!accepted) await rebuild();
+      await probe();
+      break;
+    case SgStatusRecovery.rebuild:
+      await rebuild();
+      await probe();
+      break;
+  }
+  return readStatus();
+}

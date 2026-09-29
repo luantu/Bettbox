@@ -22,6 +22,7 @@ import 'common/external_control.dart';
 import 'common/network_matcher.dart';
 import 'models/models.dart';
 import 'services/corplink_sg.dart';
+import 'services/sg_network_handoff.dart';
 
 ReceivePort? _serviceReceiverPort;
 ReceivePort? _messageReceiverPort;
@@ -112,31 +113,22 @@ Future<void> _service(List<String> flags) async {
     final clashLibHandler = ClashLibHandler();
     final smartAutoStopLock = Lock();
 
-    // Reconnect WireGuard tunnels after a network change (e.g. WiFi reconnected
-    // after being dropped). The SG-Node transport is a TCP connection that
-    // becomes half-open when the underlying network disappears, and the core's
-    // idle watchdog recovers it too slowly for a usable UX. Tearing the
-    // transport down here lets the next dial/keepalive rebuild it immediately.
-    DateTime? _lastTunnelReconnectAt;
-    void reconnectTunnelsOnNetworkChange() {
-      final now = DateTime.now();
-      if (_lastTunnelReconnectAt != null &&
-          now.difference(_lastTunnelReconnectAt!) <
-              const Duration(seconds: 3)) {
-        commonPrint.log('[reconnectTunnels] skipped (debounce)');
-        return;
-      }
-      _lastTunnelReconnectAt = now;
-      commonPrint.log('[reconnectTunnels] network changed, reconnecting');
-      Future(() async {
+    // Android reports Wi-Fi availability before protected sockets necessarily
+    // route over it. The phone reproduced a reconnect that stayed on cellular
+    // for over two minutes; a reconnect after Wi-Fi settled moved immediately.
+    final networkHandoffRecovery = SgNetworkHandoffRecovery(
+      reconnect: () async {
         try {
+          final isRunning = await vpn?.getStatus();
+          if (isRunning != true) return;
+          commonPrint.log('[reconnectTunnels] physical network settled, reconnecting');
           await clashLibHandler.reconnectTunnels();
           commonPrint.log('[reconnectTunnels] done');
         } catch (e) {
           commonPrint.log('[reconnectTunnels] failed: $e');
         }
-      });
-    }
+      },
+    );
 
     Future<void> checkSmartAutoStop() async {
       try {
@@ -178,6 +170,7 @@ Future<void> _service(List<String> flags) async {
           await globalState.handleStart();
         },
         onStop: () async {
+          networkHandoffRecovery.cancel();
           await app.tip(appLocalizations.stopVpn);
           clashLibHandler.stopListener();
           await vpn?.stop();
@@ -198,7 +191,7 @@ Future<void> _service(List<String> flags) async {
         },
         onNetworkChanged: () {
           checkSmartAutoStop();
-          reconnectTunnelsOnNetworkChange();
+          networkHandoffRecovery.networkChanged();
         },
       ),
     );

@@ -17,17 +17,17 @@ void main() {
     expect(reconnects, 0);
     await tester.pump(const Duration(seconds: 1));
     expect(reconnects, 1);
-    recovery.dispose();
+    recovery.cancel();
   });
 
-  testWidgets('disposed network recovery never reconnects', (tester) async {
+  testWidgets('canceled network recovery never reconnects', (tester) async {
     var reconnects = 0;
     final recovery = SgNetworkHandoffRecovery(
       settleDelay: const Duration(seconds: 5),
       reconnect: () async { reconnects++; },
     );
     recovery.networkChanged();
-    recovery.dispose();
+    recovery.cancel();
     await tester.pump(const Duration(seconds: 6));
     expect(reconnects, 0);
   });

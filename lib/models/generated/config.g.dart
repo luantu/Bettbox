@@ -105,6 +105,7 @@ const _$DashboardWidgetEnumMap = {
   DashboardWidget.ntpOverride: 'ntpOverride',
   DashboardWidget.providersInfo: 'providersInfo',
   DashboardWidget.fcmStatus: 'fcmStatus',
+  DashboardWidget.sgNode: 'sgNode',
   DashboardWidget.onlinePanel: 'onlinePanel',
   DashboardWidget.startButton: 'startButton',
 };

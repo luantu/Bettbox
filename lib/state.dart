@@ -29,6 +29,8 @@ import 'services/corplink_sg.dart';
 
 typedef UpdateTasks = List<FutureOr Function()>;
 
+const _sgDashboardTileMigrationKey = 'sg_dashboard_tile_default_v1';
+
 class GlobalState {
   static GlobalState? _instance;
   Map<CacheTag, FixedMap<String, double>> computeHeightMapCache = {};
@@ -130,6 +132,7 @@ class GlobalState {
               : defaultClashConfig,
         );
     await globalState.migrateOldData(config);
+    await _migrateSgDashboardTile();
     final locale =
         utils.getLocaleForString(config.appSetting.locale) ??
         utils.getSystemLocale();
@@ -137,6 +140,24 @@ class GlobalState {
     if (system.isAndroid) {
       _isAndroidTV = await app.isAndroidTV();
     }
+  }
+
+  Future<void> _migrateSgDashboardTile() async {
+    if (!system.isAndroid || isService) return;
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    if (prefs == null || prefs.getBool(_sgDashboardTileMigrationKey) == true) {
+      return;
+    }
+    final current = config.appSetting.mobileDashboardWidgets;
+    final next = insertDefaultSgTile(current);
+    if (!identical(current, next)) {
+      final updated = config.copyWith(
+        appSetting: config.appSetting.copyWith(mobileDashboardWidgets: next),
+      );
+      if (!await preferences.saveConfig(updated)) return;
+      config = updated;
+    }
+    await prefs.setBool(_sgDashboardTileMigrationKey, true);
   }
 
   bool get isAndroidTV => _isAndroidTV ?? false;

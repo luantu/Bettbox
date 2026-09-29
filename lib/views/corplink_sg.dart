@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bett_box/clash/clash.dart';
 import 'package:bett_box/services/corplink_sg.dart';
+import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/state.dart';
 import 'package:flutter/material.dart';
@@ -60,8 +61,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     if (settings.enabled) unawaited(_refreshLiveStatus());
   }
 
-  Future<SgCoreStatus> _readStatus() async =>
-      SgCoreStatus.fromJson(await clashCore.getCorplinkSgStatus());
+  Future<SgCoreStatus> _readStatus() => readCorplinkSgStatus();
 
   Future<void> _refreshLiveStatus({bool recover = false}) async {
     if (!_enabled) {
@@ -70,41 +70,9 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     }
     _statusReadInFlight = true;
     try {
-      if (recover && !globalState.isStart) {
-        await globalState.appController.updateStatus(true);
-      }
-      var status = await _readStatus();
-      if (recover) {
-        switch (status.recovery) {
-          case SgStatusRecovery.none:
-            if (!await _probeChatGpt()) {
-              await clashCore.reconnectCorplinkTunnel();
-              if (!await _probeChatGpt()) {
-                await globalState.appController.applyProfile(silence: true);
-                await _probeChatGpt();
-              }
-            }
-            break;
-          case SgStatusRecovery.probe:
-            await recoverInitialSgConnection(
-              probe: _probeChatGpt,
-              readStatus: _readStatus,
-              reconnect: clashCore.reconnectCorplinkTunnel,
-              rebuild: () => globalState.appController.applyProfile(silence: true),
-              settle: () => Future<void>.delayed(const Duration(seconds: 2)),
-            );
-            break;
-          case SgStatusRecovery.reconnect:
-            await clashCore.reconnectCorplinkTunnel();
-            await _probeChatGpt();
-            break;
-          case SgStatusRecovery.rebuild:
-            await globalState.appController.applyProfile(silence: true);
-            await _probeChatGpt();
-            break;
-        }
-        status = await _readStatus();
-      }
+      final status = recover
+          ? await refreshCorplinkSgStatus(probe: _probeChatGpt)
+          : await _readStatus();
       if (!mounted) return;
       final phase = switch (status.phase) {
         SgConnectionPhase.missing => '节点未创建',
