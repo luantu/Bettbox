@@ -294,6 +294,7 @@ void main() {
       ensureVpn: () async { events.add('vpn'); },
       readStatus: () async { events.add('read'); return state; },
       probe: () async { events.add('probe'); return true; },
+      fallbackProbe: () async { events.add('fallback'); return false; },
       reconnect: () async { events.add('reconnect'); return true; },
       rebuild: () async {
         events.add('rebuild');
@@ -305,6 +306,26 @@ void main() {
     );
     expect(result.phase, SgConnectionPhase.ready);
     expect(events, ['vpn', 'read', 'rebuild', 'probe', 'read']);
+  });
+
+  test('one blocked site does not reset a ready SG tunnel', () async {
+    var reconnects = 0;
+    var rebuilds = 0;
+    final ready = SgCoreStatus.fromJson({
+      'present': true, 'initialized': true, 'ready': true,
+    });
+    final result = await recoverSgStatus(
+      ensureVpn: () async {},
+      readStatus: () async => ready,
+      probe: () async => false,
+      fallbackProbe: () async => true,
+      reconnect: () async { reconnects++; return true; },
+      rebuild: () async { rebuilds++; },
+      settle: () async {},
+    );
+    expect(result.phase, SgConnectionPhase.ready);
+    expect(reconnects, 0);
+    expect(rebuilds, 0);
   });
 
   test('first SG probe retries after VPN settles and reconnects', () async {
