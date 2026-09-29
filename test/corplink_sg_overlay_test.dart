@@ -131,7 +131,7 @@ void main() {
     expect(raw['rules'], ['MATCH,DIRECT']);
   });
 
-  test('unchecked node removes only dependent rules and proxy references', () {
+  test('unchecked node blocks dependent rules without creating a proxy', () {
     final raw = config();
     (raw['proxies'] as List).add({
       'name': 'Airport-Needs-Fuzhou', 'type': 'socks5',
@@ -157,9 +157,11 @@ void main() {
         ['Airport-A', 'FZ-INT-Node-WG']);
     expect((raw['proxy-groups'] as List)
         .singleWhere((group) => group['name'] == 'Downloaded')['proxies'],
-        ['Airport-A']);
-    expect(raw['rules'], isNot(contains('RULE-SET,fuzhou-provider,FUZHOU-NODE-1')));
-    expect((raw['sub-rules'] as Map)['downloaded'], isEmpty);
+        ['REJECT']);
+    expect(raw['rules'], contains('RULE-SET,fuzhou-provider,REJECT'));
+    expect((raw['rules'] as List).last, 'MATCH,DIRECT');
+    expect((raw['sub-rules'] as Map)['downloaded'],
+        ['DOMAIN-SUFFIX,inside.example.invalid,REJECT']);
     expect((raw['proxies'] as List).where((proxy) => proxy['type'] == 'reject'),
         isEmpty);
   });
@@ -188,10 +190,12 @@ void main() {
       keyPairs: keyPairs,
     );
     final groups = raw['proxy-groups'] as List;
-    expect(groups.map((g) => g['name']), ['OpenAI']);
+    expect(groups.map((g) => g['name']), ['OpenAI', 'Downloaded-Uses-WG']);
+    expect(groups.last['proxies'], ['REJECT']);
     expect((raw['proxies'] as List).map((p) => p['name']), ['Airport-A']);
-    expect((raw['sub-rules'] as Map)['downloaded'], isEmpty);
-    expect(raw['rules'], ['MATCH,DIRECT']);
+    expect((raw['sub-rules'] as Map)['downloaded'],
+        ['DOMAIN-SUFFIX,sub.example.com,REJECT']);
+    expect(raw['rules'], ['RULE-SET,fuzhou-provider,REJECT', 'MATCH,DIRECT']);
   });
 
   test('disabled authorized node is absent without affecting sibling', () {
@@ -459,7 +463,7 @@ void main() {
         ['FZ-INT-Node-WG']);
   });
 
-  test('direct rule targeting a suppressed WG proxy is skipped', () {
+  test('direct rule targeting a suppressed WG proxy blocks that domain', () {
     final raw = config();
     apply(raw);
     final managed = captureCorplinkManagedNames(raw, {
@@ -494,8 +498,7 @@ void main() {
       originalProxyNames: managed.allProxyNames,
       expectedManagedObjects: expected,
     );
-    expect(afterScript['rules'],
-        isNot(contains('DOMAIN-SUFFIX,example.com,FUZHOU-NODE-1-WG')));
+    expect(afterScript['rules'], contains('DOMAIN-SUFFIX,example.com,REJECT'));
     expect((afterScript['proxy-groups'] as List).where((item) =>
         item['name'] == 'FUZHOU-NODE-1'), isEmpty);
   });
@@ -572,7 +575,8 @@ void main() {
     );
     expect(conflicts, contains('FUZHOU-NODE-1'));
     final groups = afterScript['proxy-groups'] as List;
-    expect(groups.where((item) => item['name'] == 'Other'), isEmpty);
+    expect(groups.singleWhere((item) => item['name'] == 'Other')['proxies'],
+        ['REJECT']);
     expect(groups.where((item) => item['name'] == 'FUZHOU-NODE-1'), isEmpty);
   });
 
@@ -739,9 +743,11 @@ void main() {
     );
     final proxies = safe['proxies'] as List;
     expect(proxies, isEmpty);
-    expect((safe['proxy-groups'] as List).where((item) =>
-        item['name'] == 'Downloaded-Uses-WG'), isEmpty);
-    expect((safe['sub-rules'] as Map)['downloaded'], isEmpty);
+    expect((safe['proxy-groups'] as List)
+        .singleWhere((item) => item['name'] == 'Downloaded-Uses-WG')['proxies'],
+        ['REJECT']);
+    expect((safe['sub-rules'] as Map)['downloaded'],
+        ['DOMAIN-SUFFIX,sub.example.com,REJECT']);
     expect(safe['rules'], contains('MATCH,REJECT'));
   });
 
@@ -754,7 +760,7 @@ void main() {
     expect((raw['proxy-groups'] as List).where((g) =>
         g['name'] == 'FUZHOU-NODE-1'), isEmpty);
     expect((raw['rules'] as List),
-        isNot(contains('RULE-SET,fuzhou-provider,FUZHOU-NODE-1')));
+        contains('RULE-SET,fuzhou-provider,REJECT'));
   });
 
   test('ChatGPT rules follow the discovered INTL spelling directly', () {
