@@ -159,7 +159,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build APK
-        run: flutter build apk --release --target-platform android-arm64
+        run: flutter build apk --release --target-platform android-arm64 --dart-define=SHOW_APP_ENV_BANNER=false
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

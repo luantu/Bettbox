@@ -214,11 +214,20 @@ class _AppStateManagerState extends ConsumerState<AppStateManager>
 
 class AppEnvManager extends StatelessWidget {
   final Widget child;
+  final bool showEnvironmentBanner;
 
-  const AppEnvManager({super.key, required this.child});
+  const AppEnvManager({
+    super.key,
+    required this.child,
+    this.showEnvironmentBanner = const bool.fromEnvironment(
+      'SHOW_APP_ENV_BANNER',
+      defaultValue: true,
+    ),
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (!showEnvironmentBanner) return child;
     if (kDebugMode) {
       if (globalState.isPre) {
         return Banner(
