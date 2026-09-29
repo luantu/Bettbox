@@ -282,6 +282,31 @@ void main() {
     expect(SgCoreStatus.fromJson({}).recovery, SgStatusRecovery.rebuild);
   });
 
+  test('shared SG refresh rebuilds when the core requires a new IP stack', () async {
+    final events = <String>[];
+    var state = SgCoreStatus.fromJson({
+      'present': true,
+      'initialized': true,
+      'ready': false,
+      'rebuildRequired': true,
+    });
+    final result = await recoverSgStatus(
+      ensureVpn: () async { events.add('vpn'); },
+      readStatus: () async { events.add('read'); return state; },
+      probe: () async { events.add('probe'); return true; },
+      reconnect: () async { events.add('reconnect'); return true; },
+      rebuild: () async {
+        events.add('rebuild');
+        state = SgCoreStatus.fromJson({
+          'present': true, 'initialized': true, 'ready': true,
+        });
+      },
+      settle: () async { events.add('settle'); },
+    );
+    expect(result.phase, SgConnectionPhase.ready);
+    expect(events, ['vpn', 'read', 'rebuild', 'probe', 'read']);
+  });
+
   test('first SG probe retries after VPN settles and reconnects', () async {
     final events = <String>[];
     var probes = 0;
