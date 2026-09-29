@@ -178,6 +178,28 @@ void main() {
     expect((config['rules'] as List).last, 'MATCH,DIRECT');
   });
 
+  test('reapplying SG overlay preserves script RULE-SET targeting SG group', () {
+    final config = <String, dynamic>{
+      'proxies': <dynamic>[],
+      'proxy-groups': <dynamic>[],
+      'rules': <dynamic>[
+        'RULE-SET,sg-node-overseas,SG-OpenAI',
+        'MATCH,DIRECT',
+      ],
+    };
+    const settings = CorplinkSgSettings(enabled: true, routeOpenAi: true);
+
+    mergeCorplinkSgOverlay(config, settings: settings);
+    mergeCorplinkSgOverlay(config, settings: settings);
+
+    final rules = config['rules'] as List;
+    expect(rules.where((r) => r == 'RULE-SET,sg-node-overseas,SG-OpenAI'),
+        hasLength(1));
+    expect(rules.where((r) => r == 'DOMAIN-SUFFIX,chatgpt.com,SG-OpenAI'),
+        hasLength(1));
+    expect(rules.last, 'MATCH,DIRECT');
+  });
+
   test('withholds a failed SG node while keeping the airport profile usable', () {
     final config = <String, dynamic>{
       'proxies': <dynamic>[
