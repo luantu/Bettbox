@@ -107,9 +107,90 @@ bool _isLegacyProxy(dynamic item) =>
     item['type'] == 'wireguard' &&
     item['corplink'] is Map;
 
+bool _isManagedOpenAiRule(dynamic rule) {
+  if (rule is! String) return false;
+  final parsed = ParsedRule.parseString(rule);
+  if (parsed.ruleTarget != 'SG-OpenAI' &&
+      !isIntlCorplinkServerName(parsed.ruleTarget)) {
+    return false;
+  }
+  return corplinkOpenAiRules.contains(
+    parsed.copyWith(ruleTarget: 'SG-OpenAI').value,
+  );
+}
+
+Set<String> _pruneUnavailableNodeReferences(
+  List<dynamic> proxies,
+  List<dynamic> groups,
+  List<dynamic> rules,
+  Map<String, dynamic> config,
+  Set<String> managedCandidates,
+) {
+  final present = <String>{
+    for (final item in [...proxies, ...groups])
+      if (item is Map && item['name'] is String) item['name'] as String,
+  };
+  final unavailable = managedCandidates.difference(present);
+  final skipped = <String>{};
+  var changed = true;
+  while (changed) {
+    changed = false;
+    for (final item in List<dynamic>.from(proxies)) {
+      if (item is! Map || item['name'] is! String) continue;
+      if (unavailable.contains(item['dialer-proxy'])) {
+        proxies.remove(item);
+        unavailable.add(item['name'] as String);
+        skipped.add(item['name'] as String);
+        changed = true;
+      }
+    }
+    for (final item in List<dynamic>.from(groups)) {
+      if (item is! Map || item['name'] is! String) continue;
+      final members = item['proxies'];
+      if (members is! List) continue;
+      final retained = <dynamic>[
+        for (final member in members)
+          if (!unavailable.contains(member)) member,
+      ];
+      if (retained.length != members.length) {
+        item['proxies'] = retained;
+        skipped.add(item['name'] as String);
+      }
+      if (retained.isEmpty && (item['use'] is! List || (item['use'] as List).isEmpty)) {
+        groups.remove(item);
+        unavailable.add(item['name'] as String);
+        changed = true;
+      }
+    }
+  }
+
+  bool targetsUnavailable(dynamic rawRule) {
+    if (rawRule is! String) return false;
+    final parsed = ParsedRule.parseString(rawRule);
+    if (!unavailable.contains(parsed.ruleTarget)) return false;
+    if (parsed.ruleAction == RuleAction.MATCH) {
+      throw StateError('CORPLINK_UNSELECTED_MATCH_RULE');
+    }
+    skipped.add(parsed.ruleTarget!);
+    return true;
+  }
+
+  rules.removeWhere(targetsUnavailable);
+  final subRules = config['sub-rules'];
+  if (subRules is Map) {
+    for (final key in subRules.keys.toList()) {
+      final value = subRules[key];
+      if (value is List) {
+        subRules[key] = List<dynamic>.from(value)..removeWhere(targetsUnavailable);
+      }
+    }
+  }
+  return skipped;
+}
+
 /// Adds one WireGuard outbound and one same-name select group per server.
 /// All collision checks happen before any write to [rawConfig].
-void mergeCorplinkNodeOverlay(
+Set<String> mergeCorplinkNodeOverlay(
   Map<String, dynamic> rawConfig, {
   required CorplinkSgSettings settings,
   required List<CorplinkNodeSelection> selections,
@@ -123,8 +204,9 @@ void mergeCorplinkNodeOverlay(
   Set<String> originalProxyNames = const {},
   Map<String, dynamic> expectedManagedObjects = const {},
   void Function(Set<String>)? onScriptConflict,
+  void Function(Set<String>)? onUnavailableReferences,
 }) {
-  if (!settings.enabled) return;
+  if (!settings.enabled) return <String>{};
   final selectionNames = <String>{};
   final foldedNames = <String>{};
   var enabledIntl = 0;
@@ -214,8 +296,27 @@ void mergeCorplinkNodeOverlay(
     }
   }
 
-  final targetProxyNames = <String>{for (final name in selectionNames) '$name-WG'};
-  final targetGroupNames = <String>{...selectionNames, 'SG-Node', 'SG-OpenAI'};
+  final authorized = settings.isConfigured &&
+      corplinkAuthMatchesSettings(auth, settings) &&
+      cookiePath != null &&
+      cookiePath.isNotEmpty;
+  final scriptSuppressedNames = <String>{
+    for (final name in selectionNames)
+      if (scriptConflicts.contains(name) ||
+          scriptConflicts.contains('$name-WG'))
+        name,
+  };
+  final activeNames = <String>{
+    for (final selection in selections)
+      if (selection.enabled &&
+          !suppressedNames.contains(selection.serverName) &&
+          !scriptSuppressedNames.contains(selection.serverName) &&
+          authorized &&
+          keyPairs.containsKey(selection.serverName))
+        selection.serverName,
+  };
+  final targetProxyNames = <String>{for (final name in activeNames) '$name-WG'};
+  final targetGroupNames = <String>{...activeNames};
   final foldedTargetProxyNames = targetProxyNames.map((name) => name.toLowerCase()).toSet();
   final foldedTargetGroupNames = targetGroupNames.map((name) => name.toLowerCase()).toSet();
   if (foldedTargetProxyNames.intersection(foldedTargetGroupNames).isNotEmpty) {
@@ -250,16 +351,6 @@ void mergeCorplinkNodeOverlay(
     }
   }
 
-  final authorized = settings.isConfigured &&
-      corplinkAuthMatchesSettings(auth, settings) &&
-      cookiePath != null &&
-      cookiePath.isNotEmpty;
-  final scriptSuppressedNames = <String>{
-    for (final name in selectionNames)
-      if (scriptConflicts.contains(name) ||
-          scriptConflicts.contains('$name-WG'))
-        name,
-  };
   final suppressedProxyNames = <String>{
     for (final name in scriptSuppressedNames) '$name-WG',
     for (final item in sourceProxies)
@@ -270,33 +361,14 @@ void mergeCorplinkNodeOverlay(
               (item['corplink'] as Map)['corplink-vpn-server-name']))
         item['name'] as String,
   };
-  final activeNames = <String>{
-    for (final selection in selections)
-      if (selection.enabled &&
-          !suppressedNames.contains(selection.serverName) &&
-          !scriptSuppressedNames.contains(selection.serverName) &&
-          authorized &&
-          keyPairs.containsKey(selection.serverName))
-        selection.serverName,
-  };
   String? intlName;
   for (final selection in selections) {
-    if (selection.enabled && isIntlCorplinkServerName(selection.serverName)) {
+    if (activeNames.contains(selection.serverName) &&
+        isIntlCorplinkServerName(selection.serverName)) {
       intlName = selection.serverName;
       break;
     }
   }
-  if (intlName == null) {
-    for (final selection in selections) {
-      if (isIntlCorplinkServerName(selection.serverName)) {
-        intlName = selection.serverName;
-        break;
-      }
-    }
-  }
-  final intlActive = intlName != null && activeNames.contains(intlName);
-  final aliasConflict = scriptConflicts.contains('SG-Node');
-  final openAiConflict = scriptConflicts.contains('SG-OpenAI');
 
   final proxies = <dynamic>[
     for (final item in sourceProxies)
@@ -338,92 +410,53 @@ void mergeCorplinkNodeOverlay(
       },
     });
   }
-  for (final selection in selections) {
-    final name = selection.serverName;
-    if (activeNames.contains(name)) continue;
-    // Retain the generated proxy name with a rejecting adapter. Downloaded
-    // groups, sub-rules or dialer-proxy entries may reference this exact name
-    // even while the node is disabled or not yet authorized.
-    proxies.add({'name': '$name-WG', 'type': 'reject'});
-  }
-
   final groups = <dynamic>[];
-  String? primarySubscriptionGroup;
-  final openAiGroup = RegExp(r'openai|chatgpt', caseSensitive: false);
   for (final item in sourceGroups) {
     if (item is! Map) {
       groups.add(item);
       continue;
     }
     final name = item['name']?.toString() ?? '';
-    if (name == 'SG-OpenAI' || managedGroupNames.contains(name)) continue;
+    if (managedGroupNames.contains(name)) continue;
     final group = Map<String, dynamic>.from(item);
-    if (group['proxies'] is List && suppressedProxyNames.isNotEmpty) {
-      group['proxies'] = [
-        for (final member in group['proxies'] as List)
-          if (suppressedProxyNames.contains(member)) 'REJECT' else member,
-      ];
-    }
-    final kind = group['type']?.toString().toLowerCase();
-    if (primarySubscriptionGroup == null &&
-        name != 'GLOBAL' &&
-        !openAiGroup.hasMatch(name) &&
-        {'select', 'url-test', 'fallback', 'load-balance'}.contains(kind)) {
-      primarySubscriptionGroup = name;
-    }
-    if (group['proxies'] is List &&
-        (name == 'GLOBAL' || openAiGroup.hasMatch(name))) {
-      final members = List<dynamic>.from(group['proxies'] as List);
-      members.removeWhere((member) => member == 'SG-Node');
-      if (intlActive && !aliasConflict && !openAiConflict && settings.routeOpenAi) {
-        members.insert(0, 'SG-Node');
-      }
-      if (members.isEmpty) members.add('REJECT');
-      group['proxies'] = members;
-    }
     groups.add(group);
   }
   for (final selection in selections) {
     final name = selection.serverName;
+    if (!activeNames.contains(name)) continue;
     groups.add({
       'name': name,
       'type': 'select',
-      'proxies': activeNames.contains(name) ? <String>['$name-WG'] : <String>['REJECT'],
+      'proxies': <String>['$name-WG'],
+      if (selection.healthUrl.isNotEmpty) 'url': selection.healthUrl,
+      if (selection.healthUrl.isEmpty && isIntlCorplinkServerName(name))
+        'url': 'https://chatgpt.com/robots.txt',
     });
   }
-  groups.add({
-    'name': 'SG-Node',
-    'type': 'select',
-    'hidden': true,
-    'proxies': !aliasConflict && intlName != null
-        ? <String>[intlName]
-        : <String>['REJECT'],
-  });
-  groups.add({
-    'name': 'SG-OpenAI',
-    'type': 'select',
-    'proxies': intlActive && !aliasConflict && !openAiConflict
-        ? <String>['SG-Node', if (primarySubscriptionGroup != null) primarySubscriptionGroup]
-        : <String>['REJECT'],
-  });
 
   final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
   final rules = List<dynamic>.from(rawConfig[rulesKey] as List? ?? const []);
-  rules.removeWhere((rule) => rule is String && corplinkOpenAiRules.contains(rule));
-  if (suppressedProxyNames.isNotEmpty) {
-    for (var index = 0; index < rules.length; index++) {
-      final rule = rules[index];
-      if (rule is! String) continue;
-      final parsed = ParsedRule.parseString(rule);
-      if (suppressedProxyNames.contains(parsed.ruleTarget)) {
-        rules[index] = parsed.copyWith(ruleTarget: 'REJECT').value;
-      }
-    }
-  }
+  rules.removeWhere(_isManagedOpenAiRule);
+  final skippedReferences = _pruneUnavailableNodeReferences(
+    proxies,
+    groups,
+    rules,
+    rawConfig,
+    {
+      for (final name in selectionNames) name,
+      for (final name in selectionNames) '$name-WG',
+      'SG-Node',
+      'SG-OpenAI',
+    },
+  );
   rawConfig['proxies'] = proxies;
   rawConfig['proxy-groups'] = groups;
-  rawConfig[rulesKey] = settings.routeOpenAi
-      ? <dynamic>[...corplinkOpenAiRules, ...rules]
+  rawConfig[rulesKey] = settings.routeOpenAi && intlName != null
+      ? <dynamic>[
+          for (final rule in corplinkOpenAiRules)
+            rule.replaceFirst(RegExp(r'SG-OpenAI$'), intlName),
+          ...rules,
+        ]
       : rules;
   rawConfig.remove(rulesKey == 'rules' ? 'rule' : 'rules');
   _generatedGroupsByConfig[rawConfig] = targetGroupNames;
@@ -438,4 +471,8 @@ void mergeCorplinkNodeOverlay(
   if (scriptConflicts.isNotEmpty) {
     onScriptConflict?.call(Set.unmodifiable(scriptConflicts));
   }
+  if (skippedReferences.isNotEmpty) {
+    onUnavailableReferences?.call(Set.unmodifiable(skippedReferences));
+  }
+  return {...targetGroupNames, ...targetProxyNames};
 }

@@ -656,6 +656,7 @@ Future<Set<String>> applyCorplinkSgNode(
   Set<String> originalProxyNames = const {},
   Map<String, dynamic> expectedManagedObjects = const {},
   void Function(Set<String>)? onScriptConflict,
+  void Function(Set<String>)? onUnavailableReferences,
 }) async {
   final settings = await CorplinkSgSettings.load();
   if (!settings.enabled) return <String>{};
@@ -691,16 +692,7 @@ Future<Set<String>> applyCorplinkSgNode(
   }
   final usableAuth = File(cookiePath).existsSync() ? auth : null;
   if (selections == null) {
-    // An existing install retains the old single-node configuration until
-    // the user explicitly saves a multi-node selection.
-    mergeCorplinkSgOverlay(
-      rawConfig,
-      settings: settings,
-      auth: usableAuth,
-      cookiePath: cookiePath,
-      controlIP: controlIP,
-      suppressNode: suppressNode,
-    );
+    // Without an explicit checked server, do not create a proxy or group.
     return <String>{};
   }
   final keyPairs = <String, CorplinkNodeKeyPair>{};
@@ -714,7 +706,7 @@ Future<Set<String>> applyCorplinkSgNode(
       );
     }
   }
-  mergeCorplinkNodeOverlay(
+  return mergeCorplinkNodeOverlay(
     rawConfig,
     settings: settings,
     selections: selections,
@@ -730,13 +722,8 @@ Future<Set<String>> applyCorplinkSgNode(
     originalProxyNames: originalProxyNames,
     expectedManagedObjects: expectedManagedObjects,
     onScriptConflict: onScriptConflict,
+    onUnavailableReferences: onUnavailableReferences,
   );
-  return {
-    for (final selection in selections) selection.serverName,
-    for (final selection in selections) '${selection.serverName}-WG',
-    'SG-Node',
-    'SG-OpenAI',
-  };
 }
 
 String? selectCorplinkPhysicalIP(Iterable<String> addresses) {

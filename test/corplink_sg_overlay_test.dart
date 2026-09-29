@@ -101,6 +101,9 @@ void main() {
         ['Airport-A', 'FZ-INT-Node-WG']);
     expect((raw['proxy-groups'] as List).map((group) => group['name']),
         ['OpenAI', 'FZ-INT-Node']);
+    expect((raw['proxy-groups'] as List)
+        .singleWhere((group) => group['name'] == 'FZ-INT-Node')['url'],
+        'https://chatgpt.com/robots.txt');
     expect(raw['rules'], contains('DOMAIN-SUFFIX,chatgpt.com,FZ-INT-Node'));
     expect((raw['rules'] as List).where((rule) =>
         rule.toString().contains('SG-OpenAI')), isEmpty);
@@ -110,13 +113,52 @@ void main() {
     final raw = config()..['rules'] = <dynamic>['MATCH,DIRECT'];
     apply(raw, nodes: const [
       CorplinkNodeSelection(serverName: 'FZ-INT-Node', enabled: false),
-      CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1'),
+      CorplinkNodeSelection(
+        serverName: 'FUZHOU-NODE-1',
+        healthUrl: 'https://inside.example.invalid/ready',
+      ),
     ]);
     expect((raw['proxy-groups'] as List).map((group) => group['name']),
         ['OpenAI', 'FUZHOU-NODE-1']);
     expect((raw['proxies'] as List).map((proxy) => proxy['name']),
         ['Airport-A', 'FUZHOU-NODE-1-WG']);
+    expect((raw['proxy-groups'] as List)
+        .singleWhere((group) => group['name'] == 'FUZHOU-NODE-1')['url'],
+        'https://inside.example.invalid/ready');
     expect(raw['rules'], ['MATCH,DIRECT']);
+  });
+
+  test('unchecked node removes only dependent rules and proxy references', () {
+    final raw = config();
+    (raw['proxies'] as List).add({
+      'name': 'Airport-Needs-Fuzhou', 'type': 'socks5',
+      'server': 'airport.example.invalid', 'port': 1080,
+      'dialer-proxy': 'FUZHOU-NODE-1-WG',
+    });
+    (raw['proxy-groups'] as List).add({
+      'name': 'Downloaded', 'type': 'select',
+      'proxies': <String>[
+        'Airport-A', 'Airport-Needs-Fuzhou', 'FUZHOU-NODE-1-WG',
+      ],
+    });
+    raw['sub-rules'] = {
+      'downloaded': <String>[
+        'DOMAIN-SUFFIX,inside.example.invalid,FUZHOU-NODE-1-WG',
+      ],
+    };
+    apply(raw, nodes: const [
+      CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+      CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1', enabled: false),
+    ]);
+    expect((raw['proxies'] as List).map((proxy) => proxy['name']),
+        ['Airport-A', 'FZ-INT-Node-WG']);
+    expect((raw['proxy-groups'] as List)
+        .singleWhere((group) => group['name'] == 'Downloaded')['proxies'],
+        ['Airport-A']);
+    expect(raw['rules'], isNot(contains('RULE-SET,fuzhou-provider,FUZHOU-NODE-1')));
+    expect((raw['sub-rules'] as Map)['downloaded'], isEmpty);
+    expect((raw['proxies'] as List).where((proxy) => proxy['type'] == 'reject'),
+        isEmpty);
   });
 
   test('missing authorization and disabled selection fail closed per group', () {

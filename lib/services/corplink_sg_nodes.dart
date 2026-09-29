@@ -49,7 +49,7 @@ class CorplinkNodeSelection {
     };
     if (serverName.isEmpty ||
         serverName.trim() != serverName ||
-        RegExp(r'[,\r\n\x00-\x1f]').hasMatch(serverName) ||
+        RegExp(r'[:,/\\?#@\r\n\x00-\x1f]').hasMatch(serverName) ||
         reservedNames.contains(serverName.toUpperCase())) {
       return '服务器节点名称无效';
     }

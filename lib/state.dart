@@ -1205,6 +1205,12 @@ class GlobalState {
             'affected route(s) are fail-closed');
         showNotifier('覆写脚本修改了飞连托管节点或组；相关路由已阻断，请检查脚本');
       },
+      onUnavailableReferences: (names) {
+        corplinkSgLastScriptErrorCode.value = 'UNSELECTED_NODE_REFERENCES_SKIPPED';
+        commonPrint.log('[CorpLinkSG] skipped ${names.length} references '
+            'to unavailable managed nodes');
+        showNotifier('已跳过指向未勾选飞连节点的规则或成员，请检查覆写脚本');
+      },
     );
     return rawConfig;
   }

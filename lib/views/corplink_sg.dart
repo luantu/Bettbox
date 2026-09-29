@@ -20,9 +20,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
   final _password = TextEditingController();
   final _server = TextEditingController();
   final _manualServerName = TextEditingController();
-  List<CorplinkNodeSelection> _nodes = const [
-    CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
-  ];
+  List<CorplinkNodeSelection> _nodes = const [];
   bool _nodeSelectionSaved = false;
   List<String> _discoveredNames = const [];
   final Map<String, String> _lastNodeIPs = {};

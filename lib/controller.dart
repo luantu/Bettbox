@@ -54,7 +54,6 @@ class AppController {
   int _coreGeneration = 0;
   int _setupGeneration = 0;
   final Set<String> _updatingProfileIds = {};
-  final SgRecoveryPolicy _sgRecoveryPolicy = SgRecoveryPolicy();
   final Map<String, SgRecoveryPolicy> _sgNodeRecoveryPolicies = {};
   final SgDeferredScheduler _sgTaskScheduler = SgDeferredScheduler();
   Timer? _sgHealthTimer;
@@ -235,52 +234,9 @@ class AppController {
         }
       }
       final selectedNodes = await loadCorplinkNodeSelections();
-      if (selectedNodes != null) {
-        await _checkCorplinkNodeHealth(selectedNodes);
-        return;
-      }
-      var status = SgCoreStatus.fromJson(await clashCore.getCorplinkSgStatus());
-      if (status.recovery == SgStatusRecovery.probe) {
-        // First traffic starts the lazy WireGuard handshake. The target URL
-        // result is not the tunnel's health signal; the handshake state is.
-        try {
-          await clashCore.getDelay(
-            'https://www.apple.com/library/test/success.html', 'SG-Node');
-        } catch (_) {}
-        status = SgCoreStatus.fromJson(await clashCore.getCorplinkSgStatus());
-      }
-      // A completed handshake is necessary but not sufficient: the phone
-      // reproduced a ready TCP/WG socket with no working HTTPS data plane.
-      // Require two independent destinations to fail before counting a
-      // business-path failure, so one blocked website cannot churn the tunnel.
-      var healthy = status.phase == SgConnectionPhase.ready;
-      if (healthy) {
-        healthy = await _sgTargetReachable('https://chatgpt.com/robots.txt');
-        if (!healthy) {
-          healthy = await _sgTargetReachable(
-            'https://www.apple.com/library/test/success.html');
-        }
-      }
-      final now = DateTime.now();
-      final action = status.rebuildRequired
-          ? _sgRecoveryPolicy.recordRebuildRequired(now)
-          : _sgRecoveryPolicy.recordProbe(healthy, now);
-      switch (action) {
-        case SgRecoveryAction.none:
-          break;
-        case SgRecoveryAction.reconnect:
-          commonPrint.log('[CorpLinkSG] health probe requested transport reconnect');
-          if (status.present) {
-            await clashCore.reconnectCorplinkTunnel();
-          } else {
-            await applyProfile(silence: true);
-          }
-          break;
-        case SgRecoveryAction.rebuild:
-          commonPrint.log('[CorpLinkSG] health state requested fresh outbound');
-          await applyProfile(silence: true);
-          break;
-      }
+      if (selectedNodes == null ||
+          !selectedNodes.any((node) => node.enabled)) return;
+      await _checkCorplinkNodeHealth(selectedNodes);
     } catch (error) {
       commonPrint.log('[CorpLinkSG] recovery error: ${error.runtimeType}');
     } finally {
@@ -339,15 +295,6 @@ class AppController {
         commonPrint.log('[CorpLinkSG] node health failed for '
             '${node.serverName}: ${error.runtimeType}');
       }
-    }
-  }
-
-  Future<bool> _sgTargetReachable(String url) async {
-    try {
-      final delay = await clashCore.getDelay(url, 'SG-Node');
-      return delay.value != null && delay.value! > 0;
-    } catch (_) {
-      return false;
     }
   }
 
