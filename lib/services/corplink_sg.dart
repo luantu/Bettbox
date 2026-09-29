@@ -14,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:bett_box/plugins/app.dart';
 import 'package:bett_box/plugins/vpn.dart';
+import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:bett_box/services/corplink_sg_overlay.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgRouteOpenAiKey = 'corplinkSg.routeOpenAi';
@@ -649,6 +651,7 @@ Future<void> applyCorplinkSgNode(
           ? rustCookiePath
           : legacyCookiePath)
       : joinPath(home, '${interfaceName}_cookies.json');
+  final selections = await loadCorplinkNodeSelections();
   String? controlIP;
   if (Platform.isAndroid && !suppressNode && auth != null) {
     final host = Uri.tryParse(settings.server.trim())?.host;
@@ -664,13 +667,42 @@ Future<void> applyCorplinkSgNode(
       }
     }
   }
-  mergeCorplinkSgOverlay(
+  final usableAuth = File(cookiePath).existsSync() ? auth : null;
+  if (selections == null) {
+    // An existing install retains the old single-node configuration until
+    // the user explicitly saves a multi-node selection.
+    mergeCorplinkSgOverlay(
+      rawConfig,
+      settings: settings,
+      auth: usableAuth,
+      cookiePath: cookiePath,
+      controlIP: controlIP,
+      suppressNode: suppressNode,
+    );
+    return;
+  }
+  final keyPairs = <String, CorplinkNodeKeyPair>{};
+  if (usableAuth != null && !suppressNode) {
+    for (final selection in selections) {
+      if (!selection.enabled) continue;
+      keyPairs[selection.serverName] = await loadOrCreateCorplinkNodeKeyPair(
+        settings,
+        selection.serverName,
+        legacyAuth: usableAuth,
+      );
+    }
+  }
+  mergeCorplinkNodeOverlay(
     rawConfig,
     settings: settings,
-    auth: File(cookiePath).existsSync() ? auth : null,
+    selections: selections,
+    keyPairs: keyPairs,
+    auth: usableAuth,
     cookiePath: cookiePath,
     controlIP: controlIP,
-    suppressNode: suppressNode,
+    suppressedNames: suppressNode
+        ? {for (final selection in selections) selection.serverName}
+        : const {},
   );
 }
 
