@@ -17,7 +17,7 @@
 - 保留旧 `SG-OpenAI` 与自动 ChatGPT 规则；新服务器的分流只由覆写脚本注入。未授权或停用的已配置组指向 `REJECT`，不回退 `DIRECT`。
 - 节点级故障不得通过全量 `applyProfile()` 暗中重建；节点级 IP 栈重建必须保持另一隧道和机场代理在线。
 - 健康探针逐节点配置、使用 HTTPS，不能嵌入账号密码；未设置时只读握手，不用公网网站判定故障。私钥和探针 URL 不进入普通偏好设置或公开日志。
-- 当前 Mac 没有 Flutter/Dart；Dart 红绿测试用功能分支上的 `gh workflow run android-sg-apk.yml --ref codex/corplink-multi-node` 观察 `Run Flutter unit tests` 步骤。Go 测试本机用 `nice -n 15 env GOMAXPROCS=2 GOFLAGS=-p=1 go test -p 1`。不得把未运行的测试写成通过。
+- 当前 Mac 没有 Flutter/Dart；Dart 红绿测试用隔离实施分支上的 `gh workflow run android-sg-apk.yml --ref codex/corplink-multi-node-impl` 观察 `Run Flutter unit tests` 步骤。Go 测试本机用 `nice -n 15 env GOMAXPROCS=2 GOFLAGS=-p=1 go test -p 1`。不得把未运行的测试写成通过。
 - 模拟器只用 `/Volumes/ExtArchive/Android/` 下的 arm64 AVD，一次一个、优先 1 vCPU，观察高 CPU 时停止；真机安装保留现有应用数据。`main` 与已发布的 `v1.19.4-sg.1` 在验收前不变。
 
 ## Review Focus
@@ -49,7 +49,7 @@
 **Interfaces:** Expose Task 1's core action as `ClashCore.listCorplinkVpnNodes(Map<String, dynamic> request)` and parse its name/mode records. Produce `CorplinkNodeSelection(serverName, enabled, healthUrl)`, `CorplinkNodeKeyPair(publicKey, privateKey)`, `loadCorplinkNodeSelections()`, `saveCorplinkNodeSelections(...)`, and `loadOrCreateCorplinkNodeKeyPair(settings, serverName, legacyAuth:)`. Factor the existing in-flight login lock into `CorplinkAuthCoordinator.ensure(accountSessionKey, login)` so simultaneous node initialization shares one login. SharedPreferences stores names/enabled only; secure storage holds key pairs and HTTPS probe URLs.
 
 - [ ] **Step 1:** Write tests asserting that two server names receive different persistent keys under one account, restart returns the same key for each, another account/upstream cannot reuse them, invalid probe URLs are rejected, and an old INTL key migrates without re-login. Assert concurrent node initialization invokes the shared helper at most once, and a missing server list leaves the old `SG-Node` configuration untouched.
-- [ ] **Step 2:** Push the test-only commit to `codex/corplink-multi-node`; dispatch the existing Android SG workflow on that ref and confirm `Run Flutter unit tests` fails for the new missing model/API, not for toolchain setup.
+- [ ] **Step 2:** Push the test-only commit to `codex/corplink-multi-node-impl`; dispatch the existing Android SG workflow on that ref and confirm `Run Flutter unit tests` fails for the new missing model/API, not for toolchain setup.
 - [ ] **Step 3:** Implement the Dart list-action bridge, selection persistence, secure per-node keys and one-time legacy migration. Keep the Rust helper on the existing single-login path; its old `vpn_server_name` must not force a second login or a second device identity.
 - [ ] **Step 4:** Dispatch the workflow again; expect Task 2 Dart tests green and record the run ID. Commit only Task 2 code/tests.
 
@@ -103,7 +103,7 @@
 
 **Interfaces:** Consume the CI artifact built from the feature branch. Produce an APK SHA-256 and a case-by-case emulator record with actual results, not a blank checklist.
 
-- [ ] **Step 1:** Dispatch `.github/workflows/android-sg-apk.yml` on `codex/corplink-multi-node`; verify Flutter tests, Go tests, Rust helper, `libmeta.so` and arm64 APK all succeed. Download the artifact to `outputs/` and check package ID, signature continuity and SHA-256.
+- [ ] **Step 1:** Dispatch `.github/workflows/android-sg-apk.yml` on `codex/corplink-multi-node-impl`; verify Flutter tests, Go tests, Rust helper, `libmeta.so` and arm64 APK all succeed. Download the artifact to `outputs/` and check package ID, signature continuity and SHA-256.
 - [ ] **Step 2:** Start only `/Volumes/ExtArchive/Android/.android/avd/BettboxSGApi35Test2.avd` using `ANDROID_SDK_ROOT=/Volumes/ExtArchive/Android/sdk`, `ANDROID_AVD_HOME=/Volumes/ExtArchive/Android/.android/avd`, the external SDK's `emulator` binary, `-cores 1 -memory 1536 -gpu off -no-audio`, and a visible window. Monitor CPU and stop the AVD when done. Preserve any pre-existing AVD data before a conflicting signature install.
 - [ ] **Step 3:** Install the APK and run cases for list selection, manual node, legacy alias, empty/airport Profile, script RuleSet, REJECT, status and per-node refresh. If real server login is required, present the visible emulator for the user to enter credentials; do not read or log them. A mock service may cover deterministic errors, but must not count as a real handshake.
 - [ ] **Step 4:** Write each executed case's steps, expected/actual result, timestamp, build SHA and sanitized evidence to the verification document. Fix failed cases and repeat CI/emulator tests until their final result is explicit. Commit the document after emulator read-back.
