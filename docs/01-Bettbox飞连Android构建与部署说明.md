@@ -15,7 +15,7 @@
 2. 等待 Flutter 单测、Go 出站测试、CorpLink Android helper、Mihomo-SG 原生库和 APK 打包全部通过。
 3. 下载名为 `Bettbox-android-arm64-sg` 的构建产物，解压得到 `app-release.apk`。记录工作流 run、提交 SHA 和 APK SHA-256，确保安装包与源码对应。
 
-工作流定义见 [android-sg-apk.yml](../.github/workflows/android-sg-apk.yml)。其中 CorpLink helper 按固定提交编译，Mihomo-SG 从本仓库 `core/` 源码编译；构建不依赖本机 Android NDK。
+工作流定义见 [android-sg-apk.yml](../.github/workflows/android-sg-apk.yml)。其中 CorpLink helper 按固定提交编译，Mihomo-SG 从本仓库 `core/` 源码编译；构建不依赖本机 Android NDK。SG 测试 APK 通过 `SHOW_APP_ENV_BANNER=false` 隐藏右上角 `PRE` 角标，但仍保留预发布身份和公开测试签名，不因此变成正式发布包。
 
 ## 安装和配置
 
@@ -25,7 +25,7 @@
 
 飞连页面每三秒更新一次隧道状态，分别显示 Android VPN、WireGuard 握手、当前隧道 IP、上游端点和本次打开页面以来的 IP 变化次数。**检查连接**用于检测 ChatGPT 域名是否有 HTTPS 响应；有响应不等于已登录 ChatGPT。**刷新状态并恢复**会按当前状态触发首次握手、定向重连或完整重建；**重新连接隧道**用于主动重连。保存或重连结束后，页面会立即刷新状态。若页面显示“隧道未就绪”，较早一次成功的 ChatGPT 检查只是历史结果，不代表此刻仍可用。
 
-Android 首页首次升级会默认加入半宽的 SG-Node 磁贴：标题旁可手动刷新并按状态恢复，下方显示当前连接状态；点卡片主体进入飞连页查看隧道 IP 和详细结果。磁贴可通过首页右上角“编辑”删除、重新添加或排序；删除后不会在下一次启动时自行出现。
+Android 首页首次升级会默认加入半宽的 SG-Node 磁贴：标题与状态分别复用其他半宽卡片的标准标题区和底部内容区，右上角可手动刷新并按状态恢复；点卡片主体进入飞连页查看隧道 IP 和详细结果。磁贴可通过首页右上角“编辑”删除、重新添加或排序；删除后不会在下一次启动时自行出现。
 
 已有机场订阅时，继续按原方式更新订阅。飞连组会在下载配置和覆写脚本处理后合并到最终配置；机场节点和普通分流不应消失。没有订阅时，应用会创建一个可启动的基础 Profile。更换飞连账号或上游地址后重新保存，以免沿用旧授权。
 

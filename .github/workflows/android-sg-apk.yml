@@ -159,6 +159,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build APK
+        # Keep the test-signed pre-release identity; hide only its UI ribbon.
         run: flutter build apk --release --target-platform android-arm64 --dart-define=SHOW_APP_ENV_BANNER=false
 
       - name: Upload APK
