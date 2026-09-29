@@ -318,6 +318,46 @@ void main() {
         ['FZ-INT-Node-WG']);
   });
 
+  test('direct rule targeting a suppressed WG proxy is rewritten to REJECT', () {
+    final raw = config();
+    apply(raw);
+    final managed = captureCorplinkManagedNames(raw, {
+      'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+    });
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(raw['proxy-groups'] as List),
+        ...(raw['proxies'] as List),
+      ])
+        if (item is Map &&
+            {...managed.groups, ...managed.proxies}.contains(item['name']))
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
+    final afterScript = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(raw)) as Map);
+    (afterScript['proxies'] as List).removeWhere(
+        (item) => item['name'] == 'FUZHOU-NODE-1-WG');
+    (afterScript['rules'] as List).insert(0,
+        'DOMAIN-SUFFIX,example.com,FUZHOU-NODE-1-WG');
+    mergeCorplinkNodeOverlay(
+      afterScript,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      trustedManagedGroupNames: managed.groups,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
+    );
+    expect(afterScript['rules'], contains('DOMAIN-SUFFIX,example.com,REJECT'));
+    expect((afterScript['proxy-groups'] as List)
+        .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
+        ['REJECT']);
+  });
+
   test('whole-list script replacement still restores managed groups', () {
     final raw = config();
     apply(raw);

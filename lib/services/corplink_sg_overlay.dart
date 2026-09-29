@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:bett_box/models/models.dart';
 import 'package:collection/collection.dart';
 
 // Object identity is trustworthy for a second pass over the same map. When
@@ -372,6 +373,16 @@ void mergeCorplinkNodeOverlay(
   final rulesKey = rawConfig['rules'] is List ? 'rules' : 'rule';
   final rules = List<dynamic>.from(rawConfig[rulesKey] as List? ?? const []);
   rules.removeWhere((rule) => rule is String && corplinkOpenAiRules.contains(rule));
+  if (suppressedProxyNames.isNotEmpty) {
+    for (var index = 0; index < rules.length; index++) {
+      final rule = rules[index];
+      if (rule is! String) continue;
+      final parsed = ParsedRule.parseString(rule);
+      if (suppressedProxyNames.contains(parsed.ruleTarget)) {
+        rules[index] = parsed.copyWith(ruleTarget: 'REJECT').value;
+      }
+    }
+  }
   rawConfig['proxies'] = proxies;
   rawConfig['proxy-groups'] = groups;
   rawConfig[rulesKey] = settings.routeOpenAi
