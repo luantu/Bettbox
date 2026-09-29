@@ -247,7 +247,14 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
             '请自行勾选要同时连接的节点后保存';
       });
     } catch (error) {
-      if (mounted) setState(() => _status = '发现节点失败：${error.runtimeType}');
+      final code = error is StateError ? error.message.toString() : '';
+      final safeCode = RegExp(
+        r'^(?:CORPLINK_[A-Z_]+|corplink vpn list (?:HTTP|code) [0-9]+)$',
+      );
+      if (mounted) {
+        setState(() => _status = '发现节点失败：'
+            '${safeCode.hasMatch(code) ? code : error.runtimeType}');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

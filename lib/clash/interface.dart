@@ -7,6 +7,17 @@ import 'package:bett_box/common/common.dart';
 import 'package:bett_box/enum/enum.dart';
 import 'package:bett_box/models/models.dart';
 
+List<dynamic> checkedCorplinkNodeListResult(dynamic value) {
+  if (value is List) return value;
+  final message = value is String ? value.trim() : '';
+  final safeCode = RegExp(
+    r'^(?:INVALID_NODE_LIST_REQUEST|CORPLINK_NODE_LIST_FAILED|corplink vpn list (?:HTTP|code) [0-9]+)$',
+  );
+  throw StateError(safeCode.hasMatch(message)
+      ? message
+      : 'CORPLINK_NODE_LIST_FAILED');
+}
+
 mixin ClashInterface {
   Future<bool> init(InitParams params);
 
@@ -395,20 +406,25 @@ abstract class ClashHandlerInterface with ClashInterface {
   }
 
   @override
-  Future<List<dynamic>> listCorplinkVpnNodes(Map<String, dynamic> request) {
-    return invoke<List<dynamic>>(
+  Future<List<dynamic>> listCorplinkVpnNodes(Map<String, dynamic> request) async {
+    final value = await invoke<dynamic>(
       method: ActionMethod.listCorplinkVpnNodes,
       data: jsonEncode(request),
       timeout: const Duration(seconds: 15),
+      onTimeout: () => throw TimeoutException('CORPLINK_NODE_LIST_TIMEOUT'),
     );
+    return checkedCorplinkNodeListResult(value);
   }
 
   @override
-  Future<List<dynamic>> getCorplinkNodeStatuses() {
-    return invoke<List<dynamic>>(
+  Future<List<dynamic>> getCorplinkNodeStatuses() async {
+    final value = await invoke<dynamic>(
       method: ActionMethod.getCorplinkNodeStatuses,
       timeout: const Duration(seconds: 4),
+      onTimeout: () => throw TimeoutException('CORPLINK_STATUS_TIMEOUT'),
     );
+    if (value is List) return value;
+    throw StateError('CORPLINK_STATUS_UNAVAILABLE');
   }
 
   @override

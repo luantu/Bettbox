@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:bett_box/clash/interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -227,5 +228,22 @@ void main() {
       {'name': 'FUZHOU-NODE-1', 'protocolMode': 1},
     ]);
     expect(names, ['FZ-INT-Node', 'FUZHOU-NODE-1']);
+  });
+
+  test('core discovery error is not cast to a node list or leaked', () {
+    expect(
+      () => checkedCorplinkNodeListResult('corplink vpn list HTTP 401'),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      () => checkedCorplinkNodeListResult('Cookie=/private/token'),
+      throwsA(isA<StateError>().having(
+        (error) => error.message.toString(), 'safe message',
+        isNot(contains('/private/token')),
+      )),
+    );
+    expect(checkedCorplinkNodeListResult([
+      {'name': 'FUZHOU-NODE-1', 'protocolMode': 1},
+    ]), hasLength(1));
   });
 }
