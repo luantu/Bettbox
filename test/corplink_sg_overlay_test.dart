@@ -239,8 +239,8 @@ void main() {
         ['FZ-INT-Node-WG']);
     expect(groups.singleWhere((item) => item['name'] == 'OpenAI')['proxies'],
         contains('Airport-A'));
-    expect((afterScript['proxies'] as List).where((item) =>
-        item['name'] == 'FUZHOU-NODE-1-WG'), isEmpty);
+    expect((afterScript['proxies'] as List).singleWhere((item) =>
+        item['name'] == 'FUZHOU-NODE-1-WG')['type'], 'reject');
   });
 
   test('script-modified managed proxy cannot silently redirect node traffic', () {
@@ -616,6 +616,19 @@ void main() {
       'downloaded': <String>['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG'],
     };
     apply(raw);
+    final managed = captureCorplinkManagedNames(raw, {
+      'FZ-INT-Node', 'FUZHOU-NODE-1', 'SG-Node', 'SG-OpenAI',
+      'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+    });
+    final expected = <String, dynamic>{
+      for (final item in [
+        ...(raw['proxy-groups'] as List),
+        ...(raw['proxies'] as List),
+      ])
+        if (item is Map &&
+            {...managed.groups, ...managed.proxies}.contains(item['name']))
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
     final safe = failClosedCorplinkScriptResult(raw);
     mergeCorplinkNodeOverlay(
       safe,
@@ -625,6 +638,10 @@ void main() {
       auth: auth,
       cookiePath: '/private/cookies.json',
       suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
+      trustedManagedGroupNames: managed.groups,
+      trustedManagedProxyNames: managed.proxies,
+      originalProxyNames: managed.allProxyNames,
+      expectedManagedObjects: expected,
     );
     final proxies = safe['proxies'] as List;
     expect(proxies.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1-WG')['type'],
