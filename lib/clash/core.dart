@@ -47,6 +47,9 @@ class ClashCore {
   Future<bool> rebuildCorplinkNode(String serverName) =>
       clashInterface.rebuildCorplinkNode(serverName);
 
+  Future<bool> ensureCorplinkNode(String serverName) =>
+      clashInterface.ensureCorplinkNode(serverName);
+
   Future<bool> reconnectCorplinkTunnel() =>
       clashInterface.reconnectCorplinkTunnel();
 

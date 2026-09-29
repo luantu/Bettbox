@@ -1291,6 +1291,18 @@ func (w *WireGuard) CorplinkServerName() string {
 	return w.option.Corplink.VPNServerName
 }
 
+// EnsureCorplinkReady starts the lazy WireGuard handshake without requesting
+// any public website. This is the default health path when no HTTPS probe is
+// configured for the node.
+func (w *WireGuard) EnsureCorplinkReady(ctx context.Context) bool {
+	w.lifecycleMu.RLock()
+	defer w.lifecycleMu.RUnlock()
+	if w.closed.Load() || !w.IsCorplink() {
+		return false
+	}
+	return w.init(ctx) == nil && w.waitTunnelReady(ctx)
+}
+
 // Reconnect forces the WireGuard transport to tear down and re-establish its
 // underlying connection. It is invoked after an Android network change: the
 // previous TCP transport becomes a half-open socket whose writes are silently

@@ -291,6 +291,14 @@ func handleAction(action *Action, result ActionResult) {
 		}
 		result.success(handleRebuildCorplinkNode(serverName))
 		return
+	case ensureCorplinkNodeMethod:
+		serverName, ok := action.Data.(string)
+		if !ok {
+			result.success(false)
+			return
+		}
+		result.success(handleEnsureCorplinkNode(serverName))
+		return
 	case reconnectCorplinkTunnelMethod:
 		result.success(handleReconnectCorplinkTunnel())
 		return

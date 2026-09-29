@@ -97,6 +97,8 @@ mixin ClashInterface {
 
   Future<bool> rebuildCorplinkNode(String serverName);
 
+  Future<bool> ensureCorplinkNode(String serverName);
+
   Future<bool> reconnectCorplinkTunnel();
 
   FutureOr<void> startTrackRequests();
@@ -424,6 +426,15 @@ abstract class ClashHandlerInterface with ClashInterface {
       method: ActionMethod.rebuildCorplinkNode,
       data: serverName,
       timeout: const Duration(seconds: 50),
+    );
+  }
+
+  @override
+  Future<bool> ensureCorplinkNode(String serverName) {
+    return invoke<bool>(
+      method: ActionMethod.ensureCorplinkNode,
+      data: serverName,
+      timeout: const Duration(seconds: 25),
     );
   }
 

@@ -29,14 +29,16 @@ type statusAdapter struct {
 	serverName string
 	reconnects int
 	rebuilds   int
+	ensures    int
 }
 
-func (a *statusAdapter) CorplinkStatus() outbound.CorplinkStatus { return a.status }
-func (a *statusAdapter) CorplinkServerName() string              { return a.serverName }
-func (a *statusAdapter) Reconnect()                              { a.reconnects++ }
-func (a *statusAdapter) RebuildCorplink(context.Context) error   { a.rebuilds++; return nil }
-func (a *statusAdapter) Name() string                            { return "test" }
-func (a *statusAdapter) Close() error                            { return nil }
+func (a *statusAdapter) CorplinkStatus() outbound.CorplinkStatus  { return a.status }
+func (a *statusAdapter) CorplinkServerName() string               { return a.serverName }
+func (a *statusAdapter) Reconnect()                               { a.reconnects++ }
+func (a *statusAdapter) RebuildCorplink(context.Context) error    { a.rebuilds++; return nil }
+func (a *statusAdapter) EnsureCorplinkReady(context.Context) bool { a.ensures++; return true }
+func (a *statusAdapter) Name() string                             { return "test" }
+func (a *statusAdapter) Close() error                             { return nil }
 
 func TestCorplinkStatusReportsMissingAndReadyNodes(t *testing.T) {
 	missing := corplinkStatusFromProxies(nil)
@@ -125,6 +127,21 @@ func TestCorplinkNamedRebuildTouchesOnlyOneNode(t *testing.T) {
 	}
 	if rebuildCorplinkNodeFromProxies(context.Background(), proxies, "missing") {
 		t.Fatal("unknown node unexpectedly rebuilt")
+	}
+}
+
+func TestCorplinkNamedHandshakeTouchesOnlyOneNode(t *testing.T) {
+	intl := &statusAdapter{serverName: "FZ-INT-Node"}
+	fuzhou := &statusAdapter{serverName: "FUZHOU-NODE-1"}
+	proxies := map[string]C.Proxy{
+		"FZ-INT-Node-WG":   statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(intl)},
+		"FUZHOU-NODE-1-WG": statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(fuzhou)},
+	}
+	if !ensureCorplinkNodeFromProxies(context.Background(), proxies, "FUZHOU-NODE-1") {
+		t.Fatal("selected node handshake was not started")
+	}
+	if intl.ensures != 0 || fuzhou.ensures != 1 {
+		t.Fatalf("handshake crossed node boundary: intl=%d fuzhou=%d", intl.ensures, fuzhou.ensures)
 	}
 }
 

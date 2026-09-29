@@ -336,6 +336,7 @@ const _$ActionMethodEnumMap = {
   ActionMethod.listCorplinkVpnNodes: 'listCorplinkVpnNodes',
   ActionMethod.reconnectCorplinkNode: 'reconnectCorplinkNode',
   ActionMethod.rebuildCorplinkNode: 'rebuildCorplinkNode',
+  ActionMethod.ensureCorplinkNode: 'ensureCorplinkNode',
   ActionMethod.reconnectCorplinkTunnel: 'reconnectCorplinkTunnel',
   ActionMethod.generateAgeKeyPair: 'generateAgeKeyPair',
   ActionMethod.convertAgeSecretKeyToPublicKey: 'convertAgeSecretKeyToPublicKey',

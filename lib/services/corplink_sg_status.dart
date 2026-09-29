@@ -5,6 +5,7 @@ enum SgStatusRecovery { none, probe, reconnect, rebuild }
 /// Read-only core telemetry. This model intentionally has no auth material.
 class SgCoreStatus {
   const SgCoreStatus({
+    this.serverName = '',
     required this.present,
     required this.initialized,
     required this.ready,
@@ -14,6 +15,7 @@ class SgCoreStatus {
     required this.endpoint,
   });
 
+  final String serverName;
   final bool present;
   final bool initialized;
   final bool ready;
@@ -23,6 +25,7 @@ class SgCoreStatus {
   final String endpoint;
 
   factory SgCoreStatus.fromJson(Map<dynamic, dynamic> json) => SgCoreStatus(
+        serverName: json['serverName'] as String? ?? '',
         present: json['present'] == true,
         initialized: json['initialized'] == true,
         ready: json['ready'] == true,
@@ -46,6 +49,59 @@ class SgCoreStatus {
         SgConnectionPhase.missing || SgConnectionPhase.needsRebuild =>
           SgStatusRecovery.rebuild,
       };
+}
+
+class SgNodeAggregate {
+  const SgNodeAggregate({required this.ready, required this.total});
+
+  final int ready;
+  final int total;
+
+  String get label => total == 0 ? '未选择节点' : '$ready/$total 已连接';
+}
+
+SgNodeAggregate summarizeCorplinkNodes(
+  Iterable<SgCoreStatus> statuses,
+  Iterable<String> enabledServerNames,
+) {
+  final names = enabledServerNames.toSet();
+  final ready = statuses.where((status) =>
+      names.contains(status.serverName) && status.phase == SgConnectionPhase.ready).length;
+  return SgNodeAggregate(ready: ready, total: names.length);
+}
+
+/// Manual refresh addresses only one named outbound. A custom HTTPS probe is
+/// diagnostic; a blocked website never overrides a ready WireGuard handshake.
+Future<SgCoreStatus> recoverCorplinkNodeStatus({
+  required String serverName,
+  required Future<SgCoreStatus> Function() readStatus,
+  required Future<bool> Function(String) ensureHandshake,
+  required Future<bool> Function(String) reconnect,
+  required Future<bool> Function(String) rebuild,
+  String probeUrl = '',
+  Future<bool> Function(String serverName, String url)? probe,
+}) async {
+  var status = await readStatus();
+  switch (status.phase) {
+    case SgConnectionPhase.needsRebuild:
+      if (await rebuild(serverName)) await ensureHandshake(serverName);
+      break;
+    case SgConnectionPhase.waitingForTraffic:
+      await ensureHandshake(serverName);
+      break;
+    case SgConnectionPhase.connecting:
+      if (await reconnect(serverName)) await ensureHandshake(serverName);
+      break;
+    case SgConnectionPhase.missing:
+    case SgConnectionPhase.ready:
+      break;
+  }
+  status = await readStatus();
+  if (status.phase == SgConnectionPhase.ready &&
+      probeUrl.isNotEmpty && probe != null) {
+    await probe(serverName, probeUrl);
+  }
+  return status;
 }
 
 /// Bring up the lazy tunnel after Android VpnService starts. A failed website

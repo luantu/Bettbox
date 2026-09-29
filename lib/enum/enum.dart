@@ -267,6 +267,7 @@ enum ActionMethod {
   listCorplinkVpnNodes,
   reconnectCorplinkNode,
   rebuildCorplinkNode,
+  ensureCorplinkNode,
   reconnectCorplinkTunnel,
   generateAgeKeyPair,
   convertAgeSecretKeyToPublicKey,
