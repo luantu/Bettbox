@@ -31,8 +31,10 @@
 
 ## 上游同步记录
 
-上游为 `appshubcc/Bettbox` 的 `main` 分支，2026-09-28 的提交 `3189346611caeba73aa87feaf708e4fd65115d16`。本地补丁范围固定按合并前的 `f71482f..8a31b6f` 口径；引入的上游代码不算本地补丁。合并在外置盘独立工作树中进行，原分支及其未跟踪的 APK、过程文件没有参与冲突处理。
+上游为 `appshubcc/Bettbox` 的 `main` 分支，2026-09-28 的提交 `3189346611caeba73aa87feaf708e4fd65115d16`；合并提交为 `d0983e68e9612223ea58e7b0ad9cab4cef6c6a1e`。本地补丁范围固定按合并前的 `f71482f..8a31b6f` 口径；引入的上游代码不算本地补丁。合并在外置盘独立工作树中进行，原分支及其未跟踪的 APK、过程文件没有参与冲突处理。
 
 两条历史自 `6291ab3` 分叉后都有大量提交，本次合并涉及 35 个文本冲突。处理时保留上游的配置模型、运行配置文件写入方式、首页启动开关、跨平台窗口及本地化更新，同时接回 SG 授权、节点/代理组注入、DNS 隧道路由、状态磁贴与 Android 网络切换能力。特别复核了 `SetupParams` 新接口：最终配置先写入运行文件，随后调用核心初始化；脚本覆写后的 SG 规则仍使用上游的 `rules` 字段。生成模型文件以新上游为基底，仅补入 `DashboardWidget.sgNode` 的序列化项。
 
-合并候选已通过冲突标记扫描和 `git diff --cached --check`。低并发 Go 测试中，`core` 模块全部通过；Mihomo 的出站、配置执行器、Sudoku 传输测试通过。首轮 Sudoku 本地回环测试返回 502，查明是测试进程继承了本机 `ALL_PROXY`，清除代理环境后该测试通过。Mihomo 入站测试持续占用近两个 CPU 核心，已主动中止，因此不记作通过；完整 Mihomo 测试套件也没有通过验证。Flutter/Android 工具链本机不可用，合并版 APK 仍须经 GitHub Actions 构建；在新 APK 安装到真机并验证前，不把此前 APK 的实测结果算作本次上游合并的验收结果。
+合并候选已通过冲突标记扫描和 `git diff --cached --check`。低并发 Go 测试中，`core` 模块全部通过；Mihomo 的出站、配置执行器、Sudoku 传输测试通过。首轮 Sudoku 本地回环测试返回 502，查明是测试进程继承了本机 `ALL_PROXY`，清除代理环境后该测试通过。Mihomo 入站测试持续占用近两个 CPU 核心，已主动中止，因此不记作通过；完整 Mihomo 测试套件也没有通过验证。
+
+合并提交 `d0983e6` 的 [Android SG APK 工作流](https://github.com/luantu/Bettbox/actions/runs/36530262119) 已成功：Flutter 单测、Go 出站测试、`corplink-rs` Android helper、Mihomo-SG Android 原生库及 APK 打包和上传均通过。产物名为 `Bettbox-android-arm64-sg`，GitHub artifact ID 为 `11016508997`。本机未安装合并版 APK，也未重新进行真机登录、隧道、DNS 或 ChatGPT 实测；此前 APK 的实测结果不算作本次上游合并的验收结果。
