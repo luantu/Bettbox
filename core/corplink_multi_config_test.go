@@ -79,3 +79,29 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestCorplinkRejectPlaceholderKeepsAllReferenceTypesParsable(t *testing.T) {
+	raw := config.DefaultRawConfig()
+	raw.Proxy = []map[string]any{
+		{"name": "FUZHOU-NODE-1-WG", "type": "reject"},
+		{"name": "Airport-A", "type": "socks5", "server": "127.0.0.1", "port": 1080,
+			"dialer-proxy": "FUZHOU-NODE-1-WG"},
+	}
+	raw.ProxyGroup = []map[string]any{
+		{"name": "FUZHOU-NODE-1", "type": "select", "proxies": []string{"REJECT"}},
+		{"name": "Downloaded-Uses-WG", "type": "select", "proxies": []string{"FUZHOU-NODE-1-WG"}},
+	}
+	raw.SubRules = map[string][]string{
+		"downloaded": {"DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG"},
+	}
+	raw.Rule = []string{"MATCH,REJECT"}
+	parsed, err := config.ParseRawConfig(raw)
+	if err != nil {
+		t.Fatalf("reject placeholder did not preserve Profile parsing: %v", err)
+	}
+	if parsed.Proxies["FUZHOU-NODE-1-WG"] == nil ||
+		parsed.Proxies["Airport-A"] == nil ||
+		parsed.Proxies["Downloaded-Uses-WG"] == nil {
+		t.Fatal("placeholder or ordinary proxy missing after parse")
+	}
+}

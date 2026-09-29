@@ -302,8 +302,10 @@ void main() {
     );
     expect(safe['rules'], contains('MATCH,REJECT'));
     expect(safe['sub-rules'], isNull);
-    expect((safe['proxies'] as List).single['name'], 'Airport-A');
-    expect((safe['proxies'] as List).single.containsKey('dialer-proxy'), isFalse);
+    expect((safe['proxies'] as List).map((item) => item['name']),
+        ['Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
+    expect((safe['proxies'] as List).first.containsKey('dialer-proxy'), isFalse);
+    expect((safe['proxies'] as List).last['type'], 'reject');
     expect((safe['proxy-groups'] as List)
         .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
         ['REJECT']);
@@ -580,7 +582,9 @@ void main() {
       expectedManagedObjects: expected,
       suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
     );
-    expect((safe['proxies'] as List).map((item) => item['name']), ['Airport-A']);
+    expect((safe['proxies'] as List).map((item) => item['name']),
+        ['Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
+    expect((safe['proxies'] as List).last['type'], 'reject');
     expect(safe['rules'], contains('MATCH,REJECT'));
     expect(safe['mode'], 'rule');
     expect(safe['rules'], isNot(contains('DOMAIN-SUFFIX,example.com,Airport-B')));
@@ -589,6 +593,40 @@ void main() {
     expect((safe['proxy-groups'] as List)
         .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
         ['REJECT']);
+  });
+
+  test('fail-closed fallback keeps referenced WG names as reject adapters', () {
+    final raw = config();
+    (raw['proxies'] as List).first['dialer-proxy'] = 'FUZHOU-NODE-1-WG';
+    (raw['proxy-groups'] as List).add({
+      'name': 'Downloaded-Uses-WG', 'type': 'select',
+      'proxies': <String>['FUZHOU-NODE-1-WG'],
+    });
+    raw['sub-rules'] = {
+      'downloaded': <String>['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG'],
+    };
+    apply(raw);
+    final safe = failClosedCorplinkScriptResult(raw);
+    mergeCorplinkNodeOverlay(
+      safe,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
+    );
+    final proxies = safe['proxies'] as List;
+    expect(proxies.singleWhere((item) => item['name'] == 'FUZHOU-NODE-1-WG')['type'],
+        'reject');
+    expect(proxies.singleWhere((item) => item['name'] == 'Airport-A')['dialer-proxy'],
+        'FUZHOU-NODE-1-WG');
+    expect((safe['proxy-groups'] as List)
+        .singleWhere((item) => item['name'] == 'Downloaded-Uses-WG')['proxies'],
+        ['FUZHOU-NODE-1-WG']);
+    expect((safe['sub-rules'] as Map)['downloaded'],
+        ['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG']);
+    expect(safe['rules'], contains('MATCH,REJECT'));
   });
 
   test('changing selected server removes obsolete generated node and group', () {
