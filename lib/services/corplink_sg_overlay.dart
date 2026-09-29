@@ -53,7 +53,7 @@ CorplinkManagedNames captureCorplinkManagedNames(
   );
 }
 
-bool hasAmbiguousCorplinkScriptProxyChange(
+bool requiresCorplinkScriptSafetyFallback(
   Map<String, dynamic> scriptConfig, {
   required Set<String> trustedManagedProxyNames,
   required Set<String> originalProxyNames,
@@ -62,14 +62,27 @@ bool hasAmbiguousCorplinkScriptProxyChange(
   if (trustedManagedProxyNames.isEmpty || originalProxyNames.isEmpty) {
     return false;
   }
-  final currentNames = <String>{
+  final current = <String, dynamic>{
     for (final item in scriptConfig['proxies'] as List? ?? const [])
-      if (item is Map && item['name'] is String) item['name'] as String,
+      if (item is Map && item['name'] is String)
+        item['name'] as String: item,
   };
-  final missingManaged = trustedManagedProxyNames.any((name) =>
-      expectedManagedObjects.containsKey(name) && !currentNames.contains(name));
-  if (!missingManaged) return false;
-  return currentNames.difference(originalProxyNames).isNotEmpty;
+  final expectedNames = trustedManagedProxyNames
+      .where(expectedManagedObjects.containsKey).toSet();
+  for (final name in expectedNames) {
+    if (current.containsKey(name) &&
+        !_managedObjectEquality.equals(current[name], expectedManagedObjects[name])) {
+      return true;
+    }
+  }
+  final missing = expectedNames.difference(current.keys.toSet());
+  if (missing.isEmpty) return false;
+  if (expectedNames.intersection(current.keys.toSet()).isNotEmpty) {
+    return true;
+  }
+  // Replacing an entire proxy list without new names is recoverable. New
+  // names cannot be proven independent of a renamed managed proxy.
+  return current.keys.toSet().difference(originalProxyNames).isNotEmpty;
 }
 
 Map<String, dynamic> failClosedCorplinkScriptResult(
@@ -82,6 +95,7 @@ Map<String, dynamic> failClosedCorplinkScriptResult(
   // Drop the entire script result, including its sub-rules and dialer-proxy
   // references, and block all destinations until the script is corrected.
   safe['rules'] = <dynamic>['MATCH,REJECT'];
+  safe['mode'] = 'rule';
   safe.remove('rule');
   return safe;
 }
@@ -158,7 +172,7 @@ void mergeCorplinkNodeOverlay(
     ...?_generatedSnapshotsByConfig[rawConfig],
     ...expectedManagedObjects,
   };
-  if (hasAmbiguousCorplinkScriptProxyChange(
+  if (requiresCorplinkScriptSafetyFallback(
     rawConfig,
     trustedManagedProxyNames: trustedProxyNames,
     originalProxyNames: originalProxyNames,

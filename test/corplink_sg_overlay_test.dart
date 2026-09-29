@@ -259,8 +259,23 @@ void main() {
     final proxy = (afterScript['proxies'] as List).singleWhere(
         (item) => item['name'] == 'FUZHOU-NODE-1-WG') as Map;
     proxy['server'] = 'different.example.invalid';
-    final conflicts = <String>{};
-    mergeCorplinkNodeOverlay(
+    afterScript['sub-rules'] = {
+      'test': <String>['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG'],
+    };
+    final airport = (afterScript['proxies'] as List).singleWhere(
+        (item) => item['name'] == 'Airport-A') as Map;
+    airport['dialer-proxy'] = 'FUZHOU-NODE-1-WG';
+    expect(requiresCorplinkScriptSafetyFallback(
+      afterScript,
+      trustedManagedProxyNames: {
+        'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      originalProxyNames: {
+        'Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
+      },
+      expectedManagedObjects: expected,
+    ), isTrue);
+    expect(() => mergeCorplinkNodeOverlay(
       afterScript,
       settings: settings,
       selections: selections,
@@ -274,14 +289,24 @@ void main() {
         'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG',
       },
       expectedManagedObjects: expected,
-      onScriptConflict: conflicts.addAll,
+    ), throwsStateError);
+    final safe = failClosedCorplinkScriptResult(raw);
+    mergeCorplinkNodeOverlay(
+      safe,
+      settings: settings,
+      selections: selections,
+      keyPairs: keyPairs,
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+      suppressedNames: {'FZ-INT-Node', 'FUZHOU-NODE-1'},
     );
-    expect(conflicts, contains('FUZHOU-NODE-1-WG'));
-    expect((afterScript['proxy-groups'] as List)
+    expect(safe['rules'], contains('MATCH,REJECT'));
+    expect(safe['sub-rules'], isNull);
+    expect((safe['proxies'] as List).single['name'], 'Airport-A');
+    expect((safe['proxies'] as List).single.containsKey('dialer-proxy'), isFalse);
+    expect((safe['proxy-groups'] as List)
         .singleWhere((item) => item['name'] == 'FUZHOU-NODE-1')['proxies'],
         ['REJECT']);
-    expect((afterScript['proxies'] as List)
-        .where((item) => item['name'] == 'FUZHOU-NODE-1-WG'), isEmpty);
   });
 
   test('partial script deletion of one managed group blocks only that node', () {
@@ -342,8 +367,9 @@ void main() {
     };
     final afterScript = Map<String, dynamic>.from(
         jsonDecode(jsonEncode(raw)) as Map);
-    (afterScript['proxies'] as List).removeWhere(
-        (item) => item['name'] == 'FUZHOU-NODE-1-WG');
+    final changedGroup = (afterScript['proxy-groups'] as List).singleWhere(
+        (item) => item['name'] == 'FUZHOU-NODE-1') as Map;
+    changedGroup['proxies'] = <String>['Airport-A'];
     (afterScript['rules'] as List).insert(0,
         'DOMAIN-SUFFIX,example.com,FUZHOU-NODE-1-WG');
     mergeCorplinkNodeOverlay(
@@ -470,7 +496,7 @@ void main() {
     (afterScript['proxy-groups'] as List).add({
       'name': 'Other', 'type': 'select', 'proxies': <String>['Other-WG'],
     });
-    expect(hasAmbiguousCorplinkScriptProxyChange(
+    expect(requiresCorplinkScriptSafetyFallback(
       afterScript,
       trustedManagedProxyNames: managed.proxies,
       originalProxyNames: managed.allProxyNames,
@@ -531,7 +557,7 @@ void main() {
     });
     (afterScript['rules'] as List).insert(0,
         'RULE-SET,test-provider,FUZHOU-NODE-1');
-    expect(hasAmbiguousCorplinkScriptProxyChange(
+    expect(requiresCorplinkScriptSafetyFallback(
       afterScript,
       trustedManagedProxyNames: managed.proxies,
       originalProxyNames: managed.allProxyNames,
@@ -554,6 +580,7 @@ void main() {
     );
     expect((safe['proxies'] as List).map((item) => item['name']), ['Airport-A']);
     expect(safe['rules'], contains('MATCH,REJECT'));
+    expect(safe['mode'], 'rule');
     expect(safe['rules'], isNot(contains('DOMAIN-SUFFIX,example.com,Airport-B')));
     expect(safe['sub-rules'], isNull);
     expect((safe['rule-providers'] as Map).containsKey('test-provider'), isFalse);

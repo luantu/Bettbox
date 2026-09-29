@@ -732,8 +732,9 @@ class GlobalState {
     );
     var rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     var effectiveSuppressCorplinkNode = suppressCorplinkNode;
+    var scriptSafetyFallback = false;
     corplinkSgLastScriptErrorCode.value = null;
-    if (hasAmbiguousCorplinkScriptProxyChange(
+    if (requiresCorplinkScriptSafetyFallback(
       rawConfig,
       trustedManagedProxyNames: managedCorplinkNames.proxies,
       originalProxyNames: managedCorplinkNames.allProxyNames,
@@ -741,6 +742,7 @@ class GlobalState {
     )) {
       rawConfig = failClosedCorplinkScriptResult(preScriptConfig);
       effectiveSuppressCorplinkNode = true;
+      scriptSafetyFallback = true;
       corplinkSgLastScriptErrorCode.value = 'SCRIPT_PROXY_PROVENANCE_AMBIGUOUS';
       commonPrint.log('[CorpLinkSG] unsafe script proxy provenance; '
           'all rule traffic is fail-closed');
@@ -808,7 +810,9 @@ class GlobalState {
       rawConfig.remove('authentication');
       rawConfig.remove('skip-auth-prefixes');
     }
-    rawConfig['mode'] = realPatchConfig.mode.name;
+    rawConfig['mode'] = scriptSafetyFallback
+        ? Mode.rule.name
+        : realPatchConfig.mode.name;
     if (rawConfig['tun'] == null) {
       rawConfig['tun'] = <String, dynamic>{};
     }
