@@ -15,8 +15,19 @@ Future<bool> probeCorplinkSgChatGpt() async {
   }
 }
 
+Future<bool> probeCorplinkSgFallback() async {
+  try {
+    final delay = await clashCore.getDelay(
+      'https://www.apple.com/library/test/success.html', 'SG-Node');
+    return delay.value != null && delay.value! > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 Future<SgCoreStatus> refreshCorplinkSgStatus({
   Future<bool> Function()? probe,
+  Future<bool> Function()? fallbackProbe,
 }) =>
     recoverSgStatus(
       ensureVpn: () async {
@@ -26,6 +37,7 @@ Future<SgCoreStatus> refreshCorplinkSgStatus({
       },
       readStatus: readCorplinkSgStatus,
       probe: probe ?? probeCorplinkSgChatGpt,
+      fallbackProbe: fallbackProbe ?? probeCorplinkSgFallback,
       reconnect: clashCore.reconnectCorplinkTunnel,
       rebuild: () => globalState.appController.applyProfile(silence: true),
       settle: () => Future<void>.delayed(const Duration(seconds: 2)),

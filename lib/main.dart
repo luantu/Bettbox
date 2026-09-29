@@ -122,8 +122,25 @@ Future<void> _service(List<String> flags) async {
           final isRunning = await vpn?.getStatus();
           if (isRunning != true) return;
           commonPrint.log('[reconnectTunnels] physical network settled, reconnecting');
-          await clashLibHandler.reconnectTunnels();
-          commonPrint.log('[reconnectTunnels] done');
+          final accepted = await clashLibHandler.reconnectTunnels();
+          if (!accepted) {
+            commonPrint.log('[reconnectTunnels] no reconnectable outbound');
+            return;
+          }
+          // TCP reset is not a completed WireGuard handshake. Check after
+          // the initial handshake window, then retry once if still unready.
+          await Future.delayed(const Duration(seconds: 8));
+          var ready = await clashLibHandler.corplinkSgReady();
+          final stillRunning = await vpn?.getStatus();
+          if (ready == false && stillRunning == true) {
+            commonPrint.log('[reconnectTunnels] SG handshake not ready, retrying once');
+            final retried = await clashLibHandler.reconnectTunnels();
+            if (retried) {
+              await Future.delayed(const Duration(seconds: 5));
+              ready = await clashLibHandler.corplinkSgReady();
+            }
+          }
+          commonPrint.log('[reconnectTunnels] request accepted; SG handshake ready=$ready');
         } catch (e) {
           commonPrint.log('[reconnectTunnels] failed: $e');
         }

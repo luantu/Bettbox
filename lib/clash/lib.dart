@@ -177,9 +177,22 @@ class ClashLibHandler {
     return completer.future;
   }
 
-  Future<void> reconnectTunnels() async {
+  Future<bool> reconnectTunnels() async {
     final id = 'reconnectTunnels-${DateTime.now().microsecondsSinceEpoch}';
-    await invokeAction('{"id":"$id","method":"reconnectTunnels"}');
+    final response = await invokeAction('{"id":"$id","method":"reconnectTunnels"}');
+    final result = ActionResult.fromJson(json.decode(response));
+    return result.code == ResultType.success && result.data == true;
+  }
+
+  Future<bool?> corplinkSgReady() async {
+    final id = 'sgStatus-${DateTime.now().microsecondsSinceEpoch}';
+    final response = await invokeAction('{"id":"$id","method":"getCorplinkSgStatus"}');
+    final result = ActionResult.fromJson(json.decode(response));
+    final data = result.data;
+    if (result.code != ResultType.success || data is! Map || data['present'] != true) {
+      return null;
+    }
+    return data['ready'] == true;
   }
 
   void attachMessagePort(int messagePort) {

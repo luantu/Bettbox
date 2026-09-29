@@ -22,6 +22,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   bool _reading = false;
   bool _busy = false;
   bool? _lastProbeOk;
+  DateTime? _lastProbeAt;
   SgCoreStatus? _status;
   DateTime? _updatedAt;
   String? _error;
@@ -48,6 +49,12 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
       final status = settings.enabled ? await readCorplinkSgStatus() : null;
       if (!mounted) return;
       setState(() {
+        if (_enabled != settings.enabled ||
+            _status?.phase != status?.phase ||
+            _status?.tunnelIp != status?.tunnelIp) {
+          _lastProbeOk = null;
+          _lastProbeAt = null;
+        }
         _enabled = settings.enabled;
         _status = status;
         _updatedAt = DateTime.now();
@@ -63,6 +70,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   Future<void> _refresh() async {
     if (_busy) return;
     final settings = await CorplinkSgSettings.load();
+    if (!mounted) return;
     if (!settings.enabled || !settings.isConfigured) {
       _openSettings();
       return;
@@ -76,6 +84,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
         probe: () async {
           final ok = await probeCorplinkSgChatGpt();
           _lastProbeOk = ok;
+          _lastProbeAt = DateTime.now();
           return ok;
         },
       );
@@ -114,9 +123,6 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
       SgConnectionPhase.needsRebuild => '需要重建隧道',
       SgConnectionPhase.missing || null => 'SG 节点未创建',
     };
-    if (phase == SgConnectionPhase.ready && _lastProbeOk != null) {
-      return '$text · ChatGPT ${_lastProbeOk! ? '有响应' : '未连通'}';
-    }
     return text;
   }
 
@@ -129,8 +135,15 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
           '${updatedAt.minute.toString().padLeft(2, '0')}:'
           '${updatedAt.second.toString().padLeft(2, '0')}';
     final tunnelIp = _status?.tunnelIp ?? '';
+    final lastProbeAt = _lastProbeAt;
+    final probeText = _lastProbeOk == null || lastProbeAt == null
+        ? ''
+        : '上次 ChatGPT 检查 '
+          '${lastProbeAt.hour.toString().padLeft(2, '0')}:'
+          '${lastProbeAt.minute.toString().padLeft(2, '0')} '
+          '${_lastProbeOk! ? '有响应' : '未连通'}';
     return SizedBox(
-      height: getWidgetHeight(1),
+      height: getWidgetHeight(2),
       child: CommonCard(
         onPressed: _openSettings,
         child: Padding(
@@ -164,6 +177,13 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
               ),
               const Spacer(),
               Text(_summary, maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (probeText.isNotEmpty)
+                Text(
+                  probeText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.textTheme.bodySmall,
+                ),
               if (tunnelIp.isNotEmpty || timeText.isNotEmpty)
                 Text(
                   [

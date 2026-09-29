@@ -70,9 +70,11 @@ void main() {
     recovery.networkChanged();
     await tester.pump(const Duration(seconds: 1));
     recovery.networkChanged();
+    await tester.pump(const Duration(seconds: 1));
+    expect(reconnects, 1);
     recovery.cancel();
     first.complete();
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
     expect(reconnects, 1);
   });
 }

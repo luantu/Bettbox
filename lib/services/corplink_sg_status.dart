@@ -82,6 +82,7 @@ Future<SgCoreStatus> recoverSgStatus({
   required Future<void> Function() ensureVpn,
   required Future<SgCoreStatus> Function() readStatus,
   required Future<bool> Function() probe,
+  required Future<bool> Function() fallbackProbe,
   required Future<bool> Function() reconnect,
   required Future<void> Function() rebuild,
   required Future<void> Function() settle,
@@ -92,11 +93,17 @@ Future<SgCoreStatus> recoverSgStatus({
     case SgStatusRecovery.none:
       final firstProbeOk = await probe();
       if (!firstProbeOk) {
-        final accepted = await reconnect();
-        final retryOk = accepted && await probe();
-        if (!retryOk) {
-          await rebuild();
-          await probe();
+        final fallbackOk = await fallbackProbe();
+        if (!fallbackOk) {
+          final accepted = await reconnect();
+          final retryPrimaryOk = accepted && await probe();
+          final retryFallbackOk = accepted &&
+              !retryPrimaryOk &&
+              await fallbackProbe();
+          if (!retryPrimaryOk && !retryFallbackOk) {
+            await rebuild();
+            await probe();
+          }
         }
       }
       break;
