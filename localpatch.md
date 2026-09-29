@@ -37,4 +37,15 @@
 
 合并候选已通过冲突标记扫描和 `git diff --cached --check`。低并发 Go 测试中，`core` 模块全部通过；Mihomo 的出站、配置执行器、Sudoku 传输测试通过。首轮 Sudoku 本地回环测试返回 502，查明是测试进程继承了本机 `ALL_PROXY`，清除代理环境后该测试通过。Mihomo 入站测试持续占用近两个 CPU 核心，已主动中止，因此不记作通过；完整 Mihomo 测试套件也没有通过验证。
 
-合并提交 `d0983e6` 的 [Android SG APK 工作流](https://github.com/luantu/Bettbox/actions/runs/36530262119) 已成功：Flutter 单测、Go 出站测试、`corplink-rs` Android helper、Mihomo-SG Android 原生库及 APK 打包和上传均通过。产物名为 `Bettbox-android-arm64-sg`，GitHub artifact ID 为 `11016508997`。本机未安装合并版 APK，也未重新进行真机登录、隧道、DNS 或 ChatGPT 实测；此前 APK 的实测结果不算作本次上游合并的验收结果。
+合并提交 `d0983e6` 的 [Android SG APK 工作流](https://github.com/luantu/Bettbox/actions/runs/36530262119) 已成功：Flutter 单测、Go 出站测试、`corplink-rs` Android helper、Mihomo-SG Android 原生库及 APK 打包和上传均通过。产物名为 `Bettbox-android-arm64-sg`，GitHub artifact ID 为 `11016508997`。上游把 Android 核心库由 `libclash.so` 改名为 `libmeta.so`；APK 同时包含 `libmeta.so` 与登录 helper。下面记录该 APK 的真机复测，不沿用旧包的结果。
+
+## 合并版真机复测（2026-09-29）
+
+APK 已下载到本地 `outputs/android-sg-arm64-2026-09-29-upstream-merge/app-release.apk`，SHA-256 为 `8eaa596c0d3125bbe3be277dad7a2234ea50c17e9b5b0612661bcc0db840b931`。它以保留数据方式覆盖安装到 Android 手机，包名仍为 `com.appshub.bettbox.sg`，版本为 1.19.4；安装前后的应用数据目录标识相同。原版 Bettbox 包未被覆盖。
+
+- 手机保存的设置可用。“重新授权”实际返回“已授权”，此后 Android VPN 启动、WireGuard 握手就绪。重新授权使隧道 IP 变化一次，随后连续请求期间未再变化。首页磁贴刷新时也没有让健康隧道掉线。
+- `SG-OpenAI` 组和 `SG-Node` 节点均出现在代理页。连续 5 次节点延迟测试为 175–204 ms，没有复现第三次即超时。Wi-Fi 下连续 5 次经手机代理访问 `chatgpt.com/cdn-cgi/trace` 均返回 200；重新授权后又连续 3 次返回 200。普通 HTTPS 站点经同一代理端口返回 200。
+- 临时启用蜂窝数据并关闭 Wi-Fi 后，首次请求正处于切换窗口，第二次约在第 7 秒恢复为 200，此后连续 3 次成功；切回 Wi-Fi 时同样从第二次起恢复，随后连续 3 次成功。两次切换后握手均就绪，隧道 IP 未变化。测试结束已确认 Wi-Fi 恢复开启，两张 SIM 的蜂窝数据恢复为原先的关闭状态。
+- 手机 Chrome 已打开 ChatGPT 页面并显示可输入界面。Bettbox“请求”历史中有 3 条 Chrome 发往 `chatgpt.com` 或 `ws.chatgpt.com` 的记录；逐条检查其节点链，均含 `SG-OpenAI` 与 `SG-Node`。命令行请求 ChatGPT 首页时，直连和经 SG 都收到 403，因此不把这个状态码单独判为隧道失败；经 SG 访问公开 trace 页为 200。
+
+边界：这次复测使用手机原有设置，没有清空数据模拟首次安装；“重新授权”已验证保存的凭据可再次登录。DoH 解析器在代码中绑定 SG 隧道，并有 Go 回归测试覆盖，但本次没有取得可单独证明真实 DNS 包路径的运行时日志或抓包；跨天 Cookie 续期、长期后台保活和实际发送 ChatGPT 对话也未测试。`outputs/` 是本地未跟踪产物，不包含在 Git 提交里。
