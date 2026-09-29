@@ -128,57 +128,65 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   Widget build(BuildContext context) {
     return SizedBox(
       height: getWidgetHeight(1),
-      child: CommonCard(
-        onPressed: _openSettings,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(14.ap, 12.ap, 14.ap, 0),
-              child: Row(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CommonCard(
+              onPressed: _openSettings,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(Icons.vpn_key_outlined,
-                      size: 18, color: context.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text('SG-Node',
+                  Container(
+                    height: globalState.measure.titleMediumHeight + 16,
+                    padding: baseInfoEdgeInsets.copyWith(bottom: 0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.vpn_key_outlined,
+                            color: context.colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text('SG-Node',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: context.textTheme.titleSmall?.copyWith(
+                                color: context.colorScheme.onSurfaceVariant,
+                              )),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: baseInfoEdgeInsets.copyWith(top: 0),
+                    child: SizedBox(
+                      height: globalState.measure.bodyMediumHeight + 2,
+                      child: Text(
+                        _summary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: context.textTheme.titleSmall?.copyWith(
-                          color: context.colorScheme.onSurfaceVariant,
-                        )),
-                  ),
-                  IconButton(
-                    constraints: const BoxConstraints.tightFor(
-                      width: 28,
-                      height: 28,
+                        style: context.textTheme.bodyMedium,
+                      ),
                     ),
-                    padding: EdgeInsets.zero,
-                    tooltip: '刷新状态并恢复 SG-Node',
-                    onPressed: _busy ? null : _refresh,
-                    icon: _busy
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh, size: 18),
                   ),
                 ],
               ),
             ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(14.ap, 0, 14.ap, 12.ap),
-              child: Text(
-                _summary,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.textTheme.bodyMedium,
-              ),
+          ),
+          Positioned(
+            top: 4.ap,
+            right: 8.ap,
+            child: IconButton(
+              tooltip: '刷新状态并恢复 SG-Node',
+              onPressed: _busy ? null : _refresh,
+              icon: _busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh, size: 18),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
