@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
-import 'package:bett_box/enum/enum.dart';
 import 'package:bett_box/models/models.dart';
 import 'package:collection/collection.dart';
 
@@ -133,7 +132,7 @@ Set<String> _pruneUnavailableNodeReferences(
       if (item is Map && item['name'] is String) item['name'] as String,
   };
   final unavailable = managedCandidates.difference(present);
-  final skipped = <String>{};
+  final blocked = <String>{};
   var changed = true;
   while (changed) {
     changed = false;
@@ -142,7 +141,7 @@ Set<String> _pruneUnavailableNodeReferences(
       if (unavailable.contains(item['dialer-proxy'])) {
         proxies.remove(item);
         unavailable.add(item['name'] as String);
-        skipped.add(item['name'] as String);
+        blocked.add(item['name'] as String);
         changed = true;
       }
     }
@@ -150,46 +149,43 @@ Set<String> _pruneUnavailableNodeReferences(
       if (item is! Map || item['name'] is! String) continue;
       final members = item['proxies'];
       if (members is! List) continue;
-      final retained = <dynamic>[
-        for (final member in members)
-          if (!unavailable.contains(member)) member,
-      ];
-      if (retained.length != members.length) {
-        item['proxies'] = retained;
-        skipped.add(item['name'] as String);
-      }
-      if (retained.isEmpty && (item['use'] is! List || (item['use'] as List).isEmpty)) {
-        groups.remove(item);
-        unavailable.add(item['name'] as String);
-        changed = true;
+      if (members.any(unavailable.contains)) {
+        // Dropping just the unavailable member can make a protected group
+        // silently select DIRECT or an unrelated airport instead.
+        item['proxies'] = <String>['REJECT'];
+        if (item['use'] is List) item['use'] = <String>[];
+        blocked.add(item['name'] as String);
       }
     }
   }
 
-  bool targetsUnavailable(dynamic rawRule) {
-    if (rawRule is! String) return false;
+  String blockUnavailableTarget(String rawRule) {
     final parsed = ParsedRule.parseString(rawRule);
-    if (!unavailable.contains(parsed.ruleTarget)) return false;
-    if (parsed.ruleAction == RuleAction.MATCH) {
-      throw StateError('CORPLINK_UNSELECTED_MATCH_RULE');
-    }
-    skipped.add(parsed.ruleTarget!);
-    return true;
+    if (!unavailable.contains(parsed.ruleTarget)) return rawRule;
+    blocked.add(parsed.ruleTarget!);
+    return parsed.copyWith(ruleTarget: 'REJECT').value;
   }
 
-  rules.removeWhere(targetsUnavailable);
+  for (var index = 0; index < rules.length; index++) {
+    if (rules[index] is String) {
+      rules[index] = blockUnavailableTarget(rules[index] as String);
+    }
+  }
   final subRules = config['sub-rules'];
   if (subRules is Map) {
     for (final key in subRules.keys.toList()) {
       final value = subRules[key];
       if (value is List<String>) {
-        subRules[key] = List<String>.from(value)..removeWhere(targetsUnavailable);
+        subRules[key] = value.map(blockUnavailableTarget).toList();
       } else if (value is List) {
-        subRules[key] = List<dynamic>.from(value)..removeWhere(targetsUnavailable);
+        subRules[key] = <dynamic>[
+          for (final rule in value)
+            if (rule is String) blockUnavailableTarget(rule) else rule,
+        ];
       }
     }
   }
-  return skipped;
+  return blocked;
 }
 
 /// Adds one WireGuard outbound and one same-name select group per server.
@@ -437,13 +433,12 @@ Set<String> mergeCorplinkNodeOverlay(
   for (final selection in selections) {
     final name = selection.serverName;
     if (!activeNames.contains(name)) continue;
+    final probeUrl = effectiveCorplinkNodeProbeUrl(selection);
     groups.add({
       'name': name,
       'type': 'select',
       'proxies': <String>['$name-WG'],
-      if (selection.healthUrl.isNotEmpty) 'url': selection.healthUrl,
-      if (selection.healthUrl.isEmpty && isIntlCorplinkServerName(name))
-        'url': 'https://chatgpt.com/robots.txt',
+      if (probeUrl.isNotEmpty) 'url': probeUrl,
     });
   }
 

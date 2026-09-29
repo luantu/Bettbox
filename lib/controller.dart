@@ -264,10 +264,11 @@ class AppController {
           await clashCore.ensureCorplinkNode(node.serverName);
           status = await readCorplinkNodeStatus(node.serverName);
         }
-        if (status.phase == SgConnectionPhase.ready && node.healthUrl.isNotEmpty) {
+        final probeUrl = effectiveCorplinkNodeProbeUrl(node);
+        if (status.phase == SgConnectionPhase.ready && probeUrl.isNotEmpty) {
           // A single blocked website is diagnostic only. Handshake status is
           // the recovery signal; never churn a working tunnel for this probe.
-          await probeCorplinkNodeHttps(node.serverName, node.healthUrl);
+          await probeCorplinkNodeHttps(node.serverName, probeUrl);
         }
         final policy = _sgNodeRecoveryPolicies.putIfAbsent(
           node.serverName, SgRecoveryPolicy.new);

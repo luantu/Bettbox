@@ -15,6 +15,16 @@ bool isIntlCorplinkServerName(String serverName) {
   return canonical == 'fzintnode' || canonical == 'fuzhouintlnode';
 }
 
+const corplinkIntlProbeUrl = 'https://chatgpt.com/robots.txt';
+
+String effectiveCorplinkNodeProbeUrl(CorplinkNodeSelection selection) {
+  if (!selection.enabled) return '';
+  if (selection.healthUrl.isNotEmpty) return selection.healthUrl;
+  return isIntlCorplinkServerName(selection.serverName)
+      ? corplinkIntlProbeUrl
+      : '';
+}
+
 abstract class CorplinkNodeSecretStore {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
