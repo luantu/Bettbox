@@ -332,6 +332,7 @@ const _$ActionMethodEnumMap = {
   ActionMethod.flushDnsCache: 'flushDnsCache',
   ActionMethod.reconnectTunnels: 'reconnectTunnels',
   ActionMethod.getCorplinkSgStatus: 'getCorplinkSgStatus',
+  ActionMethod.listCorplinkVpnNodes: 'listCorplinkVpnNodes',
   ActionMethod.reconnectCorplinkTunnel: 'reconnectCorplinkTunnel',
   ActionMethod.generateAgeKeyPair: 'generateAgeKeyPair',
   ActionMethod.convertAgeSecretKeyToPublicKey: 'convertAgeSecretKeyToPublicKey',

@@ -106,8 +106,40 @@ Future<String> corplinkSgHomePath() =>
 String joinPath(String base, String child) =>
     '$base${Platform.pathSeparator}$child';
 
-Future<bool>? _authorizationInFlight;
+final _corplinkAuthCoordinator = CorplinkAuthCoordinator();
 String? _androidAuthorizationSessionKey;
+
+/// The CookieStore is account-wide. Concurrent nodes must join the same
+/// login; a different account/server waits for that attempt to finish.
+class CorplinkAuthCoordinator {
+  Future<bool>? _inFlight;
+  String? _sessionKey;
+
+  Future<bool> ensure(String sessionKey, Future<bool> Function() login) {
+    final existing = _inFlight;
+    if (existing != null && _sessionKey == sessionKey) return existing;
+
+    Future<bool> attempt;
+    if (existing == null) {
+      attempt = login();
+    } else {
+      attempt = existing.then(
+        (_) => login(),
+        onError: (Object _, StackTrace __) => login(),
+      );
+    }
+    _inFlight = attempt;
+    _sessionKey = sessionKey;
+    void clear() {
+      if (identical(_inFlight, attempt)) {
+        _inFlight = null;
+        _sessionKey = null;
+      }
+    }
+    attempt.then((_) => clear(), onError: (Object _, StackTrace __) => clear());
+    return attempt;
+  }
+}
 
 Future<(String, String)> _loadOrCreateAndroidIdentity(
   Map<String, dynamic>? current,
@@ -141,26 +173,12 @@ Future<(String, String)> _loadOrCreateAndroidIdentity(
 Future<bool> ensureCorplinkAuthorization(
   CorplinkSgSettings settings, {
   bool force = false,
-}) async {
-  // A settings change must not inherit the result of a login started with
-  // another account or server.
-  final previous = _authorizationInFlight;
-  if (previous != null) {
-    try {
-      await previous;
-    } catch (_) {
-      // A failed prior attempt must not prevent a new account or retry.
-    }
-  }
-  final attempt = _ensureCorplinkAuthorization(settings, force: force);
-  _authorizationInFlight = attempt;
-  try {
-    return await attempt;
-  } finally {
-    if (identical(_authorizationInFlight, attempt)) {
-      _authorizationInFlight = null;
-    }
-  }
+}) {
+  final sessionKey = '${settings.username.trim()}\u0000${settings.server.trim()}';
+  return _corplinkAuthCoordinator.ensure(
+    sessionKey,
+    () => _ensureCorplinkAuthorization(settings, force: force),
+  );
 }
 
 Future<bool> _ensureCorplinkAuthorization(

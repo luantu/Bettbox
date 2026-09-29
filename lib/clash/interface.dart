@@ -89,6 +89,8 @@ mixin ClashInterface {
 
   Future<Map> getCorplinkSgStatus();
 
+  Future<List<dynamic>> listCorplinkVpnNodes(Map<String, dynamic> request);
+
   Future<bool> reconnectCorplinkTunnel();
 
   FutureOr<void> startTrackRequests();
@@ -381,6 +383,15 @@ abstract class ClashHandlerInterface with ClashInterface {
     return invoke<Map>(
       method: ActionMethod.getCorplinkSgStatus,
       timeout: const Duration(seconds: 4),
+    );
+  }
+
+  @override
+  Future<List<dynamic>> listCorplinkVpnNodes(Map<String, dynamic> request) {
+    return invoke<List<dynamic>>(
+      method: ActionMethod.listCorplinkVpnNodes,
+      data: jsonEncode(request),
+      timeout: const Duration(seconds: 15),
     );
   }
 

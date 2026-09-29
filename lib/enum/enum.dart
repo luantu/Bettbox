@@ -263,6 +263,7 @@ enum ActionMethod {
   flushDnsCache,
   reconnectTunnels,
   getCorplinkSgStatus,
+  listCorplinkVpnNodes,
   reconnectCorplinkTunnel,
   generateAgeKeyPair,
   convertAgeSecretKeyToPublicKey,
