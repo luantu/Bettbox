@@ -93,6 +93,14 @@ void main() {
 
   test('missing authorization and disabled selection fail closed per group', () {
     final raw = config();
+    (raw['proxies'] as List).first['dialer-proxy'] = 'FUZHOU-NODE-1-WG';
+    (raw['proxy-groups'] as List).add({
+      'name': 'Downloaded-Uses-WG', 'type': 'select',
+      'proxies': <String>['FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG'],
+    });
+    raw['sub-rules'] = {
+      'downloaded': <String>['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG'],
+    };
     mergeCorplinkNodeOverlay(
       raw,
       settings: settings,
@@ -105,7 +113,29 @@ void main() {
     final groups = raw['proxy-groups'] as List;
     expect(groups.singleWhere((g) => g['name'] == 'FZ-INT-Node')['proxies'], ['REJECT']);
     expect(groups.singleWhere((g) => g['name'] == 'FUZHOU-NODE-1')['proxies'], ['REJECT']);
-    expect((raw['proxies'] as List).map((p) => p['name']), ['Airport-A']);
+    expect((raw['proxies'] as List).map((p) => p['name']),
+        ['Airport-A', 'FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
+    for (final name in ['FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']) {
+      expect((raw['proxies'] as List).singleWhere((p) => p['name'] == name)['type'],
+          'reject');
+    }
+    expect(groups.singleWhere((g) => g['name'] == 'Downloaded-Uses-WG')['proxies'],
+        ['FZ-INT-Node-WG', 'FUZHOU-NODE-1-WG']);
+    expect((raw['sub-rules'] as Map)['downloaded'],
+        ['DOMAIN-SUFFIX,sub.example.com,FUZHOU-NODE-1-WG']);
+  });
+
+  test('disabled authorized node keeps reject proxy without affecting sibling', () {
+    final raw = config();
+    apply(raw, nodes: const [
+      CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+      CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1', enabled: false),
+    ]);
+    final proxies = raw['proxies'] as List;
+    expect(proxies.singleWhere((p) => p['name'] == 'FZ-INT-Node-WG')['type'],
+        'wireguard');
+    expect(proxies.singleWhere((p) => p['name'] == 'FUZHOU-NODE-1-WG')['type'],
+        'reject');
   });
 
   test('a downloaded name collision is rejected before touching the config', () {
