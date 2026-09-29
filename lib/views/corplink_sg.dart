@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bett_box/clash/clash.dart';
 import 'package:bett_box/services/corplink_sg.dart';
+import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/state.dart';
@@ -18,6 +19,14 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   final _server = TextEditingController();
+  final _manualServerName = TextEditingController();
+  List<CorplinkNodeSelection> _nodes = const [
+    CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+  ];
+  bool _nodeSelectionSaved = false;
+  List<String> _discoveredNames = const [];
+  final Map<String, String> _lastNodeIPs = {};
+  final Map<String, int> _nodeIPChanges = {};
   bool _enabled = false;
   bool _routeOpenAi = true;
   bool _showPassword = false;
@@ -45,6 +54,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
   Future<void> _load() async {
     final settings = await CorplinkSgSettings.load();
     final auth = await loadCorplinkConfig();
+    final selectedNodes = await loadCorplinkNodeSelections();
     if (!mounted) return;
     setState(() {
       _username.text = settings.username;
@@ -52,6 +62,8 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       _server.text = settings.server;
       _enabled = settings.enabled;
       _routeOpenAi = settings.routeOpenAi;
+      _nodeSelectionSaved = selectedNodes != null;
+      if (selectedNodes != null) _nodes = selectedNodes;
       _status = !settings.enabled
           ? '飞连未启用'
           : corplinkAuthMatchesSettings(auth, settings)
@@ -70,6 +82,64 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     }
     _statusReadInFlight = true;
     try {
+      if (_nodeSelectionSaved) {
+        final selected = _nodes.where((node) => node.enabled).toList();
+        final statuses = recover
+            ? await Future.wait([
+                for (final node in selected)
+                  refreshCorplinkNodeStatus(
+                    node.serverName,
+                    healthUrl: node.healthUrl,
+                  ),
+              ])
+            : await readCorplinkNodeStatuses();
+        if (!mounted) return;
+        final byName = {for (final status in statuses) status.serverName: status};
+        final summary = summarizeCorplinkNodes(
+          statuses,
+          selected.map((node) => node.serverName),
+        );
+        final lines = <String>[
+          globalState.isStart ? 'Android VPN 已启动' : 'Android VPN 未启动',
+          summary.label,
+        ];
+        for (final node in selected) {
+          final status = byName[node.serverName];
+          final phase = switch (status?.phase) {
+            SgConnectionPhase.ready => '已连接',
+            SgConnectionPhase.waitingForTraffic => '等待握手',
+            SgConnectionPhase.connecting => '连接中',
+            SgConnectionPhase.needsRebuild => '需重建',
+            SgConnectionPhase.missing || null => '未创建',
+          };
+          if (status != null && status.tunnelIp.isNotEmpty) {
+            final previous = _lastNodeIPs[node.serverName];
+            if (previous != null && previous != status.tunnelIp) {
+              _nodeIPChanges[node.serverName] =
+                  (_nodeIPChanges[node.serverName] ?? 0) + 1;
+            }
+            _lastNodeIPs[node.serverName] = status.tunnelIp;
+          }
+          lines.add('${node.serverName}：$phase'
+              '${status?.tunnelIp.isNotEmpty == true ? ' · ${status!.tunnelIp}' : ''}'
+              ' · IP 变化 ${_nodeIPChanges[node.serverName] ?? 0} 次');
+          if (status != null && status.endpoint.isNotEmpty) {
+            lines.add('  上游端点：${status.endpoint}');
+          }
+        }
+        final now = DateTime.now();
+        lines.add('更新于 ${now.hour.toString().padLeft(2, '0')}:'
+            '${now.minute.toString().padLeft(2, '0')}:'
+            '${now.second.toString().padLeft(2, '0')}');
+        setState(() {
+          _livePhase = summary.total > 0 && summary.ready == summary.total
+              ? SgConnectionPhase.ready
+              : SgConnectionPhase.connecting;
+          _liveStatus = lines.join('\n');
+          _dataPlaneStatus = '各节点探针仅作诊断；隧道健康以 TCP/WireGuard 握手为准';
+        });
+        return;
+      }
       final status = recover
           ? await refreshCorplinkSgStatus(probe: _probeChatGpt)
           : await _readStatus();
@@ -143,6 +213,63 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         server: _server.text.trim(),
       );
 
+  void _replaceNode(CorplinkNodeSelection next) {
+    setState(() {
+      _nodes = [
+        for (final node in _nodes)
+          if (node.serverName == next.serverName) next else node,
+      ];
+    });
+  }
+
+  Future<void> _discoverNodes() async {
+    if (_busy) return;
+    final settings = _settings();
+    if (settings.validationError != null) {
+      setState(() => _status = settings.validationError!);
+      return;
+    }
+    setState(() { _busy = true; _status = '正在从飞连发现 TCP 节点…'; });
+    try {
+      await settings.save();
+      final names = await discoverCorplinkVpnNodeNames(settings);
+      if (!mounted) return;
+      final selectedNames = _nodes.map((node) => node.serverName).toSet();
+      setState(() {
+        _discoveredNames = names;
+        _nodes = [
+          ..._nodes,
+          for (final name in names)
+            if (!selectedNames.contains(name))
+              CorplinkNodeSelection(serverName: name, enabled: false),
+        ];
+        _status = '发现 ${names.length} 个 TCP 节点；勾选要同时连接的节点后保存';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _status = '发现节点失败：${error.runtimeType}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _addManualNode() {
+    final name = _manualServerName.text.trim();
+    final selection = CorplinkNodeSelection(serverName: name);
+    if (selection.validationError != null) {
+      setState(() => _status = selection.validationError!);
+      return;
+    }
+    if (_nodes.any((node) => node.serverName == name)) {
+      setState(() => _status = '此节点已在列表中');
+      return;
+    }
+    setState(() {
+      _nodes = [..._nodes, selection];
+      _manualServerName.clear();
+      _status = '已添加 $name；保存后生效';
+    });
+  }
+
   Future<void> _save({bool forceAuthorization = false}) async {
     if (_busy) return;
     final settings = _settings();
@@ -151,12 +278,20 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       setState(() => _status = validationError);
       return;
     }
+    for (final node in _nodes) {
+      if (node.validationError != null) {
+        setState(() => _status = '${node.serverName}：${node.validationError}');
+        return;
+      }
+    }
     setState(() {
       _busy = true;
       _status = settings.enabled ? '正在保存并授权…' : '正在停用飞连…';
     });
     try {
       await settings.save();
+      await saveCorplinkNodeSelections(_nodes);
+      _nodeSelectionSaved = true;
       await globalState.appController.ensureSgBootstrapProfile();
       final authorized = settings.enabled &&
           await ensureCorplinkAuthorization(settings, force: forceAuthorization);
@@ -184,6 +319,11 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       _status = '正在检查 SG-Node…';
     });
     try {
+      if (_nodeSelectionSaved) {
+        await _refreshLiveStatus(recover: true);
+        if (mounted) setState(() => _status = '各节点状态已检查；详见下方实时信息');
+        return;
+      }
       final ok = await _probeChatGpt();
       await _refreshLiveStatus();
       if (!mounted) return;
@@ -205,6 +345,23 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       _status = '正在重建 TCP 隧道…';
     });
     try {
+      if (_nodeSelectionSaved) {
+        if (!globalState.isStart) {
+          await globalState.appController.updateStatus(true);
+        }
+        for (final node in _nodes.where((node) => node.enabled)) {
+          final status = await readCorplinkNodeStatus(node.serverName);
+          if (status.rebuildRequired) {
+            await clashCore.rebuildCorplinkNode(node.serverName);
+          } else {
+            await clashCore.reconnectCorplinkNode(node.serverName);
+          }
+          await clashCore.ensureCorplinkNode(node.serverName);
+        }
+        await _refreshLiveStatus();
+        if (mounted) setState(() => _status = '已逐节点请求重连，状态已刷新');
+        return;
+      }
       final before = await _readStatus();
       if (!globalState.isStart) {
         await globalState.appController.updateStatus(true);
@@ -235,6 +392,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     _username.dispose();
     _password.dispose();
     _server.dispose();
+    _manualServerName.dispose();
     super.dispose();
   }
 
@@ -243,7 +401,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('飞连 SG-Node', style: TextStyle(fontSize: 22)),
+        const Text('飞连 VPN 节点', style: TextStyle(fontSize: 22)),
         const SizedBox(height: 8),
         const Text('连接上游飞连服务器，自动发现 TCP VPN 节点并加入当前配置。'),
         const SizedBox(height: 12),
@@ -281,6 +439,72 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
             labelText: '上游建连服务器',
             hintText: 'https://aq.ruijie.com.cn:10443',
           ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            const Expanded(child: Text('TCP 服务器节点',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+            TextButton.icon(
+              onPressed: _busy || !_enabled ? null : _discoverNodes,
+              icon: const Icon(Icons.search),
+              label: const Text('从飞连发现'),
+            ),
+          ],
+        ),
+        if (_discoveredNames.isNotEmpty)
+          Text('已发现：${_discoveredNames.join('、')}',
+              style: Theme.of(context).textTheme.bodySmall),
+        for (final node in _nodes) ...[
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(node.serverName),
+            subtitle: Text(node.enabled ? '启用独立 WireGuard 隧道与同名代理组' : '停用 · 代理组阻断'),
+            value: node.enabled,
+            onChanged: _busy ? null : (value) => _replaceNode(
+              CorplinkNodeSelection(
+                serverName: node.serverName,
+                enabled: value ?? false,
+                healthUrl: node.healthUrl,
+              ),
+            ),
+            secondary: IconButton(
+              tooltip: '移除 ${node.serverName}',
+              onPressed: _busy ? null : () => setState(() {
+                _nodes = _nodes.where((item) =>
+                    item.serverName != node.serverName).toList();
+              }),
+              icon: const Icon(Icons.close),
+            ),
+          ),
+          TextFormField(
+            key: ValueKey('health-${node.serverName}'),
+            initialValue: node.healthUrl,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: '${node.serverName} 健康探针（可选）',
+              hintText: 'https://example.com/ready',
+              helperText: '留空只检查 TCP/WireGuard 握手；网站失败不会触发重连',
+            ),
+            onChanged: (value) => _replaceNode(CorplinkNodeSelection(
+              serverName: node.serverName,
+              enabled: node.enabled,
+              healthUrl: value.trim(),
+            )),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Row(
+          children: [
+            Expanded(child: TextField(
+              controller: _manualServerName,
+              decoration: const InputDecoration(labelText: '手动输入服务器节点名'),
+            )),
+            TextButton(
+              onPressed: _busy ? null : _addManualNode,
+              child: const Text('添加'),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         Text(_status),

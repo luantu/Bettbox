@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/services/corplink_sg.dart';
+import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/state.dart';
@@ -23,6 +24,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   bool _busy = false;
   bool? _lastProbeOk;
   SgCoreStatus? _status;
+  SgNodeAggregate? _aggregate;
   String? _error;
 
   @override
@@ -44,7 +46,19 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
     _reading = true;
     try {
       final settings = await CorplinkSgSettings.load();
-      final status = settings.enabled ? await readCorplinkSgStatus() : null;
+      final selections = await loadCorplinkNodeSelections();
+      final statuses = settings.enabled && selections != null
+          ? await readCorplinkNodeStatuses()
+          : const <SgCoreStatus>[];
+      final aggregate = settings.enabled && selections != null
+          ? summarizeCorplinkNodes(
+              statuses,
+              selections.where((node) => node.enabled).map((node) => node.serverName),
+            )
+          : null;
+      final status = settings.enabled && selections == null
+          ? await readCorplinkSgStatus()
+          : null;
       if (!mounted) return;
       setState(() {
         if (_enabled != settings.enabled ||
@@ -54,6 +68,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
         }
         _enabled = settings.enabled;
         _status = status;
+        _aggregate = aggregate;
         _error = null;
       });
     } catch (error) {
@@ -76,6 +91,20 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
       _error = null;
     });
     try {
+      final selections = await loadCorplinkNodeSelections();
+      if (selections != null) {
+        final enabledNodes = selections.where((node) => node.enabled).toList();
+        final statuses = await Future.wait([
+          for (final node in enabledNodes)
+            refreshCorplinkNodeStatus(node.serverName, healthUrl: node.healthUrl),
+        ]);
+        if (!mounted) return;
+        setState(() => _aggregate = summarizeCorplinkNodes(
+          statuses,
+          enabledNodes.map((node) => node.serverName),
+        ));
+        return;
+      }
       final status = await refreshCorplinkSgStatus(
         probe: () async {
           final ok = await probeCorplinkSgChatGpt();
@@ -109,6 +138,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
     if (_error != null) return '状态异常 · 点击刷新';
     if (!_enabled) return '未启用 · 点击配置';
     if (!globalState.isStart) return 'VPN 未启动 · 点击刷新';
+    if (_aggregate != null) return _aggregate!.label;
     final phase = _status?.phase;
     final text = switch (phase) {
       SgConnectionPhase.ready => _lastProbeOk == null

@@ -13,6 +13,8 @@ import 'package:bett_box/plugins/service.dart' as vpn_service;
 import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/services/corplink_sg.dart';
+import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_bootstrap.dart';
 import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
@@ -53,6 +55,7 @@ class AppController {
   int _setupGeneration = 0;
   final Set<String> _updatingProfileIds = {};
   final SgRecoveryPolicy _sgRecoveryPolicy = SgRecoveryPolicy();
+  final Map<String, SgRecoveryPolicy> _sgNodeRecoveryPolicies = {};
   final SgDeferredScheduler _sgTaskScheduler = SgDeferredScheduler();
   Timer? _sgHealthTimer;
   bool _sgHealthCheckInFlight = false;
@@ -231,6 +234,11 @@ class AppController {
           await applyProfile(silence: true);
         }
       }
+      final selectedNodes = await loadCorplinkNodeSelections();
+      if (selectedNodes != null) {
+        await _checkCorplinkNodeHealth(selectedNodes);
+        return;
+      }
       var status = SgCoreStatus.fromJson(await clashCore.getCorplinkSgStatus());
       if (status.recovery == SgStatusRecovery.probe) {
         // First traffic starts the lazy WireGuard handshake. The target URL
@@ -277,6 +285,60 @@ class AppController {
       commonPrint.log('[CorpLinkSG] recovery error: ${error.runtimeType}');
     } finally {
       _sgHealthCheckInFlight = false;
+    }
+  }
+
+  Future<void> _checkCorplinkNodeHealth(List<CorplinkNodeSelection> selections) async {
+    final enabled = selections.where((node) => node.enabled).toList();
+    final enabledNames = enabled.map((node) => node.serverName).toSet();
+    _sgNodeRecoveryPolicies.removeWhere((name, _) => !enabledNames.contains(name));
+    final statuses = {
+      for (final status in await readCorplinkNodeStatuses())
+        status.serverName: status,
+    };
+    for (final node in enabled) {
+      try {
+        var status = statuses[node.serverName] ?? SgCoreStatus(
+          serverName: node.serverName,
+          present: false, initialized: false, ready: false,
+          rebuildRequired: false, closed: false,
+          tunnelIp: '', endpoint: '',
+        );
+        if (status.phase == SgConnectionPhase.waitingForTraffic) {
+          await clashCore.ensureCorplinkNode(node.serverName);
+          status = await readCorplinkNodeStatus(node.serverName);
+        }
+        if (status.phase == SgConnectionPhase.ready && node.healthUrl.isNotEmpty) {
+          // A single blocked website is diagnostic only. Handshake status is
+          // the recovery signal; never churn a working tunnel for this probe.
+          await probeCorplinkNodeHttps(node.serverName, node.healthUrl);
+        }
+        final policy = _sgNodeRecoveryPolicies.putIfAbsent(
+          node.serverName, SgRecoveryPolicy.new);
+        final now = DateTime.now();
+        final action = status.rebuildRequired
+            ? policy.recordRebuildRequired(now)
+            : policy.recordProbe(status.phase == SgConnectionPhase.ready, now);
+        switch (action) {
+          case SgRecoveryAction.none:
+            break;
+          case SgRecoveryAction.reconnect:
+            if (status.present) {
+              await clashCore.reconnectCorplinkNode(node.serverName);
+              await clashCore.ensureCorplinkNode(node.serverName);
+            }
+            break;
+          case SgRecoveryAction.rebuild:
+            if (status.present &&
+                await clashCore.rebuildCorplinkNode(node.serverName)) {
+              await clashCore.ensureCorplinkNode(node.serverName);
+            }
+            break;
+        }
+      } catch (error) {
+        commonPrint.log('[CorpLinkSG] node health failed for '
+            '${node.serverName}: ${error.runtimeType}');
+      }
     }
   }
 
