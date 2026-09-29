@@ -12,7 +12,7 @@
 
 ## 名称与配置模型
 
-一个选中的服务器保存为 `CorpLinkNodeSelection`：`serverName`、`enabled` 和可空的 `healthUrl`。`serverName` 是从列表选中或用户手填的准确名称，也是脚本可引用的代理组名。选择后的名称保持稳定；若上游后来改名，界面提示重新选择，不静默重命名代理组和用户脚本。
+一个选中的服务器保存为 `CorplinkNodeSelection`：`serverName`、`enabled` 和可空的 `healthUrl`。`serverName` 是从列表选中或用户手填的准确名称，也是脚本可引用的代理组名。选择后的名称保持稳定；若上游后来改名，界面提示重新选择，不静默重命名代理组和用户脚本。
 
 | 对象 | 命名规则 | 用途 |
 |---|---|---|
