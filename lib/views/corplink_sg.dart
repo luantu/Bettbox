@@ -528,6 +528,12 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
               ? const SizedBox.shrink()
               : Text('最近控制面错误：$code'),
         ),
+        ValueListenableBuilder<String?>(
+          valueListenable: corplinkSgLastScriptErrorCode,
+          builder: (_, code, _) => code == null
+              ? const SizedBox.shrink()
+              : Text('最近覆写脚本冲突：$code'),
+        ),
         const SizedBox(height: 16),
         FilledButton(
           onPressed: _busy ? null : _save,

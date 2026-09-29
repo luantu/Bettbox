@@ -732,6 +732,7 @@ class GlobalState {
     );
     var rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     var effectiveSuppressCorplinkNode = suppressCorplinkNode;
+    corplinkSgLastScriptErrorCode.value = null;
     if (hasAmbiguousCorplinkScriptProxyChange(
       rawConfig,
       trustedManagedProxyNames: managedCorplinkNames.proxies,
@@ -740,6 +741,9 @@ class GlobalState {
     )) {
       rawConfig = failClosedCorplinkScriptResult(preScriptConfig);
       effectiveSuppressCorplinkNode = true;
+      corplinkSgLastScriptErrorCode.value = 'SCRIPT_PROXY_PROVENANCE_AMBIGUOUS';
+      commonPrint.log('[CorpLinkSG] unsafe script proxy provenance; '
+          'all rule traffic is fail-closed');
       showNotifier('覆写脚本无法确认飞连代理来源；本次配置已阻断全部规则流量，请修正脚本');
     }
     final originalProxyGroups = rawConfig['proxy-groups'];
@@ -1192,6 +1196,7 @@ class GlobalState {
       originalProxyNames: managedCorplinkNames.allProxyNames,
       expectedManagedObjects: expectedCorplinkObjects,
       onScriptConflict: (names) {
+        corplinkSgLastScriptErrorCode.value = 'SCRIPT_MANAGED_ROUTE_CONFLICT';
         commonPrint.log('[CorpLinkSG] script changed ${names.length} managed entries; '
             'affected route(s) are fail-closed');
         showNotifier('覆写脚本修改了飞连托管节点或组；相关路由已阻断，请检查脚本');

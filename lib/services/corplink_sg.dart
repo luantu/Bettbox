@@ -27,6 +27,7 @@ const corplinkSgDeviceNameSecureKey = 'corplinkSg.deviceName';
 const _secureStorage = FlutterSecureStorage();
 final corplinkSgLastErrorCode = ValueNotifier<String?>(null);
 final corplinkSgLastCoreErrorCode = ValueNotifier<String?>(null);
+final corplinkSgLastScriptErrorCode = ValueNotifier<String?>(null);
 
 class CorplinkSgSettings {
   final bool enabled;
