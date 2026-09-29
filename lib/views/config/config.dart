@@ -31,7 +31,7 @@ class _ConfigViewState extends State<ConfigView> {
         leading: const Icon(Icons.build),
         delegate: NextDelegate(
           title: appLocalizations.general,
-          builder: (_) => generateListView(generalItems),
+          builder: (_) => const GeneralListView(),
           blur: false,
         ),
       ),
@@ -172,7 +172,9 @@ class _ConfigViewState extends State<ConfigView> {
                 titleBuilder: (item) => Text(item.key),
                 subtitleBuilder: (item) => Text(item.value),
                 canDelete: (item) =>
-                    !(storeFix && item.key == 'services.googleapis.cn') &&
+                    !(system.isAndroid &&
+                        storeFix &&
+                        item.key == 'services.googleapis.cn') &&
                     !(networkFix && item.key == 'dns.msftncsi.com'),
                 onChange: (value) {
                   ref
@@ -289,6 +291,6 @@ class _ConfigViewState extends State<ConfigView> {
       ),
     ];
 
-    return generateListView(items.separated(const Divider(height: 0)).toList());
+    return generateListView(generateSection(items: items));
   }
 }

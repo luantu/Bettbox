@@ -5,6 +5,7 @@ import 'package:bett_box/state.dart';
 import 'package:flutter/material.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:window_ext/window_ext.dart';
 import 'package:window_manager/window_manager.dart';
 
 class Window {
@@ -13,9 +14,17 @@ class Window {
     if (system.isWindows) {
       protocol.register('clash');
       protocol.register('clashmeta');
+      protocol.register('flclash');
       protocol.register('bettbox');
     }
     await windowManager.ensureInitialized();
+    if (system.isMacOS && !globalState.config.appSetting.keepDockIcon) {
+      try {
+        await windowExtManager.setDockIconVisible(false);
+      } catch (e) {
+        commonPrint.log('Apply dock icon visibility failed: $e');
+      }
+    }
     WindowOptions windowOptions = WindowOptions(
       size: Size(props.width, props.height),
       minimumSize: const Size(380, 400),
@@ -23,26 +32,43 @@ class Window {
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
     await windowManager.setAlwaysOnTop(props.isPinned);
     if (!system.isMacOS) {
-      final left = props.left ?? 0;
-      final top = props.top ?? 0;
-      final right = left + props.width;
-      final bottom = top + props.height;
-      if (left == 0 && top == 0) {
+      final left = props.left;
+      final top = props.top;
+      if (left == null || top == null) {
         await windowManager.setAlignment(Alignment.center);
       } else {
-        final displays = await screenRetriever.getAllDisplays();
-        final isPositionValid = displays.any((display) {
-          final displayBounds = Rect.fromLTWH(
-            display.visiblePosition!.dx,
-            display.visiblePosition!.dy,
-            display.size.width,
-            display.size.height,
-          );
-          return displayBounds.contains(Offset(left, top)) ||
-              displayBounds.contains(Offset(right, bottom));
-        });
+        final savedDpr = props.scaleFactor;
+        final currentDpr = windowManager.getDevicePixelRatio();
+
+        final physLeft = left * savedDpr;
+        final physTop = top * savedDpr;
+        final physRight = physLeft + props.width * savedDpr;
+        final physBottom = physTop + props.height * savedDpr;
+
+        bool isPositionValid = false;
+        try {
+          final displays = await screenRetriever.getAllDisplays();
+          isPositionValid = displays.any((display) {
+            final pos = display.visiblePosition;
+            if (pos == null) return false;
+            final sf = (display.scaleFactor ?? 1.0).toDouble();
+            final physDisplayBounds = Rect.fromLTWH(
+              pos.dx * sf,
+              pos.dy * sf,
+              display.size.width * sf,
+              display.size.height * sf,
+            );
+            return physDisplayBounds.contains(Offset(physLeft, physTop)) ||
+                physDisplayBounds.contains(Offset(physRight, physBottom));
+          });
+        } catch (_) {}
         if (isPositionValid) {
-          await windowManager.setPosition(Offset(left, top));
+          await windowManager.setPosition(Offset(
+            physLeft / currentDpr,
+            physTop / currentDpr,
+          ));
+        } else {
+          await windowManager.setAlignment(Alignment.center);
         }
       }
     }
@@ -59,7 +85,9 @@ class Window {
     render?.resume();
     await windowManager.show();
     await windowManager.focus();
-    await windowManager.setSkipTaskbar(false);
+    if (!system.isMacOS) {
+      await windowManager.setSkipTaskbar(false);
+    }
     await globalState.resumeForegroundUpdates();
     await globalState.appController.syncWakelockIfNeeded();
   }
@@ -85,7 +113,9 @@ class Window {
 
   Future<void> hide() async {
     await windowManager.hide();
-    await windowManager.setSkipTaskbar(true);
+    if (!system.isMacOS) {
+      await windowManager.setSkipTaskbar(true);
+    }
     await globalState.handleBackground();
   }
 }

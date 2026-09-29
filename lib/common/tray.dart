@@ -70,10 +70,11 @@ class Tray {
             WidgetsBinding.instance.platformDispatcher.platformBrightness,
         isStart: isStart,
         invertTrayIcon:
-            (system.isWindows || system.isMacOS) &&
+            (system.isWindows || (system.isMacOS && !isStart)) &&
             globalState.config.themeProps.invertTrayIcon,
       ),
-      isTemplate: false,
+      isTemplate: system.isMacOS && isStart,
+      id: AppIdentity.compactName,
     );
     if (system.isMacOS) {
       await trayManager.setActive(isStart);

@@ -92,8 +92,11 @@ class _StartButtonState extends ConsumerState<StartButton> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(startButtonSelectorStateProvider);
-    final canPress = state.isInit && state.hasProfile && !_isDisabled;
-    final hasNoProfile = state.isInit && !state.hasProfile && !_isDisabled;
+    final isSmartStopped = ref.watch(isSmartStoppedProvider);
+    final canPress =
+        state.isInit && state.hasProfile && !_isDisabled && !isSmartStopped;
+    final hasNoProfile =
+        state.isInit && !state.hasProfile && !_isDisabled && !isSmartStopped;
     final isRestarting = ref.watch(isRestartingCoreProvider);
 
     return ValueListenableBuilder<int>(
@@ -101,12 +104,15 @@ class _StartButtonState extends ConsumerState<StartButton> {
       builder: (_, _, _) {
         final runTime = ref.read(runTimeProvider);
         final isStart = runTime != null;
-        final displayStart = _optimisticStart ?? isStart;
+        final displayStart =
+            isSmartStopped ? false : (_optimisticStart ?? isStart);
         return SizedBox(
           height: getWidgetHeight(1),
           child: CommonCard(
             info: Info(
-              label: isRestarting
+              label: isSmartStopped
+                  ? appLocalizations.coreSuspended
+                  : isRestarting
                   ? appLocalizations.restartCoreTitle
                   : displayStart
                   ? appLocalizations.runTime
@@ -136,6 +142,7 @@ class _StartButtonState extends ConsumerState<StartButton> {
                         runTime,
                         isRestarting,
                         _isDisabled,
+                        isSmartStopped,
                       ),
                     ),
                   ),
@@ -156,8 +163,33 @@ class _StartButtonState extends ConsumerState<StartButton> {
     int? runTime,
     bool isRestarting,
     bool isDisabled,
+    bool isSmartStopped,
   ) {
-    if (!state.isInit || isDisabled) {
+    if (isSmartStopped) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.pause_circle_outline,
+            size: 20,
+            color: context.colorScheme.outline,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Suspended',
+              style: context.textTheme.bodyMedium?.copyWith(
+                color: context.colorScheme.outline,
+              ).adjustSize(1),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (!state.isInit || isDisabled || isRestarting) {
       return Container(
         padding: const EdgeInsets.all(2),
         child: Center(
@@ -179,24 +211,6 @@ class _StartButtonState extends ConsumerState<StartButton> {
         style: context.textTheme.bodyMedium?.toLight.adjustSize(1),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-      );
-    }
-
-    if (isRestarting) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: SizedBox(
-          width: 16,
-          height: 16,
-          child: OverflowBox(
-            maxWidth: 30,
-            maxHeight: 16,
-            child: SpinKitThreeBounce(
-              color: context.colorScheme.primary,
-              size: 16,
-            ),
-          ),
-        ),
       );
     }
 

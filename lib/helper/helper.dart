@@ -122,8 +122,7 @@ class HelperClient {
     try {
       final response = await _request('helper.ping');
       return response.data == expectedToken;
-    } catch (e) {
-      commonPrint.log('[HelperClient] ping failed: $e');
+    } catch (_) {
       return false;
     }
   }

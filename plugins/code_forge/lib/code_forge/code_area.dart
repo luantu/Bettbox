@@ -325,7 +325,7 @@ class CodeForge extends StatefulWidget {
     this.keyboardType = TextInputType.multiline,
     this.textDirection = TextDirection.ltr,
     this.tabSize,
-    this.useSpaceAsTab = false,
+    this.useSpaceAsTab = true,
     this.enableGutter = true,
     this.enableGutterDivider = false,
     this.enableMagnifier = true,
@@ -353,8 +353,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final FocusNode _focusNode;
   late final AnimationController _caretBlinkController;
   late final AnimationController _lineHighlightController;
-  late final Map<String, TextStyle> _editorTheme;
-  late final Mode? _language;
+  late Map<String, TextStyle> _editorTheme;
+  late Mode? _language;
   late final CodeSelectionStyle _selectionStyle;
   late final GutterStyle _gutterStyle;
   late final SuggestionStyle _suggestionStyle;
@@ -394,6 +394,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
   final _isMac = Platform.isMacOS;
+  final _isWindows = Platform.isWindows;
+  DateTime? _lastCtrlUpTime;
   final GlobalKey _codeFieldKey = GlobalKey();
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
@@ -473,7 +475,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _readOnly = true;
     }
 
-    if (widget._tabSize != _controller.tabSize) {
+    if ((_ownsController || widget.tabSize != null) &&
+        widget._tabSize != _controller.tabSize) {
       _controller.tabSize = widget._tabSize;
     }
 
@@ -837,6 +840,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         inputAction: TextInputAction.newline,
         autocorrect: false,
         viewId: View.of(context).viewId,
+        allowedMimeTypes: const <String>['text/plain', 'text/*'],
       ),
     );
   }
@@ -1077,6 +1081,31 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   }
 
   @override
+  void didUpdateWidget(covariant CodeForge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if ((_ownsController || widget.tabSize != null) &&
+        widget._tabSize != _controller.tabSize) {
+      _controller.tabSize = widget._tabSize;
+    }
+    if (widget.useSpaceAsTab != _controller.useSpaceAsTab) {
+      _controller.useSpaceAsTab = widget.useSpaceAsTab;
+    }
+    if (widget.language != oldWidget.language) {
+      _language = widget.language ?? Mode();
+    }
+    if (widget.editorTheme != oldWidget.editorTheme) {
+      _editorTheme = widget.editorTheme ?? lightfairTheme;
+    }
+    if (widget.readOnly != oldWidget.readOnly) {
+      _readOnly = widget.readOnly;
+    }
+    if (widget.languageId != oldWidget.languageId) {
+      _controller.languageId = widget.languageId;
+    }
+  }
+
+  @override
   void dispose() {
     _controller.removeListener(_controllerListener);
     _controller.semanticTokens.removeListener(_semanticTokensListener);
@@ -1159,27 +1188,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   }
 
   void _moveSelectionRight(bool withShift) {
-    final sel = _controller.selection;
-    final textLength = _controller.length;
-
-    int newOffset;
-    if (!withShift && sel.start != sel.end) {
-      newOffset = sel.end;
-    } else if (sel.extentOffset < textLength) {
-      newOffset = sel.extentOffset + 1;
-    } else {
-      newOffset = textLength;
-    }
-
-    if (withShift) {
-      _controller.setSelectionSilently(
-        TextSelection(baseOffset: sel.baseOffset, extentOffset: newOffset),
-      );
-    } else {
-      _controller.setSelectionSilently(
-        TextSelection.collapsed(offset: newOffset),
-      );
-    }
+    _controller.pressRightArrowKey(isShiftPressed: withShift);
   }
 
   void _handleHomeKey(bool withShift) {
@@ -2448,23 +2457,51 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                   }
                                                 }
 
-                                                if (event is KeyDownEvent ||
-                                                    event is KeyRepeatEvent) {
-                                                  final isAltPressed =
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isAltPressed;
-                                                  final isShiftPressed =
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isShiftPressed;
-                                                  final isCtrlPressed =
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isControlPressed ||
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isMetaPressed;
+                                                 if (_isWindows && event is KeyUpEvent) {
+                                                   if (event.logicalKey ==
+                                                           LogicalKeyboardKey
+                                                               .controlLeft ||
+                                                       event.logicalKey ==
+                                                           LogicalKeyboardKey
+                                                               .controlRight ||
+                                                       event.logicalKey ==
+                                                           LogicalKeyboardKey
+                                                               .control) {
+                                                     _lastCtrlUpTime =
+                                                         DateTime.now();
+                                                   }
+                                                 }
+
+                                                 if (event is KeyDownEvent ||
+                                                     event is KeyRepeatEvent) {
+                                                   final isAltPressed =
+                                                       HardwareKeyboard
+                                                           .instance
+                                                           .isAltPressed;
+                                                   final isShiftPressed =
+                                                       HardwareKeyboard
+                                                           .instance
+                                                           .isShiftPressed;
+                                                   final isCtrlPressed =
+                                                       HardwareKeyboard
+                                                           .instance
+                                                           .isControlPressed ||
+                                                       HardwareKeyboard
+                                                           .instance
+                                                           .isMetaPressed;
+                                                   final isSyntheticWindowsPaste =
+                                                       _isWindows &&
+                                                       event.logicalKey ==
+                                                           LogicalKeyboardKey
+                                                               .keyV &&
+                                                       _lastCtrlUpTime !=
+                                                           null &&
+                                                       DateTime.now()
+                                                               .difference(
+                                                                   _lastCtrlUpTime!) <=
+                                                           const Duration(
+                                                             milliseconds: 150,
+                                                           );
                                                   if (_suggestionNotifier
                                                               .value !=
                                                           null &&
@@ -2608,7 +2645,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     }
                                                   }
 
-                                                  if (isCtrlPressed) {
+                                                  if (isCtrlPressed ||
+                                                      isSyntheticWindowsPaste) {
                                                     switch (event.logicalKey) {
                                                       case LogicalKeyboardKey
                                                           .keyC:
@@ -2626,6 +2664,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyV:
+                                                        _lastCtrlUpTime = null;
                                                         if (_readOnly) {
                                                           return KeyEventResult
                                                               .handled;
@@ -2804,7 +2843,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       _controller
                                                           .pressDownArrowKey(
                                                             isShiftPressed:
-                                                                isShiftPressed,
+                                                                isShiftPressed ||
+                                                                    (_isMobile &&
+                                                                        !_controller
+                                                                            .selection
+                                                                            .isCollapsed),
                                                           );
 
                                                       if (_controller
@@ -2812,7 +2855,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                         _controller
                                                             .moveMultiCursorsDown(
                                                               isShiftPressed:
-                                                                  isShiftPressed,
+                                                                  isShiftPressed ||
+                                                                      (_isMobile &&
+                                                                          !_controller
+                                                                              .selection
+                                                                              .isCollapsed),
                                                             );
                                                       }
 
@@ -2825,7 +2872,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       _controller
                                                           .pressUpArrowKey(
                                                             isShiftPressed:
-                                                                isShiftPressed,
+                                                                isShiftPressed ||
+                                                                    (_isMobile &&
+                                                                        !_controller
+                                                                            .selection
+                                                                            .isCollapsed),
                                                           );
 
                                                       if (_controller
@@ -2833,7 +2884,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                         _controller
                                                             .moveMultiCursorsUp(
                                                               isShiftPressed:
-                                                                  isShiftPressed,
+                                                                  isShiftPressed ||
+                                                                      (_isMobile &&
+                                                                          !_controller
+                                                                              .selection
+                                                                              .isCollapsed),
                                                             );
                                                       }
 
@@ -2844,7 +2899,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     case LogicalKeyboardKey
                                                         .arrowRight:
                                                       _handleArrowRight(
-                                                        isShiftPressed,
+                                                        isShiftPressed ||
+                                                            (_isMobile &&
+                                                                !_controller
+                                                                    .selection
+                                                                    .isCollapsed),
                                                       );
                                                       _commonKeyFunctions();
                                                       return KeyEventResult
@@ -2853,7 +2912,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     case LogicalKeyboardKey
                                                         .arrowLeft:
                                                       _handleArrowLeft(
-                                                        isShiftPressed,
+                                                        isShiftPressed ||
+                                                            (_isMobile &&
+                                                                !_controller
+                                                                    .selection
+                                                                    .isCollapsed),
                                                       );
                                                       _commonKeyFunctions();
                                                       return KeyEventResult
@@ -2984,9 +3047,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 language: _language,
                                                 extraLanguages:
                                                     widget.extraLanguages,
-                                                languageId: _controller
-                                                    .lspConfig
-                                                    ?.languageId,
+                                                languageId: widget.languageId ??
+                                                    _controller.languageId ??
+                                                    _controller
+                                                        .lspConfig
+                                                        ?.languageId,
                                                 lspConfig:
                                                     _controller.lspConfig,
                                                 semanticTokens: _semanticTokens,
@@ -4591,7 +4656,9 @@ class _CodeField extends LeafRenderObjectWidget {
     }
     renderObject
       ..updateDiagnostics(diagnostics)
+      ..updateScreenWidth()
       ..editorTheme = editorTheme
+      ..languageId = languageId
       ..language = language
       ..extraLanguages = extraLanguages
       ..textStyle = textStyle
@@ -4612,7 +4679,9 @@ class _CodeField extends LeafRenderObjectWidget {
 
 class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final CodeForgeController controller;
-  final String? languageId, filePath;
+  final String? filePath;
+  String? _languageId;
+  String? get languageId => _languageId;
   final ScrollController vscrollController, hscrollController;
   final FocusNode focusNode;
   final AnimationController caretBlinkController;
@@ -4634,6 +4703,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final Map<int, Rect> _actionBulbRects = {};
   final Map<Rect, DocumentColor> _colorBoxHitAreas = {};
   final Map<int, ui.Paragraph> _paragraphCache = {};
+  final Map<String, ui.Paragraph> _lineNumberParaCache = {};
+  final Map<String, TextPainter> _foldIconPainters = {};
+  ui.Paragraph? _foldIndicatorParagraph;
   final Map<int, double> _lineHeightCache = {};
   ui.Paragraph? _bufferParagraph;
   int? _bufferParagraphLine;
@@ -4692,6 +4764,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Size? _lastImeEditableSize;
   double _imeComposingCaretDx = 0.0;
   double _imeComposingWidth = 0.0;
+  double _screenWidth = 0.0;
   int? _dragStartOffset;
   Timer? _selectionTimer, _hoverTimer, _showBubbleTimer;
   Offset? _pointerDownPosition;
@@ -4984,6 +5057,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
   }
 
+  void updateScreenWidth() => _screenWidth = MediaQuery.sizeOf(context).width;
+
   ui.Paragraph _buildParagraph(String text, {double? width}) {
     final builder = ui.ParagraphBuilder(_paragraphStyle)
       ..pushStyle(_uiTextStyle)
@@ -5047,7 +5122,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required this.gutterBuilder,
     required this._selectionStyle,
     required this._diagnostics,
-    this.languageId,
+    String? languageId,
     this.lspConfig,
     this.filePath,
     this.matchHighlightStyle,
@@ -5060,13 +5135,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
        _gutterStyle = gutterStyle,
        _lineWrap = lineWrap,
        _innerPadding = innerPadding,
-       _matchHighlightStyle = matchHighlightStyle {
+       _matchHighlightStyle = matchHighlightStyle,
+       _languageId = languageId {
     final fontSize = _textStyle?.fontSize ?? 14.0;
     final fontFamily = _textStyle?.fontFamily;
     final color =
         _textStyle?.color ?? _editorTheme['root']?.color ?? Colors.black;
     final lineHeightMultiplier = _textStyle?.height ?? 1.2;
 
+    _screenWidth = MediaQuery.sizeOf(context).width;
     _lineHeight = fontSize * lineHeightMultiplier;
 
     _syntaxHighlighter = _language == null
@@ -5077,7 +5154,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             editorTheme: _editorTheme,
             baseTextStyle: _textStyle,
             languageId: languageId,
-            getLineText: controller.getLineText,
+            getLineText: (line) =>
+                _lineTextCache[line] ?? controller.getLineText(line),
           );
     _layoutMap = LayoutMap();
     _rebuildLayoutMap();
@@ -5334,10 +5412,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             editorTheme: theme,
             baseTextStyle: textStyle,
             languageId: languageId,
-            getLineText: controller.getLineText,
+            getLineText: (line) =>
+                _lineTextCache[line] ?? controller.getLineText(line),
           );
     _preHighlightInitialized = false;
     _paragraphCache.clear();
+    _lineNumberParaCache.clear();
+    _foldIconPainters.clear();
+    _foldIndicatorParagraph = null;
     _bracketCache.clear();
     markNeedsLayout();
     markNeedsPaint();
@@ -5357,10 +5439,41 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             editorTheme: editorTheme,
             baseTextStyle: textStyle,
             languageId: languageId,
-            getLineText: controller.getLineText,
+            getLineText: (line) =>
+                _lineTextCache[line] ?? controller.getLineText(line),
           );
     _preHighlightInitialized = false;
     _paragraphCache.clear();
+    _lineNumberParaCache.clear();
+    _foldIconPainters.clear();
+    _foldIndicatorParagraph = null;
+    _bracketCache.clear();
+    markNeedsLayout();
+    markNeedsPaint();
+  }
+
+  set languageId(String? id) {
+    if (id == _languageId) return;
+    _languageId = id;
+    try {
+      _syntaxHighlighter?.dispose();
+    } catch (_) {}
+    _syntaxHighlighter = _language == null
+        ? null
+        : SyntaxHighlighter(
+            language: _language!,
+            extraLanguages: _extraLanguages,
+            editorTheme: editorTheme,
+            baseTextStyle: textStyle,
+            languageId: id,
+            getLineText: (line) =>
+                _lineTextCache[line] ?? controller.getLineText(line),
+          );
+    _preHighlightInitialized = false;
+    _paragraphCache.clear();
+    _lineNumberParaCache.clear();
+    _foldIconPainters.clear();
+    _foldIndicatorParagraph = null;
     _bracketCache.clear();
     markNeedsLayout();
     markNeedsPaint();
@@ -5420,11 +5533,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             editorTheme: editorTheme,
             baseTextStyle: style,
             languageId: languageId,
-            getLineText: controller.getLineText,
+            getLineText: (line) =>
+                _lineTextCache[line] ?? controller.getLineText(line),
           );
     _preHighlightInitialized = false;
 
     _paragraphCache.clear();
+    _lineNumberParaCache.clear();
+    _foldIconPainters.clear();
+    _foldIndicatorParagraph = null;
     _lineWidthCache.clear();
     _lineTextCache.clear();
     _lineHeightCache.clear();
@@ -5469,10 +5586,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             editorTheme: editorTheme,
             baseTextStyle: textStyle,
             languageId: languageId,
-            getLineText: controller.getLineText,
+            getLineText: (line) =>
+                _lineTextCache[line] ?? controller.getLineText(line),
           );
     _preHighlightInitialized = false;
     _paragraphCache.clear();
+    _lineNumberParaCache.clear();
+    _foldIconPainters.clear();
+    _foldIndicatorParagraph = null;
     _bracketCache.clear();
     markNeedsLayout();
     markNeedsPaint();
@@ -5488,6 +5609,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (_lineWrap == value) return;
     _lineWrap = value;
     _paragraphCache.clear();
+    _lineNumberParaCache.clear();
+    _foldIndicatorParagraph = null;
     _lineHeightCache.clear();
     _bracketCache.clear();
     _indentGuideCache.clear();
@@ -5669,6 +5792,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   void _onCaretBlink() {
+    if (readOnly) return;
     final caretVisible = focusNode.hasFocus && caretBlinkController.value > 0.5;
     if (caretVisible != _lastCaretVisible) {
       _lastCaretVisible = caretVisible;
@@ -6236,9 +6360,25 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     const closerToOpener = {'}': '{', ']': '[', ')': '('};
     if (!enableFolding) return null;
 
-    final line = controller.getLineText(lineIndex);
+    final line =
+        _lineTextCache[lineIndex] ??= controller.getLineText(lineIndex);
 
-    if (!openers.any(line.contains) && !line.trim().endsWith(':')) {
+    if (line.trim().endsWith(':')) {
+      final colonFold = _computeIndentFoldRangeForLine(lineIndex, line);
+      if (colonFold != null) {
+        return colonFold;
+      }
+    }
+
+    if (!openers.any(line.contains)) {
+      final openingTagName = _extractOpeningTagName(line);
+      if (openingTagName != null) {
+        final matchLine =
+            _findMatchingClosingTagLine(openingTagName, lineIndex);
+        if (matchLine != null && matchLine > lineIndex) {
+          return FoldRange(lineIndex, matchLine);
+        }
+      }
       return null;
     }
 
@@ -6249,7 +6389,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         ? controller.lineCount
         : min(lineIndex + 10000, controller.lineCount);
     for (int i = lineIndex; i < maxScan; i++) {
-      final checkLine = controller.getLineText(i);
+      final checkLine = _lineTextCache[i] ??= controller.getLineText(i);
       for (int c = 0; c < checkLine.length; c++) {
         final ch = checkLine[c];
         if (openers.contains(ch)) {
@@ -6278,20 +6418,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
 
     if (_foldRanges.containsKey(lineIndex)) {
-      final cachedFold = _foldRanges[lineIndex];
-      if (cachedFold != null && line.trim().endsWith(':')) {
-        final exactFold = _computeIndentFoldRangeForLine(lineIndex, line);
-        if (exactFold != null && exactFold.endIndex < cachedFold.endIndex) {
-          _foldRanges[lineIndex] = exactFold;
-          return exactFold;
-        }
-      }
       return _foldRanges[lineIndex];
-    }
-
-    final colonFold = _computeIndentFoldRangeForLine(lineIndex, line);
-    if (colonFold != null) {
-      return colonFold;
     }
 
     final openingTagName = _extractOpeningTagName(line);
@@ -6334,7 +6461,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final maxIndentScan = min(lineIndex + 5000, controller.lineCount);
     for (int j = lineIndex + 1; j < maxIndentScan; j++) {
-      final next = controller.getLineText(j);
+      final next = _lineTextCache[j] ??= controller.getLineText(j);
       if (next.trim().isEmpty) continue;
       final nextIndent = _measureLeadingIndentColumns(next);
 
@@ -8219,7 +8346,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
 
       if (isFoldStart && foldRange.isFolded) {
-        final foldIndicator = _buildParagraph(' ...');
+        final foldIndicator =
+            _foldIndicatorParagraph ??= _buildParagraph(' ...');
         final paraWidth = paragraph.longestLine;
         final foldX = isRTL
             ? (innerPadding?.left ?? 0) +
@@ -8362,7 +8490,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     _drawImeComposition(canvas, offset, hasActiveFolds);
 
-    if (focusNode.hasFocus &&
+    if (!readOnly &&
+        focusNode.hasFocus &&
         caretBlinkController.value > 0.5 &&
         controller.imeComposition == null) {
       final caretInfo = _getCaretInfo();
@@ -8416,7 +8545,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         ..style = PaintingStyle.fill;
 
       if (selection.isCollapsed) {
-        if (_showBubble || _selectionActive) {
+        if (!readOnly && (_showBubble || _selectionActive)) {
           final caretInfo = _getCaretInfo();
           final handleSize = caretInfo.height;
 
@@ -8978,6 +9107,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   ui.Paragraph _buildLineNumberParagraph(String text, TextStyle style) {
+    final key =
+        '$text-${style.color?.toARGB32()}-${style.fontSize}-${style.fontFamily}';
+    final cached = _lineNumberParaCache[key];
+    if (cached != null) return cached;
+
     final builder =
         ui.ParagraphBuilder(
             ui.ParagraphStyle(
@@ -8995,6 +9129,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           ..addText(text);
     final p = builder.build();
     p.layout(const ui.ParagraphConstraints(width: double.infinity));
+    if (_lineNumberParaCache.length > 500) {
+      _lineNumberParaCache.clear();
+    }
+    _lineNumberParaCache[key] = p;
     return p;
   }
 
@@ -9006,19 +9144,24 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     double fontSize,
     double y,
   ) {
-    final iconPainter = TextPainter(
-      text: TextSpan(
-        text: String.fromCharCode(icon.codePoint),
-        style: TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontFamily: icon.fontFamily,
-          package: icon.fontPackage,
+    final key =
+        '${icon.codePoint}-${color.toARGB32()}-$fontSize-${icon.fontFamily}';
+    final iconPainter = _foldIconPainters.putIfAbsent(key, () {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: String.fromCharCode(icon.codePoint),
+          style: TextStyle(
+            color: color,
+            fontSize: fontSize,
+            fontFamily: icon.fontFamily,
+            package: icon.fontPackage,
+          ),
         ),
-      ),
-      textDirection: _textDirection,
-    );
-    iconPainter.layout();
+        textDirection: _textDirection,
+      );
+      painter.layout();
+      return painter;
+    });
     final iconX = isRTL
         ? offset.dx + size.width - iconPainter.width - 2
         : offset.dx + _gutterWidth - iconPainter.width - 2;
@@ -12277,9 +12420,19 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         }
 
         if (_selectionActive) {
+          int extentOffset = textOffset;
+          final contentWidth =
+              size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
+
+          if (localPosition.dx >= _screenWidth - 5 &&
+              (contentX + _gutterWidth).clamp(0, contentWidth) !=
+                  contentWidth) {
+            extentOffset += 8;
+          }
+
           final newSel = TextSelection(
             baseOffset: _dragStartOffset!,
-            extentOffset: textOffset,
+            extentOffset: extentOffset,
           );
           if (newSel != controller.selection) {
             controller.selection = newSel;

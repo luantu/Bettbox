@@ -5,6 +5,7 @@ import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/widgets/widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 typedef OnSelected = void Function(int index);
@@ -27,7 +28,9 @@ class _HomePageState extends State<HomePage> {
   void _requestNavFocus(int index) {
     if (!globalState.isAndroidTV) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _navFocusNodes[index]?.requestFocus();
+      if (mounted) {
+        _getNavFocusNode(index).requestFocus();
+      }
     });
   }
 
@@ -36,7 +39,15 @@ class _HomePageState extends State<HomePage> {
 
   void focusNav() {
     if (!globalState.isAndroidTV || !mounted) return;
-    _requestNavFocus(_currentNavIndex);
+    _getNavFocusNode(_currentNavIndex).requestFocus();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (globalState.isAndroidTV) {
+      _requestNavFocus(0);
+    }
   }
 
   @override
@@ -51,7 +62,16 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return HomeBackScope(
       onTvBack: () {
-        if (isNavFocused) return false;
+        final currentPage = globalState.appState.pageLabel;
+        final isNav = isNavFocused;
+
+        if (isNav) {
+          if (currentPage == PageLabel.dashboard) {
+            return false;
+          }
+          globalState.appController.toPage(PageLabel.dashboard);
+          return true;
+        }
         focusNav();
         return true;
       },
@@ -163,71 +183,115 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       child: SafeArea(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: navigationItems.asMap().entries.map((entry) {
-            final index = entry.key;
-            final item = entry.value;
-            final isSelected = index == currentIndex;
-            final focusNode = _getNavFocusNode(index);
-            return FocusTraversalOrder(
-              order: NumericFocusOrder(index.toDouble()),
-              child: AnimatedBuilder(
-                animation: focusNode,
-                builder: (context, child) {
-                  final isFocused = focusNode.hasFocus;
-                  return InkWell(
-                    focusNode: focusNode,
-                    onTap: () {
-                      globalState.appController.toPage(item.label);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? context.colorScheme.secondaryContainer
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                        border: isFocused
-                            ? Border.all(
-                                color: context.colorScheme.primary,
-                                width: 2,
-                              )
-                            : Border.all(color: Colors.transparent, width: 2),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconTheme(
-                            data: IconThemeData(
-                              color: isSelected
-                                  ? context.colorScheme.onSecondaryContainer
-                                  : context.colorScheme.onSurfaceVariant,
-                              size: 24,
+        child: Focus(
+          onKeyEvent: (node, event) {
+            if (event is! KeyDownEvent) return KeyEventResult.ignored;
+            if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+              final focusedIndex = navigationItems.indexWhere(
+                (item) =>
+                    _navFocusNodes[navigationItems.indexOf(item)]?.hasFocus ==
+                    true,
+              );
+              if (focusedIndex > 0) {
+                _getNavFocusNode(focusedIndex - 1).requestFocus();
+                return KeyEventResult.handled;
+              } else if (focusedIndex == 0) {
+                return KeyEventResult.handled;
+              }
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+              final focusedIndex = navigationItems.indexWhere(
+                (item) =>
+                    _navFocusNodes[navigationItems.indexOf(item)]?.hasFocus ==
+                    true,
+              );
+              if (focusedIndex >= 0 &&
+                  focusedIndex < navigationItems.length - 1) {
+                _getNavFocusNode(focusedIndex + 1).requestFocus();
+                return KeyEventResult.handled;
+              } else if (focusedIndex == navigationItems.length - 1) {
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: navigationItems.asMap().entries.map((entry) {
+              final index = entry.key;
+              final item = entry.value;
+              final isSelected = index == currentIndex;
+              final focusNode = _getNavFocusNode(index);
+              return FocusTraversalOrder(
+                order: NumericFocusOrder(index.toDouble()),
+                child: AnimatedBuilder(
+                  animation: focusNode,
+                  builder: (context, child) {
+                    final isFocused = focusNode.hasFocus;
+                    return InkWell(
+                      focusNode: focusNode,
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () {
+                        globalState.appController.toPage(item.label);
+                      },
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 120),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 36,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? context.colorScheme.primary.withValues(
+                                  alpha:
+                                      context.colorScheme.brightness ==
+                                              Brightness.light
+                                          ? 0.20
+                                          : 0.26,
+                                )
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                          border: isFocused
+                              ? Border.all(
+                                  color: context.colorScheme.primary,
+                                  width: 2,
+                                )
+                              : Border.all(color: Colors.transparent, width: 2),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconTheme(
+                              data: IconThemeData(
+                                color: isSelected
+                                    ? context.colorScheme.primary
+                                    : context.colorScheme.onSurfaceVariant,
+                                size: 24,
+                              ),
+                              child: item.icon,
                             ),
-                            child: item.icon,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.label.localizedName,
-                            style: TextStyle(
-                              color: isSelected
-                                  ? context.colorScheme.onSecondaryContainer
-                                  : context.colorScheme.onSurfaceVariant,
-                              fontSize: 12,
+                            const SizedBox(height: 4),
+                            Text(
+                              item.label.localizedName,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? context.colorScheme.onSecondaryContainer
+                                    : context.colorScheme.onSurfaceVariant,
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
-              ),
-            );
-          }).toList(),
+                    );
+                  },
+                ),
+              );
+            }).toList(),
+          ),
         ),
       ),
     );

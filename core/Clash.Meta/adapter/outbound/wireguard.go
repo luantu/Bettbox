@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,11 +26,13 @@ import (
 	"github.com/metacubex/mihomo/dns"
 	"github.com/metacubex/mihomo/log"
 
-	amnezia "github.com/metacubex/amneziawg-go/device"
+	amneziav3 "github.com/metacubex/amneziawg-go/device"
+	amnezia "github.com/metacubex/amneziawg-go/device_v1"
 	"github.com/metacubex/mipstack"
 	wireguard "github.com/metacubex/sing-wireguard"
 	wgconn "github.com/metacubex/wireguard-go/conn"
 	"github.com/metacubex/wireguard-go/device"
+	"github.com/metacubex/wireguard-go/tun"
 
 	"github.com/metacubex/sing/common/debug"
 	E "github.com/metacubex/sing/common/exceptions"
@@ -55,7 +58,7 @@ type WireGuard struct {
 	*Base
 	bind      wireGuardBind
 	device    wireguardGoDevice
-	tunDevice wireguard.Device
+	tunDevice wireguardDevice
 	resolver  resolver.Resolver
 
 	initOk        atomic.Bool
@@ -118,7 +121,7 @@ func (o IPStackOption) validate() error {
 	default:
 		return fmt.Errorf("invalid IP stack mode %q; expected auto, gvisor, or mips", o.Mode)
 	}
-	switch mipstack.CongestionControl(o.CongestionController) {
+	switch o.CongestionController {
 	case "", mipstack.CongestionControlCUBIC, mipstack.CongestionControlReno,
 		mipstack.CongestionControlBBR, mipstack.CongestionControlBBR3:
 		return nil
@@ -131,7 +134,10 @@ type ipStack interface {
 	Start() error
 	DialTCP(ctx context.Context, network string, source, destination netip.AddrPort) (net.Conn, error)
 	DialUDP(ctx context.Context, network string, source, destination netip.AddrPort) (net.Conn, error)
+	DialIP(ctx context.Context, network string, source, destination netip.Addr) (net.Conn, error)
+	ListenTCP(ctx context.Context, network string, local netip.AddrPort) (net.Listener, error)
 	ListenUDP(ctx context.Context, network string, local netip.AddrPort) (net.PacketConn, error)
+	ListenIP(ctx context.Context, network string, local netip.Addr) (net.PacketConn, error)
 	Read(buffers [][]byte, sizes []int, offset int) (int, error)
 	Write(buffers [][]byte, offset int) (int, error)
 	MTU() (int, error)
@@ -143,19 +149,30 @@ type ipStack interface {
 func newIPStack(option IPStackOption, localAddresses []netip.Prefix, mtu uint32) (ipStack, error) {
 	mode := option.Mode
 	if mode == ipStackAuto {
-		if features.WithGVisor {
-			mode = ipStackGVisor
-		} else {
-			mode = ipStackMips
-		}
+		mode = ipStackMips
 	}
 	switch mode {
 	case ipStackGVisor:
 		return wireguard.NewStackDevice(localAddresses, mtu)
 	case ipStackMips:
-		return mipstack.New(mipstack.Config{LocalAddresses: localAddresses, MTU: mtu,
-			TCP: mipstack.TCPSocketDefaults{CongestionControl: mipstack.CongestionControl(option.CongestionController), KeepAlive: true,
-				KeepAliveConfig: mipstack.KeepAliveConfig{Idle: 15 * time.Second, Interval: 15 * time.Second, Count: 9}}})
+		return mipstack.New(mipstack.Config{
+			LocalAddresses: localAddresses,
+			MTU:            mtu,
+			TCP: mipstack.TCPSocketDefaults{
+				CongestionControl: option.CongestionController,
+				// Align with sing-wireguard: enable keepalive with 15-second
+				// idle/interval timing and gVisor's default probe count.
+				KeepAlive: true,
+				KeepAliveConfig: mipstack.KeepAliveConfig{
+					Idle: 15 * time.Second, Interval: 15 * time.Second, Count: 9,
+				},
+			},
+			IP: mipstack.IPSocketDefaults{
+				// Align with sing-wireguard's IP socket semantics.
+				IPHeaderIncludedOnRead:  true,
+				IPHeaderIncludedOnWrite: true,
+			},
+		})
 	default:
 		return nil, errors.New("invalid IP stack mode")
 	}
@@ -180,6 +197,50 @@ func (d ipStackNetDialer) DialContext(ctx context.Context, network, address stri
 
 var _ ipStack = (*mipstack.Stack)(nil)
 var _ ipStack = (wireguard.Device)(nil)
+
+type wireguardDevice interface {
+	ipStack
+	tun.Device
+}
+
+type ipStackWireguardDevice struct {
+	ipStack
+	events    chan tun.Event
+	closeOnce sync.Once
+}
+
+func (d *ipStackWireguardDevice) File() *os.File {
+	return nil
+}
+
+func (d *ipStackWireguardDevice) Events() <-chan tun.Event {
+	return d.events
+}
+
+func (d *ipStackWireguardDevice) Start() error {
+	d.events <- tun.EventUp
+	return nil
+}
+
+func (d *ipStackWireguardDevice) Close() error {
+	d.closeOnce.Do(func() {
+		close(d.events)
+	})
+	return d.ipStack.Close()
+}
+
+func newWireguardDevice(stack ipStack) (wireguardDevice, error) {
+	if wgDevice, ok := stack.(wireguardDevice); ok {
+		return wgDevice, nil
+	}
+	if err := stack.Start(); err != nil {
+		return nil, err
+	}
+	return &ipStackWireguardDevice{
+		ipStack: stack,
+		events:  make(chan tun.Event, 1),
+	}, nil
+}
 
 // busyFailThreshold 为业务连续失败触发重建的阈值。
 const busyFailThreshold = 3
@@ -352,8 +413,9 @@ type WireGuardOption struct {
 	UDP        bool   `proxy:"udp,omitempty"`
 	// TCP 使 wireguard 走 TCP transport（兼容 corplink-rs 的 TCP 封装），
 	// 用于公司内部仅开放 TCP 的节点。默认 false（标准 UDP）。
-	TCP                 bool `proxy:"tcp,omitempty"`
-	PersistentKeepalive int  `proxy:"persistent-keepalive,omitempty"`
+	TCP                 bool          `proxy:"tcp,omitempty"`
+	PersistentKeepalive int           `proxy:"persistent-keepalive,omitempty"`
+	IPStack             IPStackOption `proxy:"ip-stack,omitempty"`
 
 	// Corplink 认证（可选）：启用后启动时调用 corplink /vpn/conn API
 	// 获取当前会话分配的隧道 IP 与服务器公钥，自动覆盖 ip/public-key。
@@ -379,6 +441,8 @@ type WireGuardPeerOption struct {
 }
 
 type AmneziaWGOption struct {
+	Version int `proxy:"version,omitempty"` // Version 3 uses the v3 implementation.
+
 	JC    int    `proxy:"jc,omitempty"`
 	JMin  int    `proxy:"jmin,omitempty"`
 	JMax  int    `proxy:"jmax,omitempty"`
@@ -399,6 +463,16 @@ type AmneziaWGOption struct {
 	J2    string `proxy:"j2,omitempty"`    // AmneziaWG v1.5 only (removed in v2)
 	J3    string `proxy:"j3,omitempty"`    // AmneziaWG v1.5 only (removed in v2)
 	Itime int64  `proxy:"itime,omitempty"` // AmneziaWG v1.5 only (removed in v2)
+
+	HeaderProtectionKey    string `proxy:"header-protection-key,omitempty"`
+	ContentPaddingAddition string `proxy:"content-padding-addition,omitempty"`
+	RekeyAfterTime         string `proxy:"rekey-after-time,omitempty"`
+	RekeyTimeout           string `proxy:"rekey-timeout,omitempty"`
+	RejectAfterTime        string `proxy:"reject-after-time,omitempty"`
+	KeepaliveTimeout       string `proxy:"keepalive-timeout,omitempty"`
+	MaxHandshakeAttempts   string `proxy:"max-handshake-attempts,omitempty"`
+	RandomTrailers         bool   `proxy:"random-trailers,omitempty"`
+	DisableCookies         bool   `proxy:"disable-cookies,omitempty"`
 }
 
 type wgSingErrorHandler struct {
@@ -416,13 +490,13 @@ func (w wgSingErrorHandler) NewError(ctx context.Context, err error) {
 }
 
 type wgNetDialer struct {
-	tunDevice wireguard.Device
+	tunDevice ipStack
 }
 
 var _ dialer.NetDialer = (*wgNetDialer)(nil)
 
 func (d wgNetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	return d.tunDevice.DialContext(ctx, network, M.ParseSocksaddr(address).Unwrap())
+	return ipStackNetDialer{stack: d.tunDevice}.DialContext(ctx, network, address)
 }
 
 func (option WireGuardPeerOption) Addr() M.Socksaddr {
@@ -525,6 +599,10 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		outbound.bind = wireguard.NewClientBind(context.Background(), wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
 	}
 
+	if outbound.bind == nil {
+		return nil, E.New("failed to create wireguard client bind")
+	}
+
 	var err error
 	outbound.localPrefixes, err = option.Prefixes()
 	if err != nil {
@@ -582,6 +660,13 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 			option.PreSharedKey = hex.EncodeToString(bytes)
 		}
 	}
+	if option.AmneziaWGOption != nil && option.AmneziaWGOption.HeaderProtectionKey != "" {
+		bytes, err := base64.StdEncoding.DecodeString(option.AmneziaWGOption.HeaderProtectionKey)
+		if err != nil {
+			return nil, E.Cause(err, "decode header protection key")
+		}
+		option.AmneziaWGOption.HeaderProtectionKey = hex.EncodeToString(bytes)
+	}
 
 	// corplink 认证：在创建 wireguard 栈设备前调用 corplink /vpn/conn API
 	// 获取当前会话分配的隧道 IP 与服务器公钥，覆盖节点配置。
@@ -606,11 +691,20 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	if mtu == 0 {
 		mtu = 1408
 	}
+	option.IPStack.normalize()
+	if err = option.IPStack.validate(); err != nil {
+		return nil, err
+	}
 	if len(outbound.localPrefixes) == 0 {
 		return nil, E.New("missing local address")
 	}
-	outbound.tunDevice, err = wireguard.NewStackDevice(outbound.localPrefixes, uint32(mtu))
+	stack, err := newIPStack(option.IPStack, outbound.localPrefixes, uint32(mtu))
 	if err != nil {
+		return nil, E.Cause(err, "create WireGuard stack")
+	}
+	outbound.tunDevice, err = newWireguardDevice(stack)
+	if err != nil {
+		_ = stack.Close()
 		return nil, E.Cause(err, "create WireGuard device")
 	}
 	logger := &device.Logger{
@@ -623,7 +717,11 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	}
 	if option.AmneziaWGOption != nil {
 		outbound.bind.SetParseReserved(false) // AmneziaWG don't need parse reserved
-		outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
+		if option.AmneziaWGOption.Version == 3 {
+			outbound.device = amneziav3.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
+		} else {
+			outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
+		}
 	} else {
 		if option.Corplink.APIServer != "" {
 			// CorpLink (feilian) peers run a modified WireGuard whose Noise
@@ -930,6 +1028,33 @@ func (w *WireGuard) genIpcConf(ctx context.Context, updateOnly bool) (string, er
 			if w.option.AmneziaWGOption.Itime != 0 {
 				ipcConf += "itime=" + strconv.FormatInt(int64(w.option.AmneziaWGOption.Itime), 10) + "\n"
 			}
+			if w.option.AmneziaWGOption.HeaderProtectionKey != "" {
+				ipcConf += "header_protection_key=" + w.option.AmneziaWGOption.HeaderProtectionKey + "\n"
+			}
+			if w.option.AmneziaWGOption.ContentPaddingAddition != "" {
+				ipcConf += "content_padding_addition=" + w.option.AmneziaWGOption.ContentPaddingAddition + "\n"
+			}
+			if w.option.AmneziaWGOption.RekeyAfterTime != "" {
+				ipcConf += "rekey_after_time=" + w.option.AmneziaWGOption.RekeyAfterTime + "\n"
+			}
+			if w.option.AmneziaWGOption.RekeyTimeout != "" {
+				ipcConf += "rekey_timeout=" + w.option.AmneziaWGOption.RekeyTimeout + "\n"
+			}
+			if w.option.AmneziaWGOption.RejectAfterTime != "" {
+				ipcConf += "reject_after_time=" + w.option.AmneziaWGOption.RejectAfterTime + "\n"
+			}
+			if w.option.AmneziaWGOption.KeepaliveTimeout != "" {
+				ipcConf += "keepalive_timeout=" + w.option.AmneziaWGOption.KeepaliveTimeout + "\n"
+			}
+			if w.option.AmneziaWGOption.MaxHandshakeAttempts != "" {
+				ipcConf += "max_handshake_attempts=" + w.option.AmneziaWGOption.MaxHandshakeAttempts + "\n"
+			}
+			if w.option.AmneziaWGOption.RandomTrailers {
+				ipcConf += "random_trailers=1\n"
+			}
+			if w.option.AmneziaWGOption.DisableCookies {
+				ipcConf += "disable_cookies=1\n"
+			}
 		}
 	}
 	if len(w.option.Peers) > 0 {
@@ -1115,7 +1240,7 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 		cancel()
 	} else {
 		dialCtx, cancel := w.tunnelDialContext(ctx)
-		conn, err = w.tunDevice.DialContext(dialCtx, "tcp", M.SocksaddrFrom(metadata.DstIP, metadata.DstPort).Unwrap())
+		conn, err = w.tunDevice.DialTCP(dialCtx, "tcp", netip.AddrPort{}, metadata.AddrPort())
 		cancel()
 	}
 	if err != nil {
@@ -1178,7 +1303,7 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 		// DNS 解析失败不计入隧道健康
 		return nil, err
 	}
-	pc, err = w.tunDevice.ListenPacket(ctx, M.SocksaddrFrom(metadata.DstIP, metadata.DstPort).Unwrap())
+	pc, err = w.tunDevice.ListenUDP(ctx, "udp", netip.AddrPort{})
 	if err != nil {
 		if isTunnelFailure(err) && w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()

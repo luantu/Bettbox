@@ -229,15 +229,15 @@ class NtpIntervalItem extends ConsumerWidget {
 }
 
 final ntpItems = <Widget>[
-  const OverrideNtpItem(),
+  ...generateSection(items: const [OverrideNtpItem()]),
   ...generateSection(
     title: appLocalizations.options,
-    items: const [
-      NtpStatusItem(),
-      WriteToSystemItem(),
-      NtpServerItem(),
-      NtpPortItem(),
-      NtpIntervalItem(),
+    items: [
+      const NtpStatusItem(),
+      if (!system.isAndroid) const WriteToSystemItem(),
+      const NtpServerItem(),
+      const NtpPortItem(),
+      const NtpIntervalItem(),
     ],
   ),
 ];

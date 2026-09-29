@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
@@ -11,12 +12,620 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lpinyin/lpinyin.dart';
 
+enum IpCategory {
+  tun,
+  lan,
+  public,
+}
+
 class Utils {
   Color? getDelayColor(int? delay) {
     if (delay == null) return null;
     if (delay < 0) return Colors.red;
     if (delay < 600) return Colors.green;
     return const Color(0xFFC57F0A);
+  }
+
+  String countryCodeToEmoji(String countryCode) {
+    final String code = countryCode.toUpperCase();
+    if (code.length != 2) {
+      return countryCode;
+    }
+    final int firstLetter = code.codeUnitAt(0) - 0x41 + 0x1F1E6;
+    final int secondLetter = code.codeUnitAt(1) - 0x41 + 0x1F1E6;
+    return String.fromCharCode(firstLetter) + String.fromCharCode(secondLetter);
+  }
+
+  static const Map<String, String> _regionToCountryCodeMap = {
+    'HKG': 'HK',
+    'HKD': 'HK',
+    'HONGKONG': 'HK',
+    'EASTASIA': 'HK',
+    'MFM': 'MO',
+    'MAC': 'MO',
+    'MOP': 'MO',
+    'MACAU': 'MO',
+    'TPE': 'TW',
+    'TSA': 'TW',
+    'KHH': 'TW',
+    'TXG': 'TW',
+    'TWN': 'TW',
+    'NTW': 'TW',
+    'TWD': 'TW',
+    'TAIPEI': 'TW',
+    'TAIWAN': 'TW',
+    'NRT': 'JP',
+    'HND': 'JP',
+    'KIX': 'JP',
+    'ITM': 'JP',
+    'FUK': 'JP',
+    'NGO': 'JP',
+    'CTS': 'JP',
+    'OKA': 'JP',
+    'SDJ': 'JP',
+    'HIJ': 'JP',
+    'KMQ': 'JP',
+    'KOJ': 'JP',
+    'FSZ': 'JP',
+    'KIJ': 'JP',
+    'JPN': 'JP',
+    'JPY': 'JP',
+    'JAPAN': 'JP',
+    'JAPANEAST': 'JP',
+    'JAPANWEST': 'JP',
+    'TOKYO': 'JP',
+    'OSAKA': 'JP',
+    'ICN': 'KR',
+    'GMP': 'KR',
+    'PUS': 'KR',
+    'CJU': 'KR',
+    'TAE': 'KR',
+    'KOR': 'KR',
+    'KRW': 'KR',
+    'KOREA': 'KR',
+    'KOREACENTRAL': 'KR',
+    'KOREASOUTH': 'KR',
+    'SEOUL': 'KR',
+    'SIN': 'SG',
+    'SGP': 'SG',
+    'SGD': 'SG',
+    'SINGAPORE': 'SG',
+    'SOUTHEASTASIA': 'SG',
+    'KUL': 'MY',
+    'JHB': 'MY',
+    'BKI': 'MY',
+    'KCH': 'MY',
+    'PEN': 'MY',
+    'MYS': 'MY',
+    'MYR': 'MY',
+    'THA': 'TH',
+    'THB': 'TH',
+    'VNM': 'VN',
+    'VND': 'VN',
+    'IDN': 'ID',
+    'IDR': 'ID',
+    'PHP': 'PH',
+    'GBR': 'GB',
+    'GBP': 'GB',
+    'DEU': 'DE',
+    'EUR': 'EU',
+    'CAD': 'CA',
+    'AUD': 'AU',
+    'CNY': 'CN',
+    'MALAYSIA': 'MY',
+    'BKK': 'TH',
+    'DMK': 'TH',
+    'CNX': 'TH',
+    'HKT': 'TH',
+    'THAILAND': 'TH',
+    'HAN': 'VN',
+    'SGN': 'VN',
+    'DAD': 'VN',
+    'VIETNAM': 'VN',
+    'MNL': 'PH',
+    'CEB': 'PH',
+    'CRK': 'PH',
+    'PHILIPPINES': 'PH',
+    'CGK': 'ID',
+    'DPS': 'ID',
+    'SUB': 'ID',
+    'INDONESIA': 'ID',
+    'BOM': 'IN',
+    'DEL': 'IN',
+    'BLR': 'IN',
+    'MAA': 'IN',
+    'HYD': 'IN',
+    'CCU': 'IN',
+    'AMD': 'IN',
+    'COK': 'IN',
+    'PNQ': 'IN',
+    'JAI': 'IN',
+    'NAG': 'IN',
+    'PAT': 'IN',
+    'INDIA': 'IN',
+    'CENTRALINDIA': 'IN',
+    'SOUTHINDIA': 'IN',
+    'WESTINDIA': 'IN',
+    'MUMBAI': 'IN',
+    'PEK': 'CN',
+    'PKX': 'CN',
+    'PVG': 'CN',
+    'SHA': 'CN',
+    'CAN': 'CN',
+    'SZX': 'CN',
+    'CTU': 'CN',
+    'TFU': 'CN',
+    'CKG': 'CN',
+    'WUH': 'CN',
+    'XIY': 'CN',
+    'HGH': 'CN',
+    'NKG': 'CN',
+    'CGO': 'CN',
+    'TAO': 'CN',
+    'CSX': 'CN',
+    'XMN': 'CN',
+    'KMG': 'CN',
+    'URC': 'CN',
+    'TSN': 'CN',
+    'DLC': 'CN',
+    'SHE': 'CN',
+    'CHN': 'CN',
+    'CHINA': 'CN',
+    'SYD': 'AU',
+    'MEL': 'AU',
+    'BNE': 'AU',
+    'PER': 'AU',
+    'ADL': 'AU',
+    'CBR': 'AU',
+    'HBA': 'AU',
+    'DRW': 'AU',
+    'CNS': 'AU',
+    'OOL': 'AU',
+    'AUSTRALIA': 'AU',
+    'AUSTRALIAEAST': 'AU',
+    'AUSTRALIASOUTHEAST': 'AU',
+    'AUSTRALIACENTRAL': 'AU',
+    'SYDNEY': 'AU',
+    'MELBOURNE': 'AU',
+    'AKL': 'NZ',
+    'WLG': 'NZ',
+    'CHC': 'NZ',
+    'NEWZEALAND': 'NZ',
+    'LAX': 'US',
+    'SFO': 'US',
+    'SJC': 'US',
+    'SAN': 'US',
+    'OAK': 'US',
+    'SMF': 'US',
+    'BUR': 'US',
+    'ONT': 'US',
+    'SEA': 'US',
+    'PDX': 'US',
+    'DFW': 'US',
+    'IAH': 'US',
+    'AUS': 'US',
+    'SAT': 'US',
+    'DAL': 'US',
+    'HOU': 'US',
+    'JFK': 'US',
+    'EWR': 'US',
+    'LGA': 'US',
+    'BUF': 'US',
+    'ORD': 'US',
+    'MDW': 'US',
+    'ATL': 'US',
+    'MIA': 'US',
+    'MCO': 'US',
+    'TPA': 'US',
+    'FLL': 'US',
+    'JAX': 'US',
+    'IAD': 'US',
+    'DCA': 'US',
+    'BOS': 'US',
+    'DEN': 'US',
+    'PHX': 'US',
+    'LAS': 'US',
+    'RNO': 'US',
+    'PHL': 'US',
+    'PIT': 'US',
+    'DTW': 'US',
+    'MSP': 'US',
+    'CLE': 'US',
+    'CMH': 'US',
+    'CVG': 'US',
+    'CLT': 'US',
+    'RDU': 'US',
+    'BNA': 'US',
+    'MEM': 'US',
+    'SLC': 'US',
+    'STL': 'US',
+    'MCI': 'US',
+    'IND': 'US',
+    'MKE': 'US',
+    'OKC': 'US',
+    'TUL': 'US',
+    'SDF': 'US',
+    'MSY': 'US',
+    'ANC': 'US',
+    'HNL': 'US',
+    'OGG': 'US',
+    'OMA': 'US',
+    'BOI': 'US',
+    'BHM': 'US',
+    'USA': 'US',
+    'USD': 'US',
+    'EASTUS': 'US',
+    'EASTUS2': 'US',
+    'WESTUS': 'US',
+    'WESTUS2': 'US',
+    'WESTUS3': 'US',
+    'CENTRALUS': 'US',
+    'NORTHCENTRALUS': 'US',
+    'SOUTHCENTRALUS': 'US',
+    'WESTCENTRALUS': 'US',
+    'YYZ': 'CA',
+    'YVR': 'CA',
+    'YUL': 'CA',
+    'YYC': 'CA',
+    'YEG': 'CA',
+    'YOW': 'CA',
+    'YWG': 'CA',
+    'YHZ': 'CA',
+    'CANADA': 'CA',
+    'CANADACENTRAL': 'CA',
+    'CANADAEAST': 'CA',
+    'LHR': 'GB',
+    'LGW': 'GB',
+    'LCY': 'GB',
+    'STN': 'GB',
+    'LTN': 'GB',
+    'MAN': 'GB',
+    'EDI': 'GB',
+    'BHX': 'GB',
+    'GLA': 'GB',
+    'BRS': 'GB',
+    'NCL': 'GB',
+    'UK': 'GB',
+    'UKSOUTH': 'GB',
+    'UKWEST': 'GB',
+    'LONDON': 'GB',
+    'FRA': 'DE',
+    'MUC': 'DE',
+    'BER': 'DE',
+    'TXL': 'DE',
+    'HAM': 'DE',
+    'DUS': 'DE',
+    'STR': 'DE',
+    'CGN': 'DE',
+    'LEJ': 'DE',
+    'NUE': 'DE',
+    'HAJ': 'DE',
+    'GERMANY': 'DE',
+    'GERMANYWESTCENTRAL': 'DE',
+    'GERMANYNORTH': 'DE',
+    'FRANKFURT': 'DE',
+    'CDG': 'FR',
+    'ORY': 'FR',
+    'MRS': 'FR',
+    'LYS': 'FR',
+    'NCE': 'FR',
+    'TLS': 'FR',
+    'BOD': 'FR',
+    'FRANCE': 'FR',
+    'FRANCECENTRAL': 'FR',
+    'FRANCESOUTH': 'FR',
+    'PARIS': 'FR',
+    'AMS': 'NL',
+    'RTM': 'NL',
+    'NETHERLANDS': 'NL',
+    'WESTEUROPE': 'NL',
+    'AMSTERDAM': 'NL',
+    'DUB': 'IE',
+    'ORK': 'IE',
+    'IRELAND': 'IE',
+    'NORTHEUROPE': 'IE',
+    'ZRH': 'CH',
+    'GVA': 'CH',
+    'BSL': 'CH',
+    'SWITZERLAND': 'CH',
+    'SWITZERLANDNORTH': 'CH',
+    'SWITZERLANDWEST': 'CH',
+    'ZURICH': 'CH',
+    'ARN': 'SE',
+    'BMA': 'SE',
+    'GOT': 'SE',
+    'MMX': 'SE',
+    'SWEDEN': 'SE',
+    'SWEDENCENTRAL': 'SE',
+    'STOCKHOLM': 'SE',
+    'OSL': 'NO',
+    'BGO': 'NO',
+    'SVG': 'NO',
+    'NORWAY': 'NO',
+    'NORWAYEAST': 'NO',
+    'NORWAYWEST': 'NO',
+    'CPH': 'DK',
+    'BLL': 'DK',
+    'DENMARK': 'DK',
+    'HEL': 'FI',
+    'FINLAND': 'FI',
+    'KEF': 'IS',
+    'ICELAND': 'IS',
+    'MXP': 'IT',
+    'LIN': 'IT',
+    'FCO': 'IT',
+    'CIA': 'IT',
+    'BLQ': 'IT',
+    'NAP': 'IT',
+    'VCE': 'IT',
+    'ITALY': 'IT',
+    'ITALYNORTH': 'IT',
+    'MILAN': 'IT',
+    'MAD': 'ES',
+    'BCN': 'ES',
+    'VLC': 'ES',
+    'AGP': 'ES',
+    'SVQ': 'ES',
+    'BIO': 'ES',
+    'SPAIN': 'ES',
+    'SPAINCENTRAL': 'ES',
+    'MADRID': 'ES',
+    'LIS': 'PT',
+    'OPO': 'PT',
+    'FAO': 'PT',
+    'PORTUGAL': 'PT',
+    'BRU': 'BE',
+    'BELGIUM': 'BE',
+    'VIE': 'AT',
+    'AUSTRIA': 'AT',
+    'WAW': 'PL',
+    'KRK': 'PL',
+    'GDN': 'PL',
+    'WRO': 'PL',
+    'POLAND': 'PL',
+    'POLANDCENTRAL': 'PL',
+    'WARSAW': 'PL',
+    'PRG': 'CZ',
+    'CZECH': 'CZ',
+    'BUD': 'HU',
+    'HUNGARY': 'HU',
+    'OTP': 'RO',
+    'CLJ': 'RO',
+    'ROMANIA': 'RO',
+    'ATH': 'GR',
+    'SKG': 'GR',
+    'GREECE': 'GR',
+    'IST': 'TR',
+    'SAW': 'TR',
+    'ESB': 'TR',
+    'AYT': 'TR',
+    'ADB': 'TR',
+    'TURKEY': 'TR',
+    'TURKIYE': 'TR',
+    'KBP': 'UA',
+    'IEV': 'UA',
+    'ODS': 'UA',
+    'UKRAINE': 'UA',
+    'SVO': 'RU',
+    'DME': 'RU',
+    'VKO': 'RU',
+    'LED': 'RU',
+    'OVB': 'RU',
+    'SVX': 'RU',
+    'RUS': 'RU',
+    'RUSSIA': 'RU',
+    'MSQ': 'BY',
+    'BELARUS': 'BY',
+    'SOF': 'BG',
+    'ZAG': 'HR',
+    'BTS': 'SK',
+    'LJU': 'SI',
+    'TLL': 'EE',
+    'RIX': 'LV',
+    'VNO': 'LT',
+    'BEG': 'RS',
+    'LCA': 'CY',
+    'LUX': 'LU',
+    'DXB': 'AE',
+    'AUH': 'AE',
+    'DWC': 'AE',
+    'SHJ': 'AE',
+    'UAE': 'AE',
+    'UAENORTH': 'AE',
+    'UAECENTRAL': 'AE',
+    'DUBAI': 'AE',
+    'RUH': 'SA',
+    'JED': 'SA',
+    'DMM': 'SA',
+    'SAUDI': 'SA',
+    'DOH': 'QA',
+    'QATAR': 'QA',
+    'TLV': 'IL',
+    'ISRAEL': 'IL',
+    'ISRAELCENTRAL': 'IL',
+    'BAH': 'BH',
+    'MCT': 'OM',
+    'KWI': 'KW',
+    'AMM': 'JO',
+    'CAI': 'EG',
+    'EGYPT': 'EG',
+    'JNB': 'ZA',
+    'CPT': 'ZA',
+    'DUR': 'ZA',
+    'SOUTHAFRICA': 'ZA',
+    'SOUTHAFRICANORTH': 'ZA',
+    'SOUTHAFRICAWEST': 'ZA',
+    'NBO': 'KE',
+    'LOS': 'NG',
+    'ABV': 'NG',
+    'CMN': 'MA',
+    'MEX': 'MX',
+    'GDL': 'MX',
+    'MTY': 'MX',
+    'QRO': 'MX',
+    'CUN': 'MX',
+    'TIJ': 'MX',
+    'MEXICO': 'MX',
+    'MEXICOCENTRAL': 'MX',
+    'GRU': 'BR',
+    'GIG': 'BR',
+    'BSB': 'BR',
+    'CGH': 'BR',
+    'SDU': 'BR',
+    'CNF': 'BR',
+    'POA': 'BR',
+    'REC': 'BR',
+    'SSA': 'BR',
+    'CWB': 'BR',
+    'FOR': 'BR',
+    'BRAZIL': 'BR',
+    'BRAZILSOUTH': 'BR',
+    'BRAZILSOUTHEAST': 'BR',
+    'EZE': 'AR',
+    'AEP': 'AR',
+    'COR': 'AR',
+    'ARGENTINA': 'AR',
+    'SCL': 'CL',
+    'CHILE': 'CL',
+    'CHILECENTRAL': 'CL',
+    'BOG': 'CO',
+    'COLOMBIA': 'CO',
+    'LIM': 'PE',
+    'PERU': 'PE',
+    'PTY': 'PA',
+    'PANAMA': 'PA',
+  };
+
+  String normalizeRegion(String region) {
+    final clean = region.trim().toUpperCase();
+    final mapped = _regionToCountryCodeMap[clean];
+    if (mapped != null) {
+      return mapped;
+    }
+    if (clean.length == 2 && RegExp(r'^[A-Z]{2}$').hasMatch(clean)) {
+      return clean;
+    }
+    return region;
+  }
+
+  bool isTunIp(String ip) {
+    final address = InternetAddress.tryParse(ip.trim());
+    if (address == null) return false;
+    if (address.type == InternetAddressType.IPv4) {
+      final parts = ip.trim().split('.').map(int.tryParse).toList();
+      if (parts.length == 4 && parts.every((p) => p != null)) {
+        final p0 = parts[0]!;
+        final p1 = parts[1]!;
+        final p2 = parts[2]!;
+        // 198.51.100.0/24 (TEST-NET-2 / TUN Default)
+        if (p0 == 198 && p1 == 51 && p2 == 100) return true;
+        // 198.18.0.0/15 (Benchmarking / Fake-IP)
+        if (p0 == 198 && (p1 == 18 || p1 == 19)) return true;
+      }
+    } else if (address.type == InternetAddressType.IPv6) {
+      final clean = ip.trim().toLowerCase();
+      // fdfe:dcba:9876::/126 (Default TUN IPv6)
+      if (clean.startsWith('fdfe:dcba:9876:')) return true;
+    }
+    return false;
+  }
+
+  IpCategory classifyIp(String ip) {
+    if (isTunIp(ip)) {
+      return IpCategory.tun;
+    }
+    if (isPrivateOrReservedIp(ip)) {
+      return IpCategory.lan;
+    }
+    return IpCategory.public;
+  }
+
+  bool isPrivateOrReservedIp(String ip) {
+    final address = InternetAddress.tryParse(ip.trim());
+    if (address == null) return false;
+
+    if (address.isLoopback || address.isLinkLocal || address.isMulticast) {
+      return true;
+    }
+
+    if (address.type == InternetAddressType.IPv4) {
+      final parts = ip.trim().split('.').map(int.tryParse).toList();
+      if (parts.length == 4 && parts.every((p) => p != null)) {
+        final p0 = parts[0]!;
+        final p1 = parts[1]!;
+        final p2 = parts[2]!;
+
+        // 0.0.0.0/8 (Current network / RFC 1122)
+        if (p0 == 0) return true;
+
+        // 10.0.0.0/8 (Private / RFC 1918)
+        if (p0 == 10) return true;
+
+        // 100.64.0.0/10 (CGNAT / Shared / RFC 6598: 100.64.0.0 - 100.127.255.255)
+        if (p0 == 100 && (p1 >= 64 && p1 <= 127)) return true;
+
+        // 127.0.0.0/8 (Loopback / RFC 1122)
+        if (p0 == 127) return true;
+
+        // 169.254.0.0/16 (Link Local / RFC 3927)
+        if (p0 == 169 && p1 == 254) return true;
+
+        // 172.16.0.0/12 (Private / RFC 1918: 172.16.0.0 - 172.31.255.255)
+        if (p0 == 172 && (p1 >= 16 && p1 <= 31)) return true;
+
+        // 192.0.0.0/24 (IETF Protocol Assignments / RFC 6890)
+        if (p0 == 192 && p1 == 0 && p2 == 0) return true;
+
+        // 192.0.2.0/24 (TEST-NET-1 / RFC 5737)
+        if (p0 == 192 && p1 == 0 && p2 == 2) return true;
+
+        // 192.88.99.0/24 (6to4 Relay Anycast / RFC 7526)
+        if (p0 == 192 && p1 == 88 && p2 == 99) return true;
+
+        // 192.168.0.0/16 (Private / RFC 1918)
+        if (p0 == 192 && p1 == 168) return true;
+
+        // 198.18.0.0/15 (Benchmarking / Fake-IP / RFC 2544: 198.18.0.0 - 198.19.255.255)
+        if (p0 == 198 && (p1 == 18 || p1 == 19)) return true;
+
+        // 198.51.100.0/24 (TEST-NET-2 / TUN Default / RFC 5737)
+        if (p0 == 198 && p1 == 51 && p2 == 100) return true;
+
+        // 203.0.113.0/24 (TEST-NET-3 / RFC 5737)
+        if (p0 == 203 && p1 == 0 && p2 == 113) return true;
+
+        // 224.0.0.0/4 (Multicast / RFC 5771)
+        if (p0 >= 224 && p0 <= 239) return true;
+
+        // 240.0.0.0/4 (Reserved / RFC 1112)
+        if (p0 >= 240) return true;
+      }
+    } else if (address.type == InternetAddressType.IPv6) {
+      final clean = ip.trim().toLowerCase();
+      // ::1 (Loopback), :: (Unspecified)
+      if (clean == '::1' || clean == '::') return true;
+      // fe80::/10 (Link-local)
+      if (clean.startsWith('fe8') ||
+          clean.startsWith('fe9') ||
+          clean.startsWith('fea') ||
+          clean.startsWith('feb')) {
+        return true;
+      }
+      // fc00::/7 (Unique Local Address ULA: fc00:: ~ fdff::)
+      if (clean.startsWith('fc') || clean.startsWith('fd')) {
+        return true;
+      }
+      // ff00::/8 (Multicast)
+      if (clean.startsWith('ff')) {
+        return true;
+      }
+      // 2001:db8::/32 (Documentation)
+      if (clean.startsWith('2001:db8:')) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   String get id {
@@ -173,6 +782,10 @@ class Utils {
   }) {
     if (system.isLinux) {
       return 'assets/images/icon.png';
+    }
+
+    if (system.isMacOS && isStart) {
+      return 'assets/images/icon_black.png';
     }
 
     final suffix = system.isWindows ? 'ico' : 'png';
@@ -366,6 +979,98 @@ class Utils {
     return '';
   }
 
+  Future<List<String>> getLocalGateways() async {
+    if (Platform.isLinux) {
+      return _getLinuxGateways();
+    }
+    if (Platform.isMacOS) {
+      return _getMacOSGateways();
+    }
+    if (Platform.isWindows) {
+      return _getWindowsGateways();
+    }
+    return [];
+  }
+
+  Future<List<String>> _getLinuxGateways() async {
+    try {
+      final routeFile = File('/proc/net/route');
+      if (!await routeFile.exists()) return [];
+
+      final lines = await routeFile.readAsLines();
+      final gateways = <String>[];
+      // Header: Iface Destination Gateway Flags RefCnt Use Metric Mask ...
+      for (final line in lines.skip(1)) {
+        final parts = line.trim().split(RegExp(r'\s+'));
+        if (parts.length < 3) continue;
+        if (parts[1] != '00000000') continue; // default route destination
+        final gwHex = parts[2];
+        if (gwHex == '00000000') continue; // no gateway
+        // /proc/net/route stores IPv4 in little-endian hex
+        final bytes = [
+          int.parse(gwHex.substring(6, 8), radix: 16),
+          int.parse(gwHex.substring(4, 6), radix: 16),
+          int.parse(gwHex.substring(2, 4), radix: 16),
+          int.parse(gwHex.substring(0, 2), radix: 16),
+        ];
+        gateways.add(bytes.join('.'));
+      }
+      return gateways;
+    } catch (e) {
+      commonPrint.log('Smart Auto Stop: Linux gateway error: $e');
+      return [];
+    }
+  }
+
+  Future<List<String>> _getMacOSGateways() async {
+    try {
+      final result = await Process.run('route', ['-n', 'get', 'default']);
+      if (result.exitCode != 0) return [];
+
+      final stdout = result.stdout.toString();
+      for (final line in stdout.split('\n')) {
+        final trimmed = line.trim();
+        if (!trimmed.startsWith('gateway:')) continue;
+        final gateway = trimmed.substring('gateway:'.length).trim();
+        // Exclude IPv6/link-local gateways
+        if (gateway.isNotEmpty && !gateway.contains(':')) {
+          return [gateway];
+        }
+      }
+      return [];
+    } catch (e) {
+      commonPrint.log('Smart Auto Stop: macOS gateway error: $e');
+      return [];
+    }
+  }
+
+  Future<List<String>> _getWindowsGateways() async {
+    try {
+      final result = await Process.run(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          'Get-NetRoute -DestinationPrefix \'0.0.0.0/0\' '
+              '| Select-Object -ExpandProperty NextHop',
+        ],
+      );
+      if (result.exitCode != 0) return [];
+
+      final gateways = <String>[];
+      for (final line in result.stdout.toString().split('\n')) {
+        final gateway = line.trim();
+        if (gateway.isEmpty) continue;
+        if (!RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(gateway)) continue;
+        gateways.add(gateway);
+      }
+      return gateways;
+    } catch (e) {
+      commonPrint.log('Smart Auto Stop: Windows gateway error: $e');
+      return [];
+    }
+  }
+
   SingleActivator controlSingleActivator(LogicalKeyboardKey trigger) {
     final control = system.isMacOS ? false : true;
     return SingleActivator(trigger, control: control, meta: !control);
@@ -390,15 +1095,54 @@ class Utils {
     return secret.toString();
   }
 
+  String patchYamlConfig(String content) {
+    final sanitized = content.replaceAllMapped(
+      RegExp(r'^[ \t]+', multiLine: true),
+      (match) => match.group(0)!.replaceAll('\t', '  '),
+    );
+    final shortIdExp = RegExp(
+      r'(?<=\bshort-id\s*:\s*)(?!["\x27{\[\s])([0-9a-fA-F]+)(?=\s*(?:$|[,\s#\}]))',
+      multiLine: true,
+    );
+    return sanitized.replaceAllMapped(shortIdExp, (match) {
+      return '"${match.group(1)}"';
+    });
+  }
+
   String patchValidateConfig(String content) {
+    final patched = patchYamlConfig(content);
     final regExp = RegExp(
       r'^(\s*geodata-mode\s*:\s*)(true|\x27true\x27|\x22true\x22)(.*)$',
       multiLine: true,
       caseSensitive: false,
     );
-    return content.replaceAllMapped(regExp, (match) {
+    return patched.replaceAllMapped(regExp, (match) {
       return '${match.group(1)}false${match.group(3)}';
     });
+  }
+
+  String encryptSecret(String raw) {
+    if (raw.isEmpty) return raw;
+    const salt = 'Bettbox';
+    final step1 = base64.encode(utf8.encode(raw));
+    final step2 = base64.encode(utf8.encode('$salt:$step1'));
+    return 'ENC~$step2';
+  }
+
+  String decryptSecret(String text) {
+    if (!text.startsWith('ENC~')) return text;
+    try {
+      const salt = 'Bettbox';
+      final cipher = text.substring(4);
+      final salted = utf8.decode(base64.decode(cipher));
+      if (salted.startsWith('$salt:')) {
+        final step1 = salted.substring(salt.length + 1);
+        return utf8.decode(base64.decode(step1));
+      }
+      return text;
+    } catch (_) {
+      return text;
+    }
   }
 }
 

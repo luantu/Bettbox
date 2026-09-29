@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'chip.dart';
+import 'text.dart';
 
 typedef OnKeywordsUpdateCallback = void Function(List<String> keywords);
 
@@ -104,6 +105,11 @@ class CommonScaffoldState extends State<CommonScaffold> {
         inputDecorationTheme: InputDecorationTheme(
           hintStyle: theme.inputDecorationTheme.hintStyle,
           border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          errorBorder: InputBorder.none,
+          focusedErrorBorder: InputBorder.none,
         ),
       ),
       child: child,
@@ -202,7 +208,7 @@ class CommonScaffoldState extends State<CommonScaffold> {
             },
             decoration: InputDecoration(hintText: appLocalizations.search),
           )
-        : Text(
+        : EmojiText(
             !_isEdit
                 ? widget.title!
                 : appLocalizations.selectedCountTitle(

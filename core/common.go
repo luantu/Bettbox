@@ -11,6 +11,8 @@ import (
 	"github.com/metacubex/mihomo/adapter/provider"
 	"github.com/metacubex/mihomo/common/batch"
 	"github.com/metacubex/mihomo/component/dialer"
+	"github.com/metacubex/mihomo/component/geodata"
+	"github.com/metacubex/mihomo/component/mmdb"
 	"github.com/metacubex/mihomo/component/resolver"
 	"github.com/metacubex/mihomo/config"
 	"github.com/metacubex/mihomo/constant"
@@ -23,8 +25,10 @@ import (
 	rp "github.com/metacubex/mihomo/rules/provider"
 	"github.com/metacubex/mihomo/tunnel"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 )
@@ -174,22 +178,13 @@ func patchSelectGroup(mapping map[string]string) {
 
 func defaultSetupParams() *SetupParams {
 	return &SetupParams{
-		Config:      config.DefaultRawConfig(),
 		TestURL:     "https://g.cn/generate_204",
 		SelectedMap: map[string]string{},
 	}
 }
 
 func readFile(path string) ([]byte, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, err
+	return os.ReadFile(path)
 }
 
 func updateConfig(params *UpdateParams) {
@@ -268,6 +263,9 @@ func updateConfig(params *UpdateParams) {
 	if params.Tun != nil {
 		general.Tun.Enable = params.Tun.Enable
 		general.Tun.AutoRoute = *params.Tun.AutoRoute
+		if params.Tun.AutoRedirect != nil {
+			general.Tun.AutoRedirect = *params.Tun.AutoRedirect
+		}
 		general.Tun.Device = *params.Tun.Device
 		general.Tun.RouteAddress = *params.Tun.RouteAddress
 		if params.Tun.RouteExcludeAddress != nil {
@@ -279,50 +277,141 @@ func updateConfig(params *UpdateParams) {
 		general.Tun.DNSHijack = *params.Tun.DNSHijack
 		general.Tun.Stack = *params.Tun.Stack
 		general.Tun.DisableICMPForwarding = *params.Tun.DisableICMPForwarding
+		if params.Tun.CongestionController != nil {
+			general.Tun.CongestionController = *params.Tun.CongestionController
+		}
 	}
 
 	updateListeners()
+}
+
+var (
+	mmdbUnloaded bool
+	asnUnloaded  bool
+)
+
+func checkActiveGeoUsage() (hasMMDB, hasSite, hasASN bool) {
+	for _, r := range tunnel.Rules() {
+		if r == nil {
+			continue
+		}
+		switch r.RuleType() {
+		case constant.GEOIP, constant.SrcGEOIP:
+			hasMMDB = true
+		case constant.GEOSITE:
+			hasSite = true
+		case constant.IPASN, constant.SrcIPASN:
+			hasASN = true
+		case constant.AND, constant.OR, constant.NOT, constant.SubRules:
+			payload := strings.ToUpper(r.Payload())
+			if strings.Contains(payload, "(GEOIP,") || strings.Contains(payload, "(SRCGEOIP,") {
+				hasMMDB = true
+			}
+			if strings.Contains(payload, "(GEOSITE,") {
+				hasSite = true
+			}
+			if strings.Contains(payload, "(IPASN,") || strings.Contains(payload, "(SRCIPASN,") {
+				hasASN = true
+			}
+		}
+		if hasMMDB && hasSite && hasASN {
+			return
+		}
+	}
+
+	if currentRawConfig != nil {
+		if !hasSite && currentRawConfig.DNS.Enable && currentRawConfig.DNS.NameServerPolicy != nil {
+			for pair := currentRawConfig.DNS.NameServerPolicy.Oldest(); pair != nil; pair = pair.Next() {
+				if strings.HasPrefix(strings.ToLower(pair.Key), "geosite:") {
+					hasSite = true
+					break
+				}
+			}
+		}
+		if !hasMMDB && currentRawConfig.DNS.Enable && len(currentRawConfig.DNS.Fallback) > 0 && currentRawConfig.DNS.FallbackFilter.GeoIP {
+			hasMMDB = true
+		}
+		if !hasSite && currentRawConfig.DNS.Enable && len(currentRawConfig.DNS.Fallback) > 0 && len(currentRawConfig.DNS.FallbackFilter.GeoSite) > 0 {
+			hasSite = true
+		}
+		if !hasSite && currentRawConfig.Sniffer.Enable {
+			for _, d := range currentRawConfig.Sniffer.ForceDomain {
+				if strings.HasPrefix(strings.ToLower(d), "geosite:") {
+					hasSite = true
+					break
+				}
+			}
+			if !hasSite {
+				for _, d := range currentRawConfig.Sniffer.SkipDomain {
+					if strings.HasPrefix(strings.ToLower(d), "geosite:") {
+						hasSite = true
+						break
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
+func tryUnloadGeoData() {
+	hasMMDB, _, hasASN := checkActiveGeoUsage()
+
+	if hasMMDB {
+		mmdbUnloaded = false
+	} else if !mmdbUnloaded && geodata.GeoIpEnable() {
+		if _, err := os.Stat(constant.Path.MMDB()); err == nil {
+			if reader := mmdb.IPInstance().Reader; reader != nil {
+				_ = reader.Close()
+			}
+			mmdb.ReloadIP()
+			mmdbUnloaded = true
+		}
+	}
+
+	if hasASN {
+		asnUnloaded = false
+	} else if !asnUnloaded && geodata.ASNEnable() {
+		if _, err := os.Stat(constant.Path.ASN()); err == nil {
+			if reader := mmdb.ASNInstance().Reader; reader != nil {
+				_ = reader.Close()
+			}
+			mmdb.ReloadASN()
+			asnUnloaded = true
+		}
+	}
 }
 
 func setupConfig(params *SetupParams) error {
 	runLock.Lock()
 	defer runLock.Unlock()
 
-	if params.Config != nil && params.Config.ProxyGroup != nil {
-		for _, group := range params.Config.ProxyGroup {
-			if elm, ok := group["tolerance"]; ok {
-				switch v := elm.(type) {
-				case json.Number:
-					if i, err := v.Int64(); err == nil {
-						group["tolerance"] = int(i)
-					}
-				case float64:
-					group["tolerance"] = int(v)
-				case float32:
-					group["tolerance"] = int(v)
-				}
-			}
-		}
-	}
-
 	constant.DefaultTestURL = params.TestURL
-	if params.OverrideTestUrl && params.Config != nil {
-		if params.Config.ProxyGroup != nil {
-			for _, group := range params.Config.ProxyGroup {
-				group["url"] = params.TestURL
-			}
-		}
-	}
 
-	var err error
-	currentConfig, err = config.ParseRawConfig(params.Config)
+	buf, err := readFile(filepath.Join(constant.Path.HomeDir(), constant.Path.Config()))
 	if err != nil {
 		return err
 	}
-	currentRawConfig = params.Config
+	rawCfg, err := config.UnmarshalRawConfig(buf)
+	if err != nil {
+		return err
+	}
+
+	if params.OverrideTestUrl && rawCfg.ProxyGroup != nil {
+		for _, group := range rawCfg.ProxyGroup {
+			group["url"] = params.TestURL
+		}
+	}
+
+	currentConfig, err = config.ParseRawConfig(rawCfg)
+	if err != nil {
+		return err
+	}
+	currentRawConfig = rawCfg
 	hub.ApplyConfig(currentConfig)
 	patchSelectGroup(params.SelectedMap)
 	updateListeners()
+	tryUnloadGeoData()
 	runtime.GC()
 	debug.FreeOSMemory()
 	return nil

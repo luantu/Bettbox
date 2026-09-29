@@ -59,11 +59,6 @@ class ClashCore {
 
   Future<bool> init() async {
     await initGeo();
-    if (globalState.config.appSetting.openLogs) {
-      clashCore.startLog();
-    } else {
-      clashCore.stopLog();
-    }
     final homeDirPath = await appPath.homeDirPath;
     return await clashInterface.init(
       InitParams(homeDir: homeDirPath, version: globalState.appState.version),
@@ -139,8 +134,11 @@ class ClashCore {
       final orderedGroupNames = <String>[
         UsedProxy.GLOBAL.name,
         ...allList.where((e) {
-          final proxy = allProxies[e] as Map<String, dynamic>?;
-          return GroupTypeExtension.valueList.contains(proxy?['type']);
+          final proxy = allProxies[e];
+          if (proxy is Map) {
+            return GroupTypeExtension.valueList.contains(proxy['type']);
+          }
+          return false;
         }),
       ];
       final groupNames = <String>[
@@ -158,7 +156,10 @@ class ClashCore {
           proxyData.cast<String, dynamic>(),
         );
         group['all'] = ((group['all'] ?? []) as List)
-            .map((name) => allProxies[name])
+            .map((name) {
+              final p = allProxies[name];
+              return p is Map ? Map<String, dynamic>.from(p) : null;
+            })
             .whereType<Map<String, dynamic>>()
             .toList();
         return group;
@@ -290,7 +291,14 @@ class ClashCore {
     final profilePath = await appPath.getProfilePath(id);
     final res = await clashInterface.getConfig(profilePath, ageSecretKey: ageSecretKey);
     if (res.isSuccess) {
-      return res.data as Map<String, dynamic>;
+      final data = res.data;
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+      return <String, dynamic>{};
     } else {
       throw res.message;
     }
@@ -338,6 +346,18 @@ class ClashCore {
     return int.parse(value);
   }
 
+  Future<CoreStatus?> getCoreStatus() async {
+    final value = await clashInterface.getCoreStatus();
+    if (value.isEmpty) {
+      return null;
+    }
+    final decoded = json.decode(value);
+    if (decoded is! Map) {
+      return null;
+    }
+    return CoreStatus.fromJson(Map<String, dynamic>.from(decoded));
+  }
+
   void resetTraffic() {
     clashInterface.resetTraffic();
   }
@@ -348,6 +368,50 @@ class ClashCore {
 
   void stopLog() {
     clashInterface.stopLog();
+  }
+
+  Future<List<Log>> getLogs() async {
+    final res = await clashInterface.getLogs();
+    if (res.isEmpty) {
+      return [];
+    }
+    try {
+      final logsRaw = json.decode(res) as List? ?? [];
+      return logsRaw.map((e) => Log.fromJson(e)).toList();
+    } catch (e) {
+      commonPrint.log('Failed to parse logs: $e');
+      return [];
+    }
+  }
+
+  void clearLogs() {
+    clashInterface.clearLogs();
+  }
+
+  Future<List<TrackerInfo>> getRequests() async {
+    final res = await clashInterface.getRequests();
+    if (res.isEmpty) {
+      return [];
+    }
+    try {
+      final requestsRaw = json.decode(res) as List? ?? [];
+      return requestsRaw.map((e) => TrackerInfo.fromJson(e)).toList();
+    } catch (e) {
+      commonPrint.log('Failed to parse requests: $e');
+      return [];
+    }
+  }
+
+  void startTrackRequests() {
+    clashInterface.startTrackRequests();
+  }
+
+  void stopTrackRequests() {
+    clashInterface.stopTrackRequests();
+  }
+
+  void clearRequests() {
+    clashInterface.clearRequests();
   }
 
   Future<void> requestGc({bool forceFreeOSMemory = false}) async {

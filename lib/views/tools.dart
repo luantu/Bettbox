@@ -114,8 +114,8 @@ class _ToolViewState extends ConsumerState<ToolsView> {
                       color: context.colorScheme.outlineVariant.withValues(
                         alpha:
                             context.colorScheme.brightness == Brightness.light
-                            ? 0.3
-                            : 0.2,
+                            ? 0.6
+                            : 0.45,
                       ),
                       indent: 16,
                       endIndent: 16,
@@ -448,16 +448,17 @@ class _ToolViewState extends ConsumerState<ToolsView> {
           const ApplicationSettingView(),
         ),
       ),
-      _SearchItem(
-        title: appLocalizations.silentLaunch,
-        subtitle: appLocalizations.silentLaunchDesc,
-        category: appCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.application,
-          const ApplicationSettingView(),
+      if (system.isDesktop)
+        _SearchItem(
+          title: appLocalizations.silentLaunch,
+          subtitle: appLocalizations.silentLaunchDesc,
+          category: appCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.application,
+            const ApplicationSettingView(),
+          ),
         ),
-      ),
       _SearchItem(
         title: appLocalizations.autoRun,
         subtitle: appLocalizations.autoRunDesc,
@@ -468,9 +469,42 @@ class _ToolViewState extends ConsumerState<ToolsView> {
           const ApplicationSettingView(),
         ),
       ),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.exclude,
+          subtitle: appLocalizations.excludeDesc,
+          category: appCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.application,
+            const ApplicationSettingView(),
+          ),
+        ),
+      if (system.isDesktop && (system.isWindows || system.isLinux))
+        _SearchItem(
+          title: appLocalizations.alwaysShowTitleBar,
+          subtitle: appLocalizations.alwaysShowTitleBarDesc,
+          category: appCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.application,
+            const ApplicationSettingView(),
+          ),
+        ),
+      if (system.isMacOS)
+        _SearchItem(
+          title: appLocalizations.keepDockIcon,
+          subtitle: appLocalizations.keepDockIconDesc,
+          category: appCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.application,
+            const ApplicationSettingView(),
+          ),
+        ),
       _SearchItem(
-        title: appLocalizations.exclude,
-        subtitle: appLocalizations.excludeDesc,
+        title: appLocalizations.showStartSwitch,
+        subtitle: appLocalizations.showStartSwitchDesc,
         category: appCategory,
         onTap: (context, _) => _pushPage(
           context,
@@ -478,26 +512,17 @@ class _ToolViewState extends ConsumerState<ToolsView> {
           const ApplicationSettingView(),
         ),
       ),
-      _SearchItem(
-        title: appLocalizations.alwaysShowTitleBar,
-        subtitle: appLocalizations.alwaysShowTitleBarDesc,
-        category: appCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.application,
-          const ApplicationSettingView(),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.navBarHapticFeedback,
+          subtitle: appLocalizations.navBarHapticFeedbackDesc,
+          category: appCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.application,
+            const ApplicationSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.navBarHapticFeedback,
-        subtitle: appLocalizations.navBarHapticFeedbackDesc,
-        category: appCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.application,
-          const ApplicationSettingView(),
-        ),
-      ),
       _SearchItem(
         title: appLocalizations.autoCloseConnections,
         subtitle: appLocalizations.autoCloseConnectionsDesc,
@@ -551,36 +576,39 @@ class _ToolViewState extends ConsumerState<ToolsView> {
           const OtherSettingView(),
         ),
       ),
-      _SearchItem(
-        title: appLocalizations.dozeSuspend,
-        subtitle: appLocalizations.dozeSuspendDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.dozeSuspend,
+          subtitle: appLocalizations.dozeSuspendDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.quickResponse,
-        subtitle: appLocalizations.quickResponseDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.quickResponse,
+          subtitle: appLocalizations.quickResponseDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.storeFix,
-        subtitle: appLocalizations.storeFixDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.storeFix,
+          subtitle: appLocalizations.storeFixDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
       _SearchItem(
         title: appLocalizations.disableQuic,
         subtitle: appLocalizations.disableQuicDesc,
@@ -601,66 +629,83 @@ class _ToolViewState extends ConsumerState<ToolsView> {
           const OtherSettingView(),
         ),
       ),
-      _SearchItem(
-        title: appLocalizations.networkSpeedNotification,
-        subtitle: appLocalizations.networkSpeedNotificationDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.notificationHighPriority,
+          subtitle: appLocalizations.notificationHighPriorityDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.trayEnhancement,
-        subtitle: appLocalizations.trayEnhancementDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.networkSpeedNotification,
+          subtitle: appLocalizations.networkSpeedNotificationDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.enableTraySpeed,
-        subtitle: appLocalizations.enableTraySpeedDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (!system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.trayEnhancement,
+          subtitle: appLocalizations.trayEnhancementDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.highPriority,
-        subtitle: appLocalizations.highPriorityDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isMacOS)
+        _SearchItem(
+          title: appLocalizations.enableTraySpeed,
+          subtitle: appLocalizations.enableTraySpeedDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.networkFix,
-        subtitle: appLocalizations.networkFixDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isWindows)
+        _SearchItem(
+          title: appLocalizations.highPriority,
+          subtitle: appLocalizations.highPriorityDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
-      _SearchItem(
-        title: appLocalizations.batteryOptimization,
-        subtitle: appLocalizations.batteryOptimizationDesc,
-        category: otherSettingsCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.otherSettings,
-          const OtherSettingView(),
+      if (system.isWindows)
+        _SearchItem(
+          title: appLocalizations.networkFix,
+          subtitle: appLocalizations.networkFixDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
         ),
-      ),
+      if (system.isAndroid)
+        _SearchItem(
+          title: appLocalizations.batteryOptimization,
+          subtitle: appLocalizations.batteryOptimizationDesc,
+          category: otherSettingsCategory,
+          onTap: (context, _) => _pushPage(
+            context,
+            appLocalizations.otherSettings,
+            const OtherSettingView(),
+          ),
+        ),
     ]);
 
     final generalCategory = '$configCategory/${appLocalizations.general}';
@@ -754,16 +799,6 @@ class _ToolViewState extends ConsumerState<ToolsView> {
       _SearchItem(
         title: appLocalizations.tcpConcurrent,
         subtitle: appLocalizations.tcpConcurrentDesc,
-        category: generalCategory,
-        onTap: (context, _) => _pushPage(
-          context,
-          appLocalizations.general,
-          const _GeneralListView(),
-        ),
-      ),
-      _SearchItem(
-        title: appLocalizations.geodataLoader,
-        subtitle: appLocalizations.geodataLoaderDesc,
         category: generalCategory,
         onTap: (context, _) => _pushPage(
           context,
@@ -1407,7 +1442,7 @@ class _ToolViewState extends ConsumerState<ToolsView> {
         },
         padding: EdgeInsets.only(
           bottom:
-              20 +
+              (globalState.isAndroidTV ? 80.0 : 20.0) +
               (isMobileView ? getFloatingBottomBarReserveHeight(context) : 0),
           top: 8,
         ),

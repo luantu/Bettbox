@@ -4,8 +4,8 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
-
 #include <glib/gstdio.h>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -119,6 +119,7 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_default_size(window, 1280, 720);
   gtk_widget_realize(GTK_WIDGET(window));
 
+  // Save window reference for single-instance activation
   main_window = window;
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();

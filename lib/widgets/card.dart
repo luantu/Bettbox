@@ -8,8 +8,9 @@ import 'text.dart';
 class Info {
   final String label;
   final IconData? iconData;
+  final TextStyle? style;
 
-  const Info({required this.label, this.iconData});
+  const Info({required this.label, this.iconData, this.style});
 }
 
 class InfoHeader extends StatelessWidget {
@@ -51,9 +52,13 @@ class InfoHeader extends StatelessWidget {
                       info.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: context.colorScheme.onSurfaceVariant,
-                      ),
+                      style:
+                          (info.style ?? Theme.of(context).textTheme.titleSmall)
+                              ?.copyWith(
+                                color:
+                                    info.style?.color ??
+                                    context.colorScheme.onSurfaceVariant,
+                              ),
                     ),
                   ),
                 ),
@@ -68,6 +73,44 @@ class InfoHeader extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class SmoothRoundedRectangleBorder extends RoundedRectangleBorder {
+  const SmoothRoundedRectangleBorder({
+    super.side,
+    super.borderRadius = BorderRadius.zero,
+  });
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    switch (side.style) {
+      case BorderStyle.none:
+        break;
+      case BorderStyle.solid:
+        final borderRect = borderRadius.resolve(textDirection).toRRect(rect);
+        if (side.width <= 0.0) {
+          canvas.drawRRect(borderRect, side.toPaint());
+        } else {
+          final strokeRect = borderRect.deflate(side.width / 2.0);
+          final paint = side.toPaint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = side.width
+            ..isAntiAlias = true;
+          canvas.drawRRect(strokeRect, paint);
+        }
+    }
+  }
+
+  @override
+  SmoothRoundedRectangleBorder copyWith({
+    BorderSide? side,
+    BorderRadiusGeometry? borderRadius,
+  }) {
+    return SmoothRoundedRectangleBorder(
+      side: side ?? this.side,
+      borderRadius: borderRadius ?? this.borderRadius,
     );
   }
 }
@@ -114,10 +157,13 @@ class CommonCard extends StatelessWidget {
         states.contains(WidgetState.pressed)) {
       return BorderSide(color: hoverColor);
     }
+    final isLight = colorScheme.brightness == Brightness.light;
     return BorderSide(
       color: isSelected
           ? colorScheme.primary
-          : colorScheme.surfaceContainerHighest,
+          : colorScheme.outlineVariant.withValues(
+              alpha: isLight ? 0.45 : 0.25,
+            ),
     );
   }
 
@@ -163,11 +209,11 @@ class CommonCard extends StatelessWidget {
     final isInteractive = onPressed != null || onLongPress != null;
     final card = OutlinedButton(
       onLongPress: onLongPress,
-      clipBehavior: Clip.hardEdge,
+      clipBehavior: Clip.antiAlias,
       style: ButtonStyle(
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
         shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(
+          SmoothRoundedRectangleBorder(
             borderRadius: BorderRadius.circular(actualRadius),
           ),
         ),
@@ -224,6 +270,7 @@ class SettingsBlock extends StatelessWidget {
           InfoHeader(info: Info(label: title)),
           Card(
             color: context.colorScheme.surfaceContainer,
+            clipBehavior: Clip.antiAlias,
             child: Column(children: settings),
           ),
         ],

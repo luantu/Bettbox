@@ -39,8 +39,15 @@ class _VpnContainerState extends ConsumerState<VpnManager> {
       final onlyNetworkSpeedChanged = prevProps.copyWith(
         networkSpeedNotification: nextProps.networkSpeedNotification,
       ) == nextProps;
+
+      final onlyHighPriorityNotificationChanged = prevProps.copyWith(
+        highPriorityNotification: nextProps.highPriorityNotification,
+      ) == nextProps;
       
-      if (onlySmartAutoStopChanged || onlyQuickResponseChanged || onlyNetworkSpeedChanged) {
+      if (onlySmartAutoStopChanged ||
+          onlyQuickResponseChanged ||
+          onlyNetworkSpeedChanged ||
+          onlyHighPriorityNotificationChanged) {
         return; // No tip needed
       }
       
@@ -54,9 +61,8 @@ class _VpnContainerState extends ConsumerState<VpnManager> {
         globalState.showNotifier(
           appLocalizations.vpnTip,
           onAction: () async {
-            await globalState.appController.updateStatus(false);
-            await Future.delayed(const Duration(milliseconds: 500));
-            await globalState.appController.updateStatus(true);
+            await globalState.appController.restartCore();
+            globalState.showNotifier(appLocalizations.success);
           },
           actionLabel: appLocalizations.restart,
           showCountdown: true,

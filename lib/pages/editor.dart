@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/enum/enum.dart' hide Mode;
 import 'package:bett_box/models/common.dart';
+import 'package:bett_box/plugins/clipboard_ext.dart';
 import 'package:bett_box/providers/app.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/widgets/widgets.dart';
@@ -67,6 +68,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   late UndoRedoController _undoController;
   late TextEditingController _titleController;
   final _focusNode = FocusNode();
+  late final FocusNode _titleFocusNode;
+  late final FocusNode _saveButtonFocusNode;
+  VoidCallback? _removePasteHandler;
   bool _lineWrap = false;
   late final int _lineCount;
   bool _isLoading = true;
@@ -84,6 +88,40 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   @override
   void initState() {
     super.initState();
+    _saveButtonFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (!globalState.isAndroidTV || event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          if (widget.titleEditable && !widget.readOnly && !widget.simple) {
+            _titleFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+    _titleFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (!globalState.isAndroidTV || event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          if (_titleController.selection.baseOffset >=
+                  _titleController.text.length ||
+              _titleController.text.isEmpty) {
+            _saveButtonFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _saveButtonFocusNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+    );
     _lineCount = widget.content.split('\n').length;
     _lineWrap = !widget.readOnly && !_isLineWrapDisabled;
     _controller = CodeForgeController();
@@ -93,6 +131,10 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     _findController = _EditorFindController(_controller);
     _undoController = UndoRedoController();
     _titleController = TextEditingController(text: widget.title);
+
+    if (system.isWindows) {
+      _removePasteHandler = clipboardExt.addHandler(_handleNativePaste);
+    }
 
     final loadingStopwatch = Stopwatch()..start();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -110,14 +152,26 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     });
   }
 
+  /// Handles a native paste command (Windows clipboard history) while the
+  /// editor holds focus. Returns false so other handlers can take over.
+  Future<bool> _handleNativePaste() async {
+    if (widget.readOnly || widget.simple) return false;
+    if (!_focusNode.hasFocus) return false;
+    await _controller.paste();
+    return true;
+  }
+
   @override
   void dispose() {
+    _removePasteHandler?.call();
     _controller.text = '';
     _findController.dispose();
     _undoController.dispose();
     _controller.dispose();
     _titleController.dispose();
+    _titleFocusNode.dispose();
     _focusNode.dispose();
+    _saveButtonFocusNode.dispose();
     super.dispose();
   }
 
@@ -145,7 +199,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     if (widget.onSave == null) return;
     if (widget.readOnly || widget.simple) return;
     if (_isLoading) return;
-    if (_controller.text == widget.content &&
+    final isNewScript = widget.title.isEmpty;
+    if (!isNewScript &&
+        _controller.text == widget.content &&
         _titleController.text == widget.title) {
       return;
     }
@@ -280,6 +336,23 @@ class _EditorPageState extends ConsumerState<EditorPage> {
 
     return CommonPopScope(
       onPop: () async {
+        if (globalState.isAndroidTV &&
+            (_focusNode.hasFocus || _titleFocusNode.hasFocus)) {
+          final isNewScript = widget.title.isEmpty;
+          final hasChanges =
+              isNewScript ||
+              _controller.text != widget.content ||
+              _titleController.text != widget.title;
+          final canSave =
+              hasChanges &&
+              widget.onSave != null &&
+              !widget.simple &&
+              !widget.readOnly;
+          if (canSave) {
+            _saveButtonFocusNode.requestFocus();
+            return false;
+          }
+        }
         if (widget.onPop == null) {
           return true;
         }
@@ -313,10 +386,21 @@ class _EditorPageState extends ConsumerState<EditorPage> {
           child: CommonScaffold(
             appBar: AppBar(
               title: TextField(
+                focusNode: _titleFocusNode,
                 enabled: widget.titleEditable && !readOnly,
                 controller: _titleController,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) {
+                  _saveButtonFocusNode.requestFocus();
+                },
                 decoration: InputDecoration(
-                  border: _NoInputBorder(),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
+                  focusedErrorBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
                   hintText: appLocalizations.unnamed,
                 ),
                 style: context.textTheme.titleLarge,
@@ -325,16 +409,45 @@ class _EditorPageState extends ConsumerState<EditorPage> {
               actions: genActions([
                 if (widget.onSave != null && !readOnly)
                   _wrapTitleController(
-                    () => IconButton(
-                      onPressed:
+                    () {
+                      final isNewScript = widget.title.isEmpty;
+                      final canSave =
                           !_isLoading &&
-                              (_controller.text != widget.content ||
-                                  _titleController.text != widget.title)
-                          ? () => _handleSave(context)
-                          : null,
-                      tooltip: appLocalizations.save,
-                      icon: const Icon(Icons.save_sharp),
-                    ),
+                          (isNewScript ||
+                              _controller.text != widget.content ||
+                              _titleController.text != widget.title);
+                      return IconButton(
+                        focusNode: _saveButtonFocusNode,
+                        style: globalState.isAndroidTV
+                            ? ButtonStyle(
+                                backgroundColor:
+                                    WidgetStateProperty.resolveWith((states) {
+                                      if (states.contains(
+                                        WidgetState.focused,
+                                      )) {
+                                        return context.colorScheme.primary
+                                            .withValues(alpha: 0.2);
+                                      }
+                                      return null;
+                                    }),
+                                side: WidgetStateBorderSide.resolveWith((
+                                  states,
+                                ) {
+                                  if (states.contains(WidgetState.focused)) {
+                                    return BorderSide(
+                                      color: context.colorScheme.primary,
+                                      width: 2,
+                                    );
+                                  }
+                                  return null;
+                                }),
+                              )
+                            : null,
+                        onPressed: canSave ? () => _handleSave(context) : null,
+                        tooltip: appLocalizations.save,
+                        icon: const Icon(Icons.save_sharp),
+                      );
+                    },
                   ),
                 if (widget.supportRemoteDownload && !readOnly)
                   IconButton(
@@ -380,6 +493,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                       enableLocalSuggestions: true,
                       enableKeyboardSuggestions: true,
                       enableMagnifier: true,
+                      tabSize: 2,
+                      useSpaceAsTab: true,
                       language: _languageMode(),
                       languageId: switch (widget.languages.firstOrNull) {
                         Language.yaml => 'yaml',
@@ -852,54 +967,6 @@ class _CodeForgeControllerListenable extends Listenable {
       _controller.removeListener(listener);
 }
 
-class _NoInputBorder extends InputBorder {
-  const _NoInputBorder() : super(borderSide: BorderSide.none);
-
-  @override
-  _NoInputBorder copyWith({BorderSide? borderSide}) => const _NoInputBorder();
-
-  @override
-  bool get isOutline => false;
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-
-  @override
-  _NoInputBorder scale(double t) => const _NoInputBorder();
-
-  @override
-  Path getInnerPath(Rect rect, {TextDirection? textDirection}) {
-    return Path()..addRect(rect);
-  }
-
-  @override
-  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
-    return Path()..addRect(rect);
-  }
-
-  @override
-  void paintInterior(
-    Canvas canvas,
-    Rect rect,
-    Paint paint, {
-    TextDirection? textDirection,
-  }) {
-    canvas.drawRect(rect, paint);
-  }
-
-  @override
-  bool get preferPaintInterior => true;
-
-  @override
-  void paint(
-    Canvas canvas,
-    Rect rect, {
-    double? gapStart,
-    double gapExtent = 0.0,
-    double gapPercentage = 0.0,
-    TextDirection? textDirection,
-  }) {}
-}
 
 class _ImportOptionsDialog extends StatefulWidget {
   const _ImportOptionsDialog();

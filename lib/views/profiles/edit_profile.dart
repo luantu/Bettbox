@@ -435,10 +435,7 @@ class EditProfileViewState extends State<EditProfileView> {
     ];
     return CommonPopScope(
       onPop: () {
-        final primaryFocus = FocusManager.instance.primaryFocus;
-        if (primaryFocus != null &&
-            primaryFocus.context?.widget is EditableText) {
-          primaryFocus.unfocus();
+        if (dismissTvInputFocus()) {
           return false;
         }
         if (fileData == null) {
@@ -461,7 +458,9 @@ class EditProfileViewState extends State<EditProfileView> {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: ListView.separated(
-              padding: kMaterialListPadding.copyWith(bottom: 72),
+              padding: kMaterialListPadding.copyWith(
+                bottom: 72 + MediaQuery.viewPaddingOf(context).bottom,
+              ),
               itemBuilder: (_, index) {
                 return items[index];
               },

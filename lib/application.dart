@@ -71,10 +71,12 @@ class ApplicationState extends ConsumerState<Application>
       globalState.appController = AppController(currentContext, ref);
     }
     await globalState.appController.init();
-    try {
-      await ExternalControl.start();
-    } catch (e) {
-      commonPrint.log('ExternalControl start failed: $e');
+    if (!appPath.isPortable) {
+      try {
+        await ExternalControl.start();
+      } catch (e) {
+        commonPrint.log('ExternalControl start failed: $e');
+      }
     }
     globalState.appController.initLink();
     if (system.isAndroid) {
@@ -101,6 +103,10 @@ class ApplicationState extends ConsumerState<Application>
     if (!shouldRun) {
       _autoUpdateGroupTaskTimer?.cancel();
       _autoUpdateGroupTaskTimer = null;
+      if (!system.isDesktop) {
+        _autoUpdateProfilesTaskTimer?.cancel();
+        _autoUpdateProfilesTaskTimer = null;
+      }
       return;
     }
     if (_autoUpdateGroupTaskTimer == null) {
@@ -241,6 +247,84 @@ class ApplicationState extends ConsumerState<Application>
                   primaryColor: themeProps.primaryColor,
                 ),
                 fontFamily: fontFamily,
+                floatingActionButtonTheme: const FloatingActionButtonThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                  ),
+                  elevation: 3,
+                  hoverElevation: 5,
+                ),
+                dialogTheme: DialogThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                ),
+                bottomSheetTheme: const BottomSheetThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                ),
+                popupMenuTheme: const PopupMenuThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                  ),
+                ),
+                dividerTheme: DividerThemeData(
+                  color: _getAppColorScheme(
+                    brightness: Brightness.light,
+                    primaryColor: themeProps.primaryColor,
+                  ).outlineVariant.withValues(alpha: 0.6),
+                  thickness: 1,
+                  space: 1,
+                ),
+                inputDecorationTheme: InputDecorationTheme(
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(18)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: const BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide(
+                      color: _getAppColorScheme(
+                        brightness: Brightness.light,
+                        primaryColor: themeProps.primaryColor,
+                      ).outlineVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: const BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide(
+                      color: _getAppColorScheme(
+                        brightness: Brightness.light,
+                        primaryColor: themeProps.primaryColor,
+                      ).primary,
+                      width: 2,
+                    ),
+                  ),
+                ),
+                chipTheme: ChipThemeData(
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(16)),
+                  ),
+                  side: BorderSide(
+                    color: _getAppColorScheme(
+                      brightness: Brightness.light,
+                      primaryColor: themeProps.primaryColor,
+                    ).outlineVariant.withValues(alpha: 0.6),
+                  ),
+                ),
+                tooltipTheme: const TooltipThemeData(
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  ),
+                  textStyle: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                  ),
+                ),
               ),
               darkTheme: ThemeData(
                 useMaterial3: true,
@@ -250,6 +334,96 @@ class ApplicationState extends ConsumerState<Application>
                   primaryColor: themeProps.primaryColor,
                 ).toPureBlack(themeProps.pureBlack),
                 fontFamily: fontFamily,
+                floatingActionButtonTheme: const FloatingActionButtonThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                  ),
+                  elevation: 3,
+                  hoverElevation: 5,
+                ),
+                dialogTheme: DialogThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                ),
+                bottomSheetTheme: const BottomSheetThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                ),
+                popupMenuTheme: const PopupMenuThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                  ),
+                ),
+                dividerTheme: DividerThemeData(
+                  color:
+                      _getAppColorScheme(
+                            brightness: Brightness.dark,
+                            primaryColor: themeProps.primaryColor,
+                          )
+                          .toPureBlack(themeProps.pureBlack)
+                          .outlineVariant
+                          .withValues(alpha: 0.45),
+                  thickness: 1,
+                  space: 1,
+                ),
+                inputDecorationTheme: InputDecorationTheme(
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(18)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: const BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide(
+                      color:
+                          _getAppColorScheme(
+                                brightness: Brightness.dark,
+                                primaryColor: themeProps.primaryColor,
+                              )
+                              .toPureBlack(themeProps.pureBlack)
+                              .outlineVariant
+                              .withValues(alpha: 0.45),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: const BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide(
+                      color: _getAppColorScheme(
+                        brightness: Brightness.dark,
+                        primaryColor: themeProps.primaryColor,
+                      ).toPureBlack(themeProps.pureBlack).primary,
+                      width: 2,
+                    ),
+                  ),
+                ),
+                chipTheme: ChipThemeData(
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(16)),
+                  ),
+                  side: BorderSide(
+                    color:
+                        _getAppColorScheme(
+                              brightness: Brightness.dark,
+                              primaryColor: themeProps.primaryColor,
+                            )
+                            .toPureBlack(themeProps.pureBlack)
+                            .outlineVariant
+                            .withValues(alpha: 0.45),
+                  ),
+                ),
+                tooltipTheme: const TooltipThemeData(
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  ),
+                  textStyle: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                  ),
+                ),
               ),
               home: child!,
             );

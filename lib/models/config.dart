@@ -11,13 +11,15 @@ part 'generated/config.freezed.dart';
 part 'generated/config.g.dart';
 
 const defaultBypassDomain = [
-  '*jd.com',
-  '*zhihu.com',
-  '*zhimg.com',
-  '*360buyimg.com',
+  '*.jd.com',
+  '*.zhihu.com',
+  '*.zhimg.com',
+  '*.360buyimg.com',
   'localhost',
-  '*.local',
   '127.*',
+  '[::1]',
+  '::1',
+  '*.local',
   '10.*',
   '172.16.*',
   '172.17.*',
@@ -121,6 +123,45 @@ List<DashboardWidget> desktopDashboardWidgetsSafeFromJson(
   }
 }
 
+const List<MediaPlatform> defaultPinnedMediaPlatforms = [
+  MediaPlatform.reddit,
+  MediaPlatform.gemini,
+  MediaPlatform.cloudflare,
+];
+
+List<MediaPlatform> pinnedMediaPlatformsSafeFromJson(
+  List<dynamic>? pinnedMediaPlatforms,
+) {
+  try {
+    if (pinnedMediaPlatforms == null) return defaultPinnedMediaPlatforms;
+    final list = <MediaPlatform>[];
+    for (final e in pinnedMediaPlatforms) {
+      final str = e.toString();
+      if (str == 'chatgpt') {
+        list.add(MediaPlatform.openai);
+        continue;
+      }
+      if (str == 'qqnews') {
+        list.add(MediaPlatform.tencent);
+        continue;
+      }
+      if (str == 'alidnsprobe') {
+        list.add(MediaPlatform.alibaba);
+        continue;
+      }
+      if (str == 'bytedance') {
+        list.add(MediaPlatform.douyin);
+        continue;
+      }
+      final p = MediaPlatform.values.where((v) => v.name == str).firstOrNull;
+      if (p != null) list.add(p);
+    }
+    return list.isEmpty ? defaultPinnedMediaPlatforms : list;
+  } catch (_) {
+    return defaultPinnedMediaPlatforms;
+  }
+}
+
 @freezed
 abstract class AppSettingProps with _$AppSettingProps {
   const factory AppSettingProps({
@@ -134,6 +175,14 @@ abstract class AppSettingProps with _$AppSettingProps {
     @Default(defaultDashboardWidgets)
     @JsonKey(fromJson: desktopDashboardWidgetsSafeFromJson)
     List<DashboardWidget> desktopDashboardWidgets,
+    @Default(defaultPinnedMediaPlatforms)
+    @JsonKey(fromJson: pinnedMediaPlatformsSafeFromJson)
+    List<MediaPlatform> pinnedMediaPlatforms,
+    @Default(false) bool mediaUnlockMoreStreamingPlatforms,
+    @Default(false) bool mediaUnlockExtraDetails,
+    @Default(true) bool mediaUnlockRefreshOnNodeChange,
+    @Default(true) bool mediaUnlockColorfulIcons,
+    @Default(true) bool mediaUnlockRefreshByCategory,
     @Default(true) bool onlyStatisticsProxy,
     @Default(false) bool autoLaunch,
     @Default(false) bool silentLaunch,
@@ -142,12 +191,14 @@ abstract class AppSettingProps with _$AppSettingProps {
     @Default(true) bool openLogs,
     @Default(true) bool closeConnections,
     @Default(defaultTestUrl) String testUrl,
+    @Default(false) bool showStartSwitch,
     @Default(true) bool enableNavBarHapticFeedback,
     @Default(true) bool autoCheckUpdate,
     @Default(false) bool showLabel,
     @Default(false) bool disclaimerAccepted,
     @Default(true) bool minimizeOnExit,
     @Default(false) bool hidden,
+    @Default(true) bool keepDockIcon,
     @Default(false) bool developerMode,
     @Default(false) bool enableHighRefreshRate,
     @Default(RecoveryStrategy.compatible) RecoveryStrategy recoveryStrategy,
@@ -190,7 +241,10 @@ abstract class AccessControl with _$AccessControl {
     @Default(AccessControlMode.rejectSelected) AccessControlMode mode,
     @Default([]) List<String> acceptList,
     @Default([]) List<String> rejectList,
-    @Default(AccessSortType.none) AccessSortType sort,
+    @Default([]) List<String> manualList,
+    @JsonKey(unknownEnumValue: AccessSortType.none)
+    @Default(AccessSortType.none)
+    AccessSortType sort,
     @Default(false) bool isFilterSystemApp,
     @Default(false) bool isFilterNonInternetApp,
   }) = _AccessControl;
@@ -214,6 +268,7 @@ abstract class WindowProps with _$WindowProps {
     double? top,
     double? left,
     @Default(false) bool isPinned,
+    @Default(1.0) double scaleFactor,
   }) = _WindowProps;
 
   factory WindowProps.fromJson(Map<String, Object?>? json) =>
@@ -224,7 +279,7 @@ abstract class WindowProps with _$WindowProps {
 abstract class VpnProps with _$VpnProps {
   const factory VpnProps({
     @Default(true) bool enable,
-    @Default(false) bool systemProxy,
+    @Default(true) bool systemProxy,
     @Default(false) bool allowBypass,
     @Default(true) bool bypassPrivateRoute,
     @Default(true) bool dozeSuspend,
@@ -233,6 +288,7 @@ abstract class VpnProps with _$VpnProps {
     @Default(false) bool storeFix,
     @Default(false) bool networkFix,
     @Default(false) bool disableQuic,
+    @Default(false) bool highPriorityNotification,
     @Default(false) bool networkSpeedNotification,
     @Default(false) bool excludeChina,
     @Default(false) bool trayEnhancement,
@@ -257,7 +313,7 @@ abstract class VpnProps with _$VpnProps {
 @freezed
 abstract class NetworkProps with _$NetworkProps {
   const factory NetworkProps({
-    @Default(false) bool systemProxy,
+    @Default(true) bool systemProxy,
     @Default(defaultBypassDomain) List<String> bypassDomain,
     @Default(true) bool bypassPrivateRoute,
     @Default([]) List<String> bypassPrivateRouteAddress,
@@ -288,6 +344,7 @@ abstract class ProxiesStyle with _$ProxiesStyle {
     @Default(DelayAnimationType.none) DelayAnimationType delayAnimation,
     @Default({}) Map<String, String> iconMap,
     @Default(250) int concurrencyLimit,
+    @Default(true) bool autoStickyHeader,
     @Default(false) bool showHiddenItems,
     @Default(false) bool hasCustomizedStyle,
   }) = _ProxiesStyle;
@@ -410,7 +467,26 @@ abstract class Config with _$Config {
       }
     } catch (_) {}
 
-    // 兼容 FlClash：currentProfileId 可能是 int 类型，需要转换为 String
+    // Migrate legacy AccessControl sort values: 'name' -> 'none', 'time' -> 'updateTime'
+    try {
+      void migrateSort(dynamic accessControl) {
+        if (accessControl is Map) {
+          final sort = accessControl['sort'];
+          if (sort == 'name') {
+            accessControl['sort'] = 'none';
+          } else if (sort == 'time') {
+            accessControl['sort'] = 'updateTime';
+          }
+        }
+      }
+
+      migrateSort(json['accessControl']);
+      if (json['vpnProps'] is Map) {
+        migrateSort((json['vpnProps'] as Map)['accessControl']);
+      }
+    } catch (_) {}
+
+    // Migrate legacy int profile IDs to string
     try {
       final currentProfileId = json['currentProfileId'];
       if (currentProfileId != null && currentProfileId is int) {
@@ -418,7 +494,6 @@ abstract class Config with _$Config {
       }
     } catch (_) {}
 
-    // 兼容 FlClash：profiles 中的 id 可能是 int 类型，需要转换为 String
     try {
       final profiles = json['profiles'];
       if (profiles != null && profiles is List) {

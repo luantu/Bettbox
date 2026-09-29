@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bett_box/common/common.dart';
@@ -6,6 +7,7 @@ import 'package:bett_box/models/models.dart';
 import 'package:bett_box/plugins/app.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/widgets/widgets.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:bett_box/providers/providers.dart';
@@ -333,28 +335,28 @@ class TrackerInfoDetailView extends ConsumerWidget {
     return process;
   }
 
-  String _getSourceText(TrackerInfo info) {
-    final sourceIP = info.metadata.sourceIP;
-    if (sourceIP.isEmpty) {
-      return '';
-    }
-    final sourcePort = info.metadata.sourcePort;
-    if (sourcePort.isNotEmpty) {
-      return '$sourceIP:$sourcePort';
-    }
-    return sourceIP;
+  bool _isIpAddress(String str) {
+    return InternetAddress.tryParse(str) != null;
   }
 
-  String _getDestinationText(TrackerInfo info) {
-    final destinationIP = info.metadata.destinationIP;
-    if (destinationIP.isEmpty) {
-      return '';
+  (String, String?)? _parseIpAndPort(String text) {
+    var raw = text.trim();
+    if (raw.isEmpty) return null;
+    if (raw.startsWith('[') && raw.contains(']')) {
+      final end = raw.indexOf(']');
+      final ip = raw.substring(1, end);
+      final rest = raw.substring(end + 1);
+      final port = rest.startsWith(':') ? rest.substring(1) : null;
+      if (_isIpAddress(ip)) return (ip, port);
     }
-    final destinationPort = info.metadata.destinationPort;
-    if (destinationPort.isNotEmpty) {
-      return '$destinationIP:$destinationPort';
+    if (raw.contains(':')) {
+      final parts = raw.split(':');
+      if (parts.length == 2 && int.tryParse(parts[1]) != null) {
+        if (_isIpAddress(parts[0])) return (parts[0], parts[1]);
+      }
     }
-    return destinationIP;
+    if (_isIpAddress(raw)) return (raw, null);
+    return null;
   }
 
   Widget _buildChains(TrackerInfo info) {
@@ -374,6 +376,80 @@ class TrackerInfoDetailView extends ConsumerWidget {
         children: [
           Text(appLocalizations.proxyChains),
           Flexible(child: chains),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIpItem(
+    BuildContext context, {
+    required String title,
+    required String ip,
+    String? port,
+  }) {
+    final category = utils.classifyIp(ip);
+    final IconData icon = switch (category) {
+      IpCategory.tun => Icons.stacked_line_chart,
+      IpCategory.lan => Icons.shuffle,
+      IpCategory.public => Icons.search_rounded,
+    };
+
+    return ListItem(
+      title: Row(
+        spacing: 16,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(title),
+          Flexible(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Material(
+                  color: context.colorScheme.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () {
+                      showIpDetailDialog(context, ip);
+                    },
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            icon,
+                            size: 14,
+                            color: context.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              ip,
+                              style: context.textTheme.bodyMedium?.copyWith(
+                                color: context.colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (port != null && port.isNotEmpty) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    ':$port',
+                    style: context.textTheme.bodyMedium,
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -406,7 +482,7 @@ class TrackerInfoDetailView extends ConsumerWidget {
                 ),
             ],
           ),
-          Flexible(child: Text(desc, textAlign: TextAlign.end)),
+          Flexible(child: EmojiText(desc, textAlign: TextAlign.end)),
         ],
       ),
     );
@@ -414,11 +490,9 @@ class TrackerInfoDetailView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final connections = ref.watch(connectionsProvider);
-    final info = connections.firstWhere(
-      (e) => e.id == trackerInfo.id,
-      orElse: () => trackerInfo,
-    );
+    final info = trackerInfo;
+
+    final remoteDestParsed = _parseIpAndPort(info.metadata.remoteDestination);
 
     final items = [
       _buildItem(
@@ -436,30 +510,65 @@ class TrackerInfoDetailView extends ConsumerWidget {
       ),
       _buildItem(title: appLocalizations.rule, desc: _getRuleText(info)),
       if (info.metadata.host.isNotEmpty)
-        _buildItem(title: appLocalizations.host, desc: info.metadata.host),
-      if (_getSourceText(info).isNotEmpty)
-        _buildItem(title: appLocalizations.source, desc: _getSourceText(info)),
-      if (_getDestinationText(info).isNotEmpty)
-        _buildItem(
+        _isIpAddress(info.metadata.host)
+            ? _buildIpItem(
+                context,
+                title: appLocalizations.host,
+                ip: info.metadata.host,
+              )
+            : _buildItem(title: appLocalizations.host, desc: info.metadata.host),
+      if (info.metadata.sourceIP.isNotEmpty)
+        _buildIpItem(
+          context,
+          title: appLocalizations.source,
+          ip: info.metadata.sourceIP,
+          port: info.metadata.sourcePort.isNotEmpty
+              ? info.metadata.sourcePort
+              : null,
+        ),
+      if (info.metadata.destinationIP.isNotEmpty)
+        _buildIpItem(
+          context,
           title: appLocalizations.destination,
-          desc: _getDestinationText(info),
+          ip: info.metadata.destinationIP,
+          port: info.metadata.destinationPort.isNotEmpty
+              ? info.metadata.destinationPort
+              : null,
         ),
-      _buildItem(
-        title: appLocalizations.upload,
-        desc: TrafficValue(value: info.upload).show,
+      Consumer(
+        builder: (context, ref, _) {
+          final liveInfo = ref.watch(
+            connectionsProvider.select(
+              (list) => list.firstWhereOrNull((e) => e.id == trackerInfo.id),
+            ),
+          );
+          final upload = liveInfo?.upload ?? trackerInfo.upload;
+          final download = liveInfo?.download ?? trackerInfo.download;
+          final isAlive = liveInfo != null;
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildItem(
+                title: appLocalizations.upload,
+                desc: TrafficValue(value: upload).show,
+              ),
+              _buildItem(
+                title: appLocalizations.download,
+                desc: TrafficValue(value: download).show,
+              ),
+              if (isAlive)
+                _buildItem(
+                  title: appLocalizations.realTimeSpeed,
+                  desc: Traffic(
+                    up: liveInfo.uploadSpeed,
+                    down: liveInfo.downloadSpeed,
+                  ).toString(),
+                ),
+            ],
+          );
+        },
       ),
-      _buildItem(
-        title: appLocalizations.download,
-        desc: TrafficValue(value: info.download).show,
-      ),
-      if (connections.any((e) => e.id == trackerInfo.id))
-        _buildItem(
-          title: appLocalizations.realTimeSpeed,
-          desc: Traffic(
-            up: info.uploadSpeed,
-            down: info.downloadSpeed,
-          ).toString(),
-        ),
       if (info.metadata.destinationGeoIP.isNotEmpty)
         _buildItem(
           title: appLocalizations.destinationGeoIP,
@@ -486,10 +595,17 @@ class TrackerInfoDetailView extends ConsumerWidget {
           desc: info.metadata.specialRules,
         ),
       if (info.metadata.remoteDestination.isNotEmpty)
-        _buildItem(
-          title: appLocalizations.remoteDestination,
-          desc: info.metadata.remoteDestination,
-        ),
+        remoteDestParsed != null
+            ? _buildIpItem(
+                context,
+                title: appLocalizations.remoteDestination,
+                ip: remoteDestParsed.$1,
+                port: remoteDestParsed.$2,
+              )
+            : _buildItem(
+                title: appLocalizations.remoteDestination,
+                desc: info.metadata.remoteDestination,
+              ),
       _buildChains(info),
     ];
     return SelectionArea(
