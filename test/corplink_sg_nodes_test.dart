@@ -132,6 +132,9 @@ void main() {
     expect(const CorplinkNodeSelection(serverName: 'SG-Node').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'SG-OpenAI').validationError, isNotNull);
     expect(const CorplinkNodeSelection(serverName: 'DIRECT').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(serverName: 'REJECT-DROP').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(serverName: 'COMPATIBLE').validationError, isNotNull);
+    expect(const CorplinkNodeSelection(serverName: 'PASS-RULE').validationError, isNotNull);
     expect(
       const CorplinkNodeSelection(
         serverName: 'FUZHOU-NODE-1',
@@ -167,6 +170,32 @@ void main() {
     expect(await loadCorplinkNodeSelections(secrets: secrets), isNull);
     await saveCorplinkNodeSelections(const [], secrets: secrets);
     expect(await loadCorplinkNodeSelections(secrets: secrets), isEmpty);
+  });
+
+  test('removed saved node remains a disabled REJECT placeholder', () async {
+    final secrets = _MemoryNodeSecrets();
+    await saveCorplinkNodeSelections(const [
+      CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+      CorplinkNodeSelection(serverName: 'FUZHOU-NODE-1'),
+    ], secrets: secrets);
+    await saveCorplinkNodeSelections(const [
+      CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+    ], secrets: secrets);
+    final loaded = await loadCorplinkNodeSelections(secrets: secrets);
+    expect(loaded?.length, 2);
+    expect(loaded?.last.serverName, 'FUZHOU-NODE-1');
+    expect(loaded?.last.enabled, isFalse);
+  });
+
+  test('equivalent INTL aliases cannot both be enabled', () async {
+    final secrets = _MemoryNodeSecrets();
+    expect(
+      () => saveCorplinkNodeSelections(const [
+        CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+        CorplinkNodeSelection(serverName: 'FUZHOU_INTL_node'),
+      ], secrets: secrets),
+      throwsArgumentError,
+    );
   });
 
   test('health URL persists in secure storage, not ordinary preferences', () async {

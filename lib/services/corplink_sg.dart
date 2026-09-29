@@ -652,6 +652,8 @@ Future<Set<String>> applyCorplinkSgNode(
   bool suppressNode = false,
   Set<String> trustedManagedGroupNames = const {},
   Set<String> trustedManagedProxyNames = const {},
+  Map<String, dynamic> expectedManagedObjects = const {},
+  void Function(Set<String>)? onScriptConflict,
 }) async {
   final settings = await CorplinkSgSettings.load();
   if (!settings.enabled) return <String>{};
@@ -723,6 +725,8 @@ Future<Set<String>> applyCorplinkSgNode(
         : const {},
     trustedManagedGroupNames: trustedManagedGroupNames,
     trustedManagedProxyNames: trustedManagedProxyNames,
+    expectedManagedObjects: expectedManagedObjects,
+    onScriptConflict: onScriptConflict,
   );
   return {
     for (final selection in selections) selection.serverName,

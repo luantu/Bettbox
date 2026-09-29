@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -713,6 +714,14 @@ class GlobalState {
       configMap,
       suppressNode: suppressCorplinkNode,
     );
+    final expectedCorplinkObjects = <String, dynamic>{
+      for (final item in [
+        ...?(configMap['proxies'] as List?),
+        ...?(configMap['proxy-groups'] as List?),
+      ])
+        if (item is Map && trustedCorplinkNames.contains(item['name']))
+          item['name'] as String: jsonDecode(jsonEncode(item)),
+    };
     final rawConfig = await handleEvaluate(configMap, profile: targetProfile);
     final originalProxyGroups = rawConfig['proxy-groups'];
 
@@ -1161,6 +1170,12 @@ class GlobalState {
       suppressNode: suppressCorplinkNode,
       trustedManagedGroupNames: trustedCorplinkNames,
       trustedManagedProxyNames: trustedCorplinkNames,
+      expectedManagedObjects: expectedCorplinkObjects,
+      onScriptConflict: (names) {
+        commonPrint.log('[CorpLinkSG] script changed ${names.length} managed entries; '
+            'affected route(s) are fail-closed');
+        showNotifier('覆写脚本修改了飞连托管节点或组；相关路由已阻断，请检查脚本');
+      },
     );
     return rawConfig;
   }

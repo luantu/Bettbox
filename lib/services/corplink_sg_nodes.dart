@@ -44,7 +44,8 @@ class CorplinkNodeSelection {
 
   String? get validationError {
     const reservedNames = {
-      'SG-NODE', 'SG-OPENAI', 'DIRECT', 'REJECT', 'GLOBAL', 'PASS',
+      'SG-NODE', 'SG-OPENAI', 'DIRECT', 'REJECT', 'REJECT-DROP',
+      'COMPATIBLE', 'GLOBAL', 'PASS', 'PASS-RULE',
     };
     if (serverName.isEmpty ||
         serverName.trim() != serverName ||
@@ -171,26 +172,45 @@ Future<void> saveCorplinkNodeSelections(
   List<CorplinkNodeSelection> selections, {
   CorplinkNodeSecretStore? secrets,
 }) async {
+  final store = secrets ?? const _PlatformNodeSecrets();
+  final previous = await loadCorplinkNodeSelections(secrets: store);
+  final requestedNames = selections.map((item) => item.serverName).toSet();
+  final retained = <CorplinkNodeSelection>[
+    ...selections,
+    for (final item in previous ?? const <CorplinkNodeSelection>[])
+      if (!requestedNames.contains(item.serverName))
+        CorplinkNodeSelection(
+          serverName: item.serverName,
+          enabled: false,
+          healthUrl: item.healthUrl,
+        ),
+  ];
   final seen = <String>{};
-  for (final selection in selections) {
+  var enabledIntl = 0;
+  for (final selection in retained) {
     final error = selection.validationError;
     if (error != null) throw ArgumentError.value(selection.serverName, 'selection', error);
-    if (!seen.add(selection.serverName)) {
+    if (!seen.add(selection.serverName.toLowerCase())) {
       throw ArgumentError.value(selection.serverName, 'selection', '节点名称重复');
     }
+    if (selection.enabled && isIntlCorplinkServerName(selection.serverName)) {
+      enabledIntl++;
+    }
   }
-  final store = secrets ?? const _PlatformNodeSecrets();
+  if (enabledIntl > 1) {
+    throw ArgumentError('同一 INTL 服务器的别名不能同时启用');
+  }
   final prefs = await SharedPreferences.getInstance();
   final username = prefs.getString(corplinkSgUsernameKey) ?? '';
   final upstream = prefs.getString(corplinkSgServerKey) ?? '';
-  for (final selection in selections) {
+  for (final selection in retained) {
     await store.write(
       _probeSecretKey(username, upstream, selection.serverName),
       selection.healthUrl,
     );
   }
   await prefs.setString(_selectionPreferenceKey, jsonEncode([
-    for (final selection in selections)
+    for (final selection in retained)
       {'serverName': selection.serverName, 'enabled': selection.enabled},
   ]));
 }

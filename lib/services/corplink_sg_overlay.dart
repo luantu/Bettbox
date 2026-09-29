@@ -1,11 +1,17 @@
+import 'dart:convert';
+
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:collection/collection.dart';
 
 // Object identity is trustworthy for a second pass over the same map. When
 // JavaScript returns a new map, state.dart passes the first pass's names
 // explicitly; a downloaded group is never trusted by its shape alone.
 final Expando<Set<String>> _generatedGroupsByConfig = Expando<Set<String>>();
 final Expando<Set<String>> _generatedProxiesByConfig = Expando<Set<String>>();
+final Expando<Map<String, dynamic>> _generatedSnapshotsByConfig =
+    Expando<Map<String, dynamic>>();
+const _managedObjectEquality = DeepCollectionEquality();
 
 bool _isLegacyProxy(dynamic item) =>
     item is Map &&
@@ -26,14 +32,25 @@ void mergeCorplinkNodeOverlay(
   Set<String> suppressedNames = const {},
   Set<String> trustedManagedGroupNames = const {},
   Set<String> trustedManagedProxyNames = const {},
+  Map<String, dynamic> expectedManagedObjects = const {},
+  void Function(Set<String>)? onScriptConflict,
 }) {
   if (!settings.enabled) return;
   final selectionNames = <String>{};
+  final foldedNames = <String>{};
+  var enabledIntl = 0;
   for (final selection in selections) {
     if (selection.validationError != null ||
-        !selectionNames.add(selection.serverName)) {
+        !selectionNames.add(selection.serverName) ||
+        !foldedNames.add(selection.serverName.toLowerCase())) {
       throw StateError('INVALID_CORPLINK_NODE_SELECTION');
     }
+    if (selection.enabled && isIntlCorplinkServerName(selection.serverName)) {
+      enabledIntl++;
+    }
+  }
+  if (enabledIntl > 1) {
+    throw StateError('CORPLINK_DUPLICATE_INTL_ALIAS');
   }
   for (final name in selectionNames) {
     if (selectionNames.contains('$name-WG')) {
@@ -63,6 +80,23 @@ void mergeCorplinkNodeOverlay(
           trustedNames.contains(item['name']))
         item['name'] as String,
   };
+  final expected = {
+    ...?_generatedSnapshotsByConfig[rawConfig],
+    ...expectedManagedObjects,
+  };
+  final scriptConflicts = <String>{};
+  for (final item in [...sourceProxies, ...sourceGroups]) {
+    if (item is! Map || item['name'] is! String) continue;
+    final name = item['name'] as String;
+    if (!managedProxyNames.contains(name) && !managedGroupNames.contains(name)) {
+      continue;
+    }
+    if (expected.isNotEmpty &&
+        (!expected.containsKey(name) ||
+            !_managedObjectEquality.equals(item, expected[name]))) {
+      scriptConflicts.add(name);
+    }
+  }
 
   final targetProxyNames = <String>{for (final name in selectionNames) '$name-WG'};
   final targetGroupNames = <String>{...selectionNames, 'SG-Node', 'SG-OpenAI'};
@@ -97,10 +131,17 @@ void mergeCorplinkNodeOverlay(
       corplinkAuthMatchesSettings(auth, settings) &&
       cookiePath != null &&
       cookiePath.isNotEmpty;
+  final scriptSuppressedNames = <String>{
+    for (final name in selectionNames)
+      if (scriptConflicts.contains(name) ||
+          scriptConflicts.contains('$name-WG'))
+        name,
+  };
   final activeNames = <String>{
     for (final selection in selections)
       if (selection.enabled &&
           !suppressedNames.contains(selection.serverName) &&
+          !scriptSuppressedNames.contains(selection.serverName) &&
           authorized &&
           keyPairs.containsKey(selection.serverName))
         selection.serverName,
@@ -121,6 +162,8 @@ void mergeCorplinkNodeOverlay(
     }
   }
   final intlActive = intlName != null && activeNames.contains(intlName);
+  final aliasConflict = scriptConflicts.contains('SG-Node');
+  final openAiConflict = scriptConflicts.contains('SG-OpenAI');
 
   final proxies = <dynamic>[
     for (final item in sourceProxies)
@@ -184,7 +227,7 @@ void mergeCorplinkNodeOverlay(
         (name == 'GLOBAL' || openAiGroup.hasMatch(name))) {
       final members = List<dynamic>.from(group['proxies'] as List);
       members.removeWhere((member) => member == 'SG-Node');
-      if (intlActive && settings.routeOpenAi) {
+      if (intlActive && !aliasConflict && !openAiConflict && settings.routeOpenAi) {
         members.insert(0, 'SG-Node');
       }
       if (members.isEmpty) members.add('REJECT');
@@ -204,14 +247,14 @@ void mergeCorplinkNodeOverlay(
     'name': 'SG-Node',
     'type': 'select',
     'hidden': true,
-    'proxies': intlName != null
+    'proxies': !aliasConflict && intlName != null
         ? <String>[intlName]
         : <String>['REJECT'],
   });
   groups.add({
     'name': 'SG-OpenAI',
     'type': 'select',
-    'proxies': intlActive
+    'proxies': intlActive && !aliasConflict && !openAiConflict
         ? <String>['SG-Node', if (primarySubscriptionGroup != null) primarySubscriptionGroup]
         : <String>['REJECT'],
   });
@@ -227,4 +270,14 @@ void mergeCorplinkNodeOverlay(
   rawConfig.remove(rulesKey == 'rules' ? 'rule' : 'rules');
   _generatedGroupsByConfig[rawConfig] = targetGroupNames;
   _generatedProxiesByConfig[rawConfig] = targetProxyNames;
+  _generatedSnapshotsByConfig[rawConfig] = {
+    for (final item in [...proxies, ...groups])
+      if (item is Map &&
+          (targetProxyNames.contains(item['name']) ||
+              targetGroupNames.contains(item['name'])))
+        item['name'] as String: jsonDecode(jsonEncode(item)),
+  };
+  if (scriptConflicts.isNotEmpty) {
+    onScriptConflict?.call(Set.unmodifiable(scriptConflicts));
+  }
 }
