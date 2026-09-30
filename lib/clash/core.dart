@@ -111,6 +111,12 @@ class ClashCore {
   }) async {
     final proxies = await clashInterface.getProxies();
     if (proxies.isEmpty) return [];
+    final privateGroup = proxies['Fuzhou-Node-1'];
+    if (privateGroup is Map) {
+      // Diagnostic only: never print the private HTTPS URL itself.
+      commonPrint.log('[CorpLinkDelay] coreProxyProbePresent='
+          '${privateGroup['testUrl'] is String && (privateGroup['testUrl'] as String).isNotEmpty}');
+    }
 
     final providers = preloadedProviders ?? await getExternalProviders();
 
