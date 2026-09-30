@@ -494,7 +494,10 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           : '节点探测失败；可尝试重新连接或重新授权');
     } catch (error) {
       if (!mounted) return;
-      setState(() => _status = '节点探测失败：${error.runtimeType}');
+      setState(() => _status = error is StateError &&
+          error.message == 'ANDROID_VPN_START_TIMEOUT'
+          ? 'Android VPN 尚未就绪；请确认系统授权后重试检查。未启动隧道探针。'
+          : '节点探测失败：${error.runtimeType}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -507,7 +510,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     final node = matches.first;
     setState(() { _busy = true; _status = '正在重连 $serverName…'; });
     try {
-      if (!globalState.isStart) await globalState.appController.updateStatus(true);
+      await ensureCorplinkVpnReady();
       final before = await readCorplinkNodeStatus(serverName);
       if (before.rebuildRequired) {
         await clashCore.rebuildCorplinkNode(serverName);

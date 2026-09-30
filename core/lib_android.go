@@ -146,6 +146,10 @@ func handleStartTun(fd int, callback unsafe.Pointer) {
 }
 
 func handleGetRunTime() string {
+	tunLock.Lock()
+	defer tunLock.Unlock()
+	// Do not publish a partial startup: the protect hook and TUN listener must
+	// finish initialization before callers release their tunnel handshakes.
 	if runTime == nil {
 		return ""
 	}

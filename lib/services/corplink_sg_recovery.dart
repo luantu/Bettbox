@@ -2,6 +2,47 @@ import 'dart:async';
 
 enum SgRecoveryAction { none, reconnect, rebuild }
 
+/// Android accepts a VPN start before its TUN/protect callback is installed.
+/// All named nodes share this barrier; no handshake may race that transition.
+class CorplinkVpnStartGate {
+  Future<bool>? _inFlight;
+
+  Future<bool> ensureReady({
+    required Future<bool> Function() isNativeReady,
+    required Future<void> Function() requestStart,
+    required Future<void> Function() settle,
+    int maxChecks = 40,
+  }) {
+    if (maxChecks < 1) throw ArgumentError.value(maxChecks, 'maxChecks');
+    final active = _inFlight;
+    if (active != null) return active;
+    final completer = Completer<bool>();
+    _inFlight = completer.future;
+    () async {
+      try {
+        if (await isNativeReady()) {
+          completer.complete(true);
+          return;
+        }
+        await requestStart();
+        for (var attempt = 0; attempt < maxChecks; attempt++) {
+          if (await isNativeReady()) {
+            completer.complete(true);
+            return;
+          }
+          if (attempt + 1 < maxChecks) await settle();
+        }
+        completer.complete(false);
+      } catch (error, stack) {
+        completer.completeError(error, stack);
+      } finally {
+        _inFlight = null;
+      }
+    }();
+    return completer.future;
+  }
+}
+
 bool shouldAutoAuthorizeAfterSgSetup({
   required bool authRejected,
   required bool authMatches,

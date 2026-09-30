@@ -4,6 +4,7 @@ import 'package:bett_box/clash/clash.dart';
 import 'package:bett_box/plugins/vpn.dart';
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
+import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/state.dart';
 
@@ -65,14 +66,30 @@ class CorplinkNodeProbeObservation {
   final DateTime checkedAt;
 }
 
+final _corplinkVpnStartGate = CorplinkVpnStartGate();
+
+Future<void> ensureCorplinkVpnReady() async {
+  final ready = await _corplinkVpnStartGate.ensureReady(
+    // This native time exists only after startTUN completed, not merely after
+    // Kotlin accepted the asynchronous VpnService start request.
+    isNativeReady: () async => await clashLib?.getRunTime() != null,
+    requestStart: () async {
+      if (!globalState.isStart) {
+        await globalState.appController.updateStatus(true);
+      }
+    },
+    settle: () => Future<void>.delayed(const Duration(milliseconds: 200)),
+  );
+  if (!ready) throw StateError('ANDROID_VPN_START_TIMEOUT');
+  await globalState.updateStartTime();
+}
+
 Future<SgCoreStatus> refreshCorplinkNodeStatus(
   String serverName, {
   String healthUrl = '',
   void Function(bool success)? onProbe,
 }) async {
-  if (!globalState.isStart) {
-    await globalState.appController.updateStatus(true);
-  }
+  await ensureCorplinkVpnReady();
   return recoverCorplinkNodeStatus(
     serverName: serverName,
     readStatus: () => readCorplinkNodeStatus(serverName),
@@ -185,11 +202,7 @@ Future<SgCoreStatus> refreshCorplinkSgStatus({
   Future<bool> Function()? fallbackProbe,
 }) =>
     recoverSgStatus(
-      ensureVpn: () async {
-        if (!globalState.isStart) {
-          await globalState.appController.updateStatus(true);
-        }
-      },
+      ensureVpn: ensureCorplinkVpnReady,
       readStatus: readCorplinkSgStatus,
       probe: probe ?? probeCorplinkSgChatGpt,
       fallbackProbe: fallbackProbe ?? probeCorplinkSgFallback,
