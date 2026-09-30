@@ -25,7 +25,6 @@ void main() {
     Future<void> Function(String)? reconnect,
     Future<void> Function()? reauthorize,
   }) async {
-    await tester.view.resetPhysicalSize();
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body:
