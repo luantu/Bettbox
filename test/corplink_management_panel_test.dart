@@ -54,7 +54,7 @@ void main() {
     expect(find.byKey(const ValueKey('account-input')), findsNothing);
     expect(find.text('选择服务器及设置探针'), findsNothing);
     expect(find.text('192.0.2.10:34080'), findsNothing);
-    expect(find.byType(FilledButton), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is FilledButton), findsOneWidget);
     await tester.tap(find.text('检查并恢复'));
     await tester.pump();
     expect(checks, 1);
