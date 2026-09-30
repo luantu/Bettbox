@@ -96,7 +96,10 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
         final enabledNodes = selections.where((node) => node.enabled).toList();
         final statuses = await Future.wait([
           for (final node in enabledNodes)
-            refreshCorplinkNodeStatus(node.serverName, healthUrl: node.healthUrl),
+            refreshCorplinkNodeStatus(
+              node.serverName,
+              healthUrl: effectiveCorplinkNodeProbeUrl(node),
+            ),
         ]);
         if (!mounted) return;
         setState(() => _aggregate = summarizeCorplinkNodes(

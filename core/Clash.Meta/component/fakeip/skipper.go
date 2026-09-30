@@ -10,13 +10,17 @@ const (
 )
 
 type Skipper struct {
-	Rules []C.Rule
-	Host  []C.DomainMatcher
-	Mode  C.FilterMode
+	Rules       []C.Rule
+	Host        []C.DomainMatcher
+	Mode        C.FilterMode
+	ForceRealIP C.DomainMatcher
 }
 
 // ShouldSkipped return if domain should be skipped
 func (p *Skipper) ShouldSkipped(domain string) bool {
+	if p.ForceRealIP != nil && p.ForceRealIP.MatchDomain(domain) {
+		return true
+	}
 	if len(p.Rules) > 0 {
 		metadata := &C.Metadata{Host: domain}
 		for _, rule := range p.Rules {

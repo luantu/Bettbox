@@ -2,15 +2,42 @@ package config
 
 import (
 	"errors"
-	"net/netip"
 	"sort"
-	"strings"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
 	C "github.com/metacubex/mihomo/constant"
 	P "github.com/metacubex/mihomo/constant/provider"
 	"github.com/metacubex/mihomo/dns"
 )
+
+type corplinkDomainRuleMatcher struct{ rule C.Rule }
+
+func (m corplinkDomainRuleMatcher) MatchDomain(domain string) bool {
+	matched, _ := m.rule.Match(&C.Metadata{Host: domain}, C.RuleMatchHelper{})
+	return matched
+}
+
+type corplinkProviderDomainMatcher struct{ provider P.RuleProvider }
+
+func (m corplinkProviderDomainMatcher) MatchDomain(domain string) bool {
+	if m.provider.Count() == 0 {
+		// Until the provider is ready, its protected scope is unknown. Claim
+		// queries rather than allowing the public resolver to see a private name.
+		return true
+	}
+	return m.provider.Match(&C.Metadata{Host: domain}, C.RuleMatchHelper{})
+}
+
+type corplinkAnyDomainMatcher struct{ matchers []C.DomainMatcher }
+
+func (m corplinkAnyDomainMatcher) MatchDomain(domain string) bool {
+	for _, matcher := range m.matchers {
+		if matcher.MatchDomain(domain) {
+			return true
+		}
+	}
+	return false
+}
 
 // appendCorplinkDNSPolicies runs after proxies and rules have been parsed but
 // before the global DNS resolver is built. A domain routed to a private VPN
@@ -35,6 +62,8 @@ func appendCorplinkDNSPolicies(
 		wg, ok := proxy.Adapter().(interface {
 			CorplinkDNSPolicyInfo() outbound.CorplinkDNSPolicyInfo
 			CorplinkDNSAddress() (string, error)
+			MatchCorplinkPrivateDomain(string) bool
+			SetCorplinkDNSMatchers([]C.DomainMatcher)
 		})
 		if !ok {
 			continue
@@ -43,57 +72,53 @@ func appendCorplinkDNSPolicies(
 		if info.ServerName == "" || name != info.ServerName+"-WG" {
 			continue
 		}
-		upstream := dns.NameServer{
-			Net: "", Addr: "192.0.2.1:53", ProxyAdapter: proxy.Adapter(),
-			DynamicAddress: true,
-		}
-		seen := map[string]bool{}
-		addDomain := func(domain string) {
-			if domain == "" || seen[domain] {
-				return
-			}
-			seen[domain] = true
-			generated = append(generated, dns.Policy{
-				Domain: domain, NameServers: []dns.NameServer{upstream},
-			})
-		}
+		upstreams := outbound.CorplinkPrivateNameServers(proxy.Adapter())
+		matchers := make([]C.DomainMatcher, 0)
 		for _, rule := range rules {
 			if rule.Adapter() != info.ServerName {
 				continue
 			}
+			if wrapped, ok := rule.(C.RuleWrapper); ok {
+				if wrapped.IsDisabled() {
+					continue
+				}
+				rule = wrapped.Unwrap()
+			}
 			switch rule.RuleType() {
-			case C.Domain:
-				addDomain(strings.ToLower(rule.Payload()))
-			case C.DomainSuffix:
-				addDomain("+." + strings.TrimPrefix(strings.ToLower(rule.Payload()), "."))
+			case C.Domain, C.DomainSuffix, C.DomainKeyword,
+				C.DomainRegex, C.DomainWildcard, C.GEOSITE:
+				matchers = append(matchers, corplinkDomainRuleMatcher{rule: rule})
 			case C.RuleSet:
 				provider, found := ruleProviders[rule.Payload()]
 				if !found {
 					return errors.New("corplink DNS rule provider unavailable")
 				}
 				if provider.Behavior() == P.IPCIDR {
-					continue // An IP-only rule has no pre-route domain to resolve.
+					return errors.New("corplink DNS IP-only rule cannot protect a domain")
 				}
-				matcher, err := parseDomainRuleSet(rule.Payload(), "corplink DNS", ruleProviders)
-				if err != nil {
-					return errors.New("corplink DNS rule provider invalid")
-				}
-				generated = append(generated, dns.Policy{
-					Matcher: matcher, NameServers: []dns.NameServer{upstream},
-				})
+				matchers = append(matchers, corplinkProviderDomainMatcher{provider: provider})
+			default:
+				return errors.New("corplink DNS rule type cannot be protected")
 			}
 		}
-		for _, domain := range info.Domains {
-			addDomain("+." + domain)
-		}
-		if info.HealthHost != "" {
-			if _, err := netip.ParseAddr(info.HealthHost); err != nil {
-				addDomain(strings.ToLower(info.HealthHost))
-			}
-		}
+		wg.SetCorplinkDNSMatchers(matchers)
+		generated = append(generated, dns.Policy{
+			Matcher:     outbound.NewCorplinkPrivateDNSMatcher(proxy.Adapter()),
+			NameServers: upstreams,
+		})
 	}
 	if len(generated) != 0 {
 		config.NameServerPolicy = append(generated, config.NameServerPolicy...)
+		if config.FakeIPSkipper != nil {
+			matchers := make([]C.DomainMatcher, 0, len(generated)+1)
+			if config.FakeIPSkipper.ForceRealIP != nil {
+				matchers = append(matchers, config.FakeIPSkipper.ForceRealIP)
+			}
+			for _, policy := range generated {
+				matchers = append(matchers, policy.Matcher)
+			}
+			config.FakeIPSkipper.ForceRealIP = corplinkAnyDomainMatcher{matchers: matchers}
+		}
 	}
 	return nil
 }

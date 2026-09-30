@@ -79,19 +79,26 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 			t.Fatalf("proxy/group %s missing after isolated failure", name)
 		}
 	}
-	protected := map[string]bool{}
+	protected := false
 	for _, policy := range parsed.DNS.NameServerPolicy {
-		if policy.Domain != "+.inside.example.invalid" &&
-			policy.Domain != "+.corp.example.invalid" {
+		if policy.Matcher == nil ||
+			!policy.Matcher.MatchDomain("host.inside.example.invalid") ||
+			!policy.Matcher.MatchDomain("host.corp.example.invalid") {
 			continue
 		}
-		protected[policy.Domain] = true
-		if len(policy.NameServers) != 1 || !policy.NameServers[0].DynamicAddress ||
-			policy.NameServers[0].ProxyAdapter == nil {
+		protected = true
+		if len(policy.NameServers) != 2 ||
+			!policy.NameServers[0].DynamicAddress ||
+			!policy.NameServers[1].DynamicAddress ||
+			policy.NameServers[0].ProxyAdapter == nil ||
+			policy.NameServers[1].ProxyAdapter == nil {
 			t.Fatal("CorpLink private DNS policy was not bound to the active WG")
 		}
+		if policy.Matcher.MatchDomain("chatgpt.com") {
+			t.Fatal("public ChatGPT domain was captured by private DNS")
+		}
 	}
-	if !protected["+.inside.example.invalid"] || !protected["+.corp.example.invalid"] {
+	if !protected {
 		t.Fatal("private DNS policy missing after complete Profile parse")
 	}
 }

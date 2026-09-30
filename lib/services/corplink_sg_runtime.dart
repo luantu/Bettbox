@@ -44,9 +44,31 @@ Future<bool> probeCorplinkNodeHttps(String serverName, String url) async {
   }
 }
 
+Future<bool> observeCorplinkNodeProbe(
+  String serverName,
+  String url, {
+  required Future<bool> Function(String serverName, String url) probe,
+  void Function(bool success)? onProbe,
+}) async {
+  final success = await probe(serverName, url);
+  onProbe?.call(success);
+  return success;
+}
+
+class CorplinkNodeProbeObservation {
+  const CorplinkNodeProbeObservation({
+    required this.success,
+    required this.checkedAt,
+  });
+
+  final bool success;
+  final DateTime checkedAt;
+}
+
 Future<SgCoreStatus> refreshCorplinkNodeStatus(
   String serverName, {
   String healthUrl = '',
+  void Function(bool success)? onProbe,
 }) async {
   if (!globalState.isStart) {
     await globalState.appController.updateStatus(true);
@@ -58,7 +80,12 @@ Future<SgCoreStatus> refreshCorplinkNodeStatus(
     reconnect: clashCore.reconnectCorplinkNode,
     rebuild: clashCore.rebuildCorplinkNode,
     probeUrl: healthUrl,
-    probe: probeCorplinkNodeHttps,
+    probe: (name, url) => observeCorplinkNodeProbe(
+      name,
+      url,
+      probe: probeCorplinkNodeHttps,
+      onProbe: onProbe,
+    ),
   );
 }
 

@@ -210,14 +210,11 @@ func applyCorplinkInternalDNS(option *WireGuardOption, info *corplinkWgInfo) err
 	if info == nil || len(info.DNSAddresses) == 0 {
 		return errors.New("corplink private VPN DNS unavailable")
 	}
-	servers := make([]string, 0, len(info.DNSAddresses))
 	for _, address := range info.DNSAddresses {
 		if !address.IsValid() || !address.IsPrivate() {
 			return errors.New("corplink private VPN DNS invalid")
 		}
-		servers = append(servers, "udp://"+net.JoinHostPort(address.String(), "53"))
 	}
-	option.Dns = servers
 	option.corplinkDNS = append([]netip.Addr(nil), info.DNSAddresses...)
 	option.corplinkDNSDomains = append([]string(nil), info.DNSDomains...)
 	return nil

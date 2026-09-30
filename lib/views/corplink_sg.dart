@@ -25,6 +25,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
   List<String> _discoveredNames = const [];
   final Map<String, String> _lastNodeIPs = {};
   final Map<String, int> _nodeIPChanges = {};
+  final Map<String, CorplinkNodeProbeObservation> _nodeProbeResults = {};
   bool _enabled = false;
   bool _routeOpenAi = true;
   bool _showPassword = false;
@@ -66,7 +67,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           ? '飞连未启用'
           : corplinkAuthMatchesSettings(auth, settings)
               ? '已生成授权文件，尚需检查隧道'
-              : '等待授权；SG-OpenAI 组会阻断流量，避免意外直连';
+              : '等待授权；当前不生成飞连组或自动 ChatGPT 规则';
     });
     if (settings.enabled) unawaited(_refreshLiveStatus());
   }
@@ -82,16 +83,31 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     try {
       if (_nodeSelectionSaved) {
         final selected = _nodes.where((node) => node.enabled).toList();
+        final observed = <String, bool>{};
         final statuses = recover
             ? await Future.wait([
                 for (final node in selected)
                   refreshCorplinkNodeStatus(
                     node.serverName,
-                    healthUrl: node.healthUrl,
+                    healthUrl: effectiveCorplinkNodeProbeUrl(node),
+                    onProbe: (success) => observed[node.serverName] = success,
                   ),
               ])
             : await readCorplinkNodeStatuses();
         if (!mounted) return;
+        if (recover) {
+          for (final node in selected) {
+            final success = observed[node.serverName];
+            if (success == null) {
+              _nodeProbeResults.remove(node.serverName);
+            } else {
+              _nodeProbeResults[node.serverName] = CorplinkNodeProbeObservation(
+                success: success,
+                checkedAt: DateTime.now(),
+              );
+            }
+          }
+        }
         final byName = {for (final status in statuses) status.serverName: status};
         final summary = summarizeCorplinkNodes(
           statuses,
@@ -123,6 +139,20 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
               ' · IP 变化 ${_nodeIPChanges[node.serverName] ?? 0} 次');
           if (status != null && status.endpoint.isNotEmpty) {
             lines.add('  上游端点：${status.endpoint}');
+          }
+          if (effectiveCorplinkNodeProbeUrl(node).isNotEmpty) {
+            final observation = _nodeProbeResults[node.serverName];
+            final label = isIntlCorplinkServerName(node.serverName)
+                ? 'ChatGPT HTTPS'
+                : '内网 HTTPS';
+            final checkedAt = observation?.checkedAt;
+            final time = checkedAt == null
+                ? ''
+                : ' · ${checkedAt.hour.toString().padLeft(2, '0')}:'
+                  '${checkedAt.minute.toString().padLeft(2, '0')}:'
+                  '${checkedAt.second.toString().padLeft(2, '0')}';
+            lines.add('  上次$label 探针：'
+                '${observation == null ? '未检测' : observation.success ? '有响应' : '失败'}$time');
           }
         }
         final now = DateTime.now();
@@ -309,7 +339,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           : authorized
               ? '已授权，连接状态已刷新；请查看下方隧道与 ChatGPT 检查结果'
               : '授权失败（${corplinkSgLastErrorCode.value ?? '请查看应用日志'}）；'
-                  'SG-OpenAI 组会阻断流量，普通代理仍可用');
+                  '未创建飞连节点，普通代理按原配置运行');
     } catch (error) {
       if (!mounted) return;
       setState(() => _status = '保存或应用失败：${error.runtimeType}');
@@ -417,7 +447,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           onChanged: _busy ? null : (value) => setState(() => _enabled = value),
         ),
         SwitchListTile(
-          title: const Text('OpenAI / ChatGPT 使用 SG-OpenAI'),
+          title: const Text('OpenAI / ChatGPT 自动使用已勾选 INTL 节点'),
           value: _routeOpenAi,
           onChanged: _busy ? null : (value) => setState(() => _routeOpenAi = value),
         ),
@@ -461,7 +491,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         if (_discoveredNames.isNotEmpty)
           Text('已发现：${_discoveredNames.join('、')}',
               style: Theme.of(context).textTheme.bodySmall),
-        Text('取消勾选会保留 REJECT 占位组，避免覆写脚本中的规则失去目标。',
+        Text('取消勾选后不生成该节点和组；脚本中失效的目标会由内置 REJECT 阻断。',
             style: Theme.of(context).textTheme.bodySmall),
         for (final node in _nodes) ...[
           CheckboxListTile(

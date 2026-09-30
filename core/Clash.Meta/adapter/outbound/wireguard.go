@@ -56,12 +56,13 @@ type wireGuardBind interface {
 
 type WireGuard struct {
 	*Base
-	lifecycleMu sync.RWMutex // protects the live stack during targeted rebuild/close
-	rebuildMu   sync.Mutex
-	bind        wireGuardBind
-	device      wireguardGoDevice
-	tunDevice   wireguardDevice
-	resolver    resolver.Resolver
+	lifecycleMu         sync.RWMutex // protects the live stack during targeted rebuild/close
+	rebuildMu           sync.Mutex
+	bind                wireGuardBind
+	device              wireguardGoDevice
+	tunDevice           wireguardDevice
+	resolver            resolver.Resolver
+	corplinkDNSMatchers []C.DomainMatcher
 
 	initOk        atomic.Bool
 	initMutex     sync.Mutex
@@ -77,17 +78,77 @@ type WireGuard struct {
 	// busyFail 记录连续业务失败（业务 dial 超时/隧道内连接失败）次数。
 	// 达到阈值（busyFailThreshold）时视为隧道 unhealthy，主动失效底层
 	// TCP 连接并触发受控重连，解决"连接看似存在但数据面无响应"的静默断链。
-	busyFail        atomic.Int32
-	busyFailResetAt atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
-	requiresRebuild atomic.Bool  // /vpn/conn needs a fresh IP stack, not an in-place peer update
-	closed          atomic.Bool
-	dohTunnelSeen   atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
+	busyFail             atomic.Int32
+	busyFailResetAt      atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
+	requiresRebuild      atomic.Bool  // /vpn/conn needs a fresh IP stack, not an in-place peer update
+	closed               atomic.Bool
+	dohTunnelSeen        atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
+	privateDNSTunnelSeen atomic.Bool // 一次性内网 DNS 隧道路径标记，不记录域名或地址
 }
 
 type CorplinkDNSPolicyInfo struct {
 	ServerName string
 	Domains    []string
 	HealthHost string
+}
+
+type corplinkPrivateDNSMatcher struct {
+	provider interface{ MatchCorplinkPrivateDomain(string) bool }
+}
+
+func (m corplinkPrivateDNSMatcher) MatchDomain(domain string) bool {
+	if m.provider == nil {
+		return true // A missing protected provider must not fall back to public DNS.
+	}
+	return m.provider.MatchCorplinkPrivateDomain(domain)
+}
+
+func NewCorplinkPrivateDNSMatcher(adapter C.ProxyAdapter) C.DomainMatcher {
+	provider, _ := adapter.(interface{ MatchCorplinkPrivateDomain(string) bool })
+	return corplinkPrivateDNSMatcher{provider: provider}
+}
+
+func CorplinkPrivateNameServers(adapter C.ProxyAdapter) []dns.NameServer {
+	udp := dns.NameServer{
+		Net: "", Addr: "192.0.2.1:53", ProxyAdapter: adapter,
+		DynamicAddress: true,
+	}
+	tcp := udp
+	tcp.Net = "tcp"
+	return []dns.NameServer{udp, tcp}
+}
+
+func (w *WireGuard) SetCorplinkDNSMatchers(matchers []C.DomainMatcher) {
+	w.lifecycleMu.Lock()
+	w.corplinkDNSMatchers = append([]C.DomainMatcher(nil), matchers...)
+	w.lifecycleMu.Unlock()
+}
+
+func (w *WireGuard) MatchCorplinkPrivateDomain(domain string) bool {
+	w.lifecycleMu.RLock()
+	if !w.option.Corplink.UseVPNDNS {
+		w.lifecycleMu.RUnlock()
+		return false
+	}
+	privateDomains := append([]string(nil), w.option.corplinkDNSDomains...)
+	healthHost := w.option.Corplink.HealthHost
+	matchers := append([]C.DomainMatcher(nil), w.corplinkDNSMatchers...)
+	w.lifecycleMu.RUnlock()
+	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
+	if domain == strings.ToLower(healthHost) && healthHost != "" {
+		return true
+	}
+	for _, suffix := range privateDomains {
+		if domain == suffix || strings.HasSuffix(domain, "."+suffix) {
+			return true
+		}
+	}
+	for _, matcher := range matchers {
+		if matcher.MatchDomain(domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *WireGuard) CorplinkDNSPolicyInfo() CorplinkDNSPolicyInfo {
@@ -833,11 +894,7 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 		// CorpLink DNS 必须经 WireGuard 隧道访问。不要按公网 DNS 地址
 		// 猜测哪些服务器可以直连，否则本地解析可能被污染，且 DoH 请求
 		// 会绕过 SG-Node。
-		nss = routeCorplinkDNSThroughTunnel(nss, outbound)
-		outbound.resolver = dns.NewResolver(dns.Config{
-			Main: nss,
-			IPv6: has6,
-		})
+		outbound.resolver = dns.NewResolver(corplinkResolverConfig(option, outbound, nss, has6))
 	}
 
 	return outbound, nil
@@ -852,6 +909,25 @@ func routeCorplinkDNSThroughTunnel(servers []dns.NameServer, tunnel C.ProxyAdapt
 		servers[i].ProxyAdapter = tunnel
 	}
 	return servers
+}
+
+func corplinkResolverConfig(
+	option WireGuardOption,
+	tunnel C.ProxyAdapter,
+	public []dns.NameServer,
+	hasIPv6 bool,
+) dns.Config {
+	config := dns.Config{
+		Main: routeCorplinkDNSThroughTunnel(public, tunnel),
+		IPv6: hasIPv6,
+	}
+	if option.Corplink.UseVPNDNS {
+		config.Policy = []dns.Policy{{
+			Matcher:     NewCorplinkPrivateDNSMatcher(tunnel),
+			NameServers: CorplinkPrivateNameServers(tunnel),
+		}}
+	}
+	return config
 }
 
 // configuredDoHEndpoint identifies the resolver transport, not an arbitrary
@@ -872,6 +948,19 @@ func configuredDoHEndpoint(metadata *C.Metadata, servers []string) bool {
 			port = "443"
 		}
 		if remote == net.JoinHostPort(u.Hostname(), port) {
+			return true
+		}
+	}
+	return false
+}
+
+func configuredPrivateDNSEndpoint(metadata *C.Metadata, option WireGuardOption) bool {
+	if metadata == nil || !option.Corplink.UseVPNDNS || metadata.DstPort != 53 ||
+		!metadata.DstIP.IsValid() {
+		return false
+	}
+	for _, address := range option.corplinkDNS {
+		if metadata.DstIP.Unmap() == address.Unmap() {
 			return true
 		}
 	}
@@ -1280,10 +1369,7 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 				break
 			}
 		}
-		nextResolver = dns.NewResolver(dns.Config{
-			Main: routeCorplinkDNSThroughTunnel(nameservers, w),
-			IPv6: hasIPv6,
-		})
+		nextResolver = dns.NewResolver(corplinkResolverConfig(replacement.option, w, nameservers, hasIPv6))
 	}
 
 	w.lifecycleMu.Lock()
@@ -1307,10 +1393,13 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 	w.requiresRebuild.Store(false)
 	w.busyFail.Store(0)
 	w.dohTunnelSeen.Store(false)
+	w.privateDNSTunnelSeen.Store(false)
 	if w.option.Corplink.UseVPNDNS {
 		// DNS policies refer to this stable adapter, but cached answers may have
 		// come from the previous CorpLink session's internal resolver.
-		resolver.ClearCache()
+		if active := resolver.DefaultResolver; active != nil {
+			active.ClearCache()
+		}
 	}
 	if oldDevice != nil {
 		oldDevice.Close()
@@ -1498,6 +1587,10 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 		w.dohTunnelSeen.CompareAndSwap(false, true) {
 		log.Infoln("[WG](%s) DoH resolver TCP connected through WireGuard tunnel", activeOption.Name)
 	}
+	if configuredPrivateDNSEndpoint(metadata, activeOption) &&
+		w.privateDNSTunnelSeen.CompareAndSwap(false, true) {
+		log.Infoln("[WG](%s) private DNS connected through WireGuard tunnel", activeOption.Name)
+	}
 	w.recordBusySuccess()
 	return NewConn(conn, w), nil
 }
@@ -1533,6 +1626,7 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 		return nil, E.New("tunnel not ready: WireGuard handshake timeout")
 	}
 	tunDevice := w.tunDevice
+	activeOption := w.option
 	w.lifecycleMu.RUnlock()
 	if err = w.ResolveUDP(ctx, metadata); err != nil {
 		// DNS 解析失败不计入隧道健康
@@ -1554,6 +1648,10 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 			w.lifecycleMu.RUnlock()
 		}
 		return nil, E.New("packetConn is nil")
+	}
+	if configuredPrivateDNSEndpoint(metadata, activeOption) &&
+		w.privateDNSTunnelSeen.CompareAndSwap(false, true) {
+		log.Infoln("[WG](%s) private DNS UDP socket opened through WireGuard tunnel", activeOption.Name)
 	}
 	w.recordBusySuccess()
 	return NewPacketConn(pc, w), nil

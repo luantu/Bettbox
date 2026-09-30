@@ -411,7 +411,8 @@ Set<String> mergeCorplinkNodeOverlay(
         'corplink-device-name': auth['device_name']?.toString() ?? 'SG-Node',
         'corplink-vpn-server-name': name,
         'corplink-public-key': keys.publicKey,
-        if (!isIntlCorplinkServerName(name)) 'corplink-use-vpn-dns': true,
+        if (name.toLowerCase() == 'fuzhou-node-1')
+          'corplink-use-vpn-dns': true,
         if (selection.healthUrl.isNotEmpty)
           'corplink-health-host': Uri.parse(selection.healthUrl).host,
         'corplink-refresh-threshold-hours': 48,

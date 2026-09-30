@@ -35,6 +35,92 @@ func TestConfiguredDoHEndpointMatchesOnlyHTTPSResolver(t *testing.T) {
 	}
 }
 
+func TestConfiguredPrivateDNSEndpointMatchesOnlyCurrentVPNResolver(t *testing.T) {
+	option := WireGuardOption{
+		Corplink:    CorplinkOption{UseVPNDNS: true},
+		corplinkDNS: []netip.Addr{netip.MustParseAddr("10.0.0.53")},
+	}
+	matching := &C.Metadata{DstIP: netip.MustParseAddr("10.0.0.53"), DstPort: 53}
+	if !configuredPrivateDNSEndpoint(matching, option) {
+		t.Fatal("current private DNS was not recognized")
+	}
+	if configuredPrivateDNSEndpoint(&C.Metadata{
+		DstIP: netip.MustParseAddr("10.0.0.53"), DstPort: 443,
+	}, option) || configuredPrivateDNSEndpoint(&C.Metadata{
+		DstIP: netip.MustParseAddr("10.0.0.54"), DstPort: 53,
+	}, option) {
+		t.Fatal("unconfigured endpoint was mistaken for private VPN DNS")
+	}
+	option.Corplink.UseVPNDNS = false
+	if configuredPrivateDNSEndpoint(matching, option) {
+		t.Fatal("INTL DoH node was mistaken for private VPN DNS")
+	}
+}
+
+type suffixPrivateMatcher string
+
+func (m suffixPrivateMatcher) MatchDomain(domain string) bool {
+	return strings.HasSuffix(domain, "."+string(m))
+}
+
+func TestCorplinkPrivateDNSMatcherTracksCurrentSessionScope(t *testing.T) {
+	w := &WireGuard{option: WireGuardOption{
+		Corplink: CorplinkOption{
+			UseVPNDNS: true, HealthHost: "api.inside.example.invalid",
+		},
+		corplinkDNSDomains: []string{"corp.example.invalid"},
+	}}
+	if !w.MatchCorplinkPrivateDomain("api.inside.example.invalid") ||
+		!w.MatchCorplinkPrivateDomain("host.corp.example.invalid") ||
+		w.MatchCorplinkPrivateDomain("public.example.com") {
+		t.Fatal("initial private domain scope is incorrect")
+	}
+	w.SetCorplinkDNSMatchers([]C.DomainMatcher{suffixPrivateMatcher("rules.example.invalid")})
+	if !w.MatchCorplinkPrivateDomain("host.rules.example.invalid") {
+		t.Fatal("final script rule scope was not added")
+	}
+	w.lifecycleMu.Lock()
+	w.option.corplinkDNSDomains = []string{"new.example.invalid"}
+	w.lifecycleMu.Unlock()
+	if w.MatchCorplinkPrivateDomain("host.corp.example.invalid") ||
+		!w.MatchCorplinkPrivateDomain("host.new.example.invalid") {
+		t.Fatal("private domain scope stayed stale after session replacement")
+	}
+}
+
+func TestCorplinkResolverKeepsDoHForPublicAndVPNDNSForPrivate(t *testing.T) {
+	option := WireGuardOption{
+		Corplink: CorplinkOption{
+			UseVPNDNS: true, HealthHost: "api.inside.example.invalid",
+		},
+		Dns:                []string{"https://1.1.1.1/dns-query"},
+		corplinkDNS:        []netip.Addr{netip.MustParseAddr("10.0.0.53")},
+		corplinkDNSDomains: []string{"corp.example.invalid"},
+	}
+	w := &WireGuard{option: option}
+	public := []dns.NameServer{{Net: "https", Addr: "https://1.1.1.1/dns-query"}}
+	config := corplinkResolverConfig(option, w, public, false)
+	if len(config.Main) != 1 || config.Main[0].Net != "https" ||
+		config.Main[0].ProxyAdapter != w {
+		t.Fatal("public DoH was not kept inside the WireGuard outbound")
+	}
+	if len(config.Policy) != 1 || len(config.Policy[0].NameServers) != 2 ||
+		config.Policy[0].NameServers[0].Net != "" ||
+		config.Policy[0].NameServers[1].Net != "tcp" ||
+		!config.Policy[0].NameServers[0].DynamicAddress ||
+		!config.Policy[0].NameServers[1].DynamicAddress ||
+		config.Policy[0].NameServers[0].ProxyAdapter != w ||
+		config.Policy[0].NameServers[1].ProxyAdapter != w {
+		t.Fatal("private domains did not get dynamic in-tunnel DNS")
+	}
+	matcher := config.Policy[0].Matcher
+	if !matcher.MatchDomain("api.inside.example.invalid") ||
+		!matcher.MatchDomain("host.corp.example.invalid") ||
+		matcher.MatchDomain("chatgpt.com") {
+		t.Fatal("private DNS scope leaked into public domain resolution")
+	}
+}
+
 func writeCorplinkCookieFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "cookies.txt")
@@ -312,7 +398,7 @@ func TestParseCorplinkDNSAddressesRejectsNonLiteralAndUnsafeIP(t *testing.T) {
 	}
 }
 
-func TestCorplinkInternalDNSRequiresPrivateAddressAndNoPublicFallback(t *testing.T) {
+func TestCorplinkInternalDNSKeepsPublicDoHAndPrivateMetadata(t *testing.T) {
 	publicDoH := []string{"https://1.1.1.1/dns-query"}
 	private := &corplinkWgInfo{
 		DNSAddresses: []netip.Addr{netip.MustParseAddr("10.104.0.53")},
@@ -324,8 +410,9 @@ func TestCorplinkInternalDNSRequiresPrivateAddressAndNoPublicFallback(t *testing
 	if err := applyCorplinkInternalDNS(&option, private); err != nil {
 		t.Fatalf("private VPN DNS was rejected: %v", err)
 	}
-	if len(option.Dns) != 1 || option.Dns[0] != "udp://10.104.0.53:53" {
-		t.Fatalf("private DNS was not used as the only in-tunnel resolver")
+	if len(option.Dns) != 1 || option.Dns[0] != publicDoH[0] ||
+		len(option.corplinkDNS) != 1 || option.corplinkDNS[0].String() != "10.104.0.53" {
+		t.Fatalf("private DNS metadata replaced the public DoH default")
 	}
 	for _, addresses := range [][]netip.Addr{
 		nil,
