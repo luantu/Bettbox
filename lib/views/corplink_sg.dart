@@ -497,7 +497,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(node.serverName),
-            subtitle: Text(node.enabled ? '启用独立 WireGuard 隧道与同名代理组' : '停用 · 代理组阻断'),
+            subtitle: Text(node.enabled ? '启用独立 WireGuard 隧道与同名代理组' : '停用 · 不生成节点及代理组'),
             value: node.enabled,
             onChanged: _busy ? null : (value) => _replaceNode(
               CorplinkNodeSelection(

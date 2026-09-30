@@ -79,7 +79,7 @@ func (c *client) ExchangeContext(ctx context.Context, m *D.Msg) (*D.Msg, error) 
 		// Resolvers MUST resend queries over TCP if they receive a truncated UDP response (with TC=1 set)!
 		if msg != nil && msg.Truncated && network == "udp" {
 			network = "tcp"
-			log.Debugln("[DNS] Truncated reply from %s:%s for %s over UDP, retrying over TCP", c.host, c.port, m.Question[0].String())
+			log.Debugln("[DNS] truncated UDP reply; retrying over TCP")
 			var tcpConn net.Conn
 			tcpConn, err = c.dialer.DialContext(ctx, network, addr)
 			if err != nil {
@@ -104,7 +104,7 @@ func (c *client) ExchangeContext(ctx context.Context, m *D.Msg) (*D.Msg, error) 
 
 func (c *client) ResetConnection() {}
 
-func newClient(addr string, resolver resolver.Resolver, netType string, params map[string]string, proxyAdapter C.ProxyAdapter, proxyName string, dynamicAddress bool) *client {
+func newClient(addr string, resolver resolver.Resolver, netType string, params map[string]string, proxyAdapter C.ProxyAdapter, proxyName string, dynamicAddress bool, dynamicAddressIndex int) *client {
 	host, port, _ := net.SplitHostPort(addr)
 	c := &client{
 		port:   port,
@@ -116,7 +116,11 @@ func newClient(addr string, resolver resolver.Resolver, netType string, params m
 		c.schema = "tcp"
 	}
 	if dynamicAddress {
-		if provider, ok := proxyAdapter.(interface{ CorplinkDNSAddress() (string, error) }); ok {
+		if provider, ok := proxyAdapter.(interface{ CorplinkDNSAddressAt(int) (string, error) }); ok {
+			c.dynamicAddress = func() (string, error) {
+				return provider.CorplinkDNSAddressAt(dynamicAddressIndex)
+			}
+		} else if provider, ok := proxyAdapter.(interface{ CorplinkDNSAddress() (string, error) }); ok && dynamicAddressIndex == 0 {
 			c.dynamicAddress = provider.CorplinkDNSAddress
 		} else {
 			c.dynamicAddress = func() (string, error) {

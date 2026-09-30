@@ -165,10 +165,9 @@ func (r *Resolver) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.Msg, e
 	}()
 
 	q := m.Question[0]
-	domain := msgToDomain(m)
 	msg, expireTime, hit := getMsgFromCache(r.cache, q)
 	if hit {
-		log.Debugln("[DNS] cache hit %s --> %s, expire at %s", domain, msgToLogString(msg), expireTime.Format("2006-01-02 15:04:05"))
+		log.Debugln("[DNS] cache hit, expire at %s", expireTime.Format("2006-01-02 15:04:05"))
 		now := time.Now()
 		if expireTime.Before(now) {
 			setMsgTTL(msg, uint32(1)) // Continue fetch
@@ -411,13 +410,14 @@ func (r *Resolver) ResetConnection() {
 }
 
 type NameServer struct {
-	Net            string
-	Addr           string
-	ProxyAdapter   C.ProxyAdapter
-	ProxyName      string
-	Params         map[string]string
-	PreferH3       bool
-	DynamicAddress bool
+	Net                 string
+	Addr                string
+	ProxyAdapter        C.ProxyAdapter
+	ProxyName           string
+	Params              map[string]string
+	PreferH3            bool
+	DynamicAddress      bool
+	DynamicAddressIndex int
 }
 
 func (ns NameServer) Equal(ns2 NameServer) bool {
@@ -431,7 +431,8 @@ func (ns NameServer) Equal(ns2 NameServer) bool {
 		ns.ProxyName == ns2.ProxyName &&
 		maps.Equal(ns.Params, ns2.Params) &&
 		ns.PreferH3 == ns2.PreferH3 &&
-		ns.DynamicAddress == ns2.DynamicAddress {
+		ns.DynamicAddress == ns2.DynamicAddress &&
+		ns.DynamicAddressIndex == ns2.DynamicAddressIndex {
 		return true
 	}
 	return false
@@ -461,6 +462,7 @@ func (ns NameServer) transportEqual(ns2 NameServer) bool {
 		ns.ProxyName == ns2.ProxyName &&
 		ns.PreferH3 == ns2.PreferH3 &&
 		ns.DynamicAddress == ns2.DynamicAddress &&
+		ns.DynamicAddressIndex == ns2.DynamicAddressIndex &&
 		paramsEqual(ns.Params, ns2.Params) &&
 		paramsEqual(ns2.Params, ns.Params)
 }

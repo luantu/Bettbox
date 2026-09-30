@@ -104,9 +104,11 @@ func TestCorplinkResolverKeepsDoHForPublicAndVPNDNSForPrivate(t *testing.T) {
 		config.Main[0].ProxyAdapter != w {
 		t.Fatal("public DoH was not kept inside the WireGuard outbound")
 	}
-	if len(config.Policy) != 1 || len(config.Policy[0].NameServers) != 2 ||
+	if len(config.Policy) != 1 || len(config.Policy[0].NameServers) != 4 ||
 		config.Policy[0].NameServers[0].Net != "" ||
 		config.Policy[0].NameServers[1].Net != "tcp" ||
+		config.Policy[0].NameServers[2].DynamicAddressIndex != 1 ||
+		config.Policy[0].NameServers[3].Net != "tcp" ||
 		!config.Policy[0].NameServers[0].DynamicAddress ||
 		!config.Policy[0].NameServers[1].DynamicAddress ||
 		config.Policy[0].NameServers[0].ProxyAdapter != w ||
@@ -118,6 +120,23 @@ func TestCorplinkResolverKeepsDoHForPublicAndVPNDNSForPrivate(t *testing.T) {
 		!matcher.MatchDomain("host.corp.example.invalid") ||
 		matcher.MatchDomain("chatgpt.com") {
 		t.Fatal("private DNS scope leaked into public domain resolution")
+	}
+}
+
+func TestCorplinkPrivateDNSIncludesBackupInsideSameTunnel(t *testing.T) {
+	w := &WireGuard{}
+	servers := CorplinkPrivateNameServers(w)
+	if len(servers) != 4 {
+		t.Fatalf("private DNS transports = %d, want UDP/TCP for main and backup", len(servers))
+	}
+	for index, server := range servers {
+		if server.ProxyAdapter != w || !server.DynamicAddress ||
+			server.DynamicAddressIndex != index/2 {
+			t.Fatalf("private DNS transport %d is not bound to this WG and its address", index)
+		}
+		if wantTCP := index%2 == 1; (server.Net == "tcp") != wantTCP {
+			t.Fatalf("private DNS transport %d has wrong network", index)
+		}
 	}
 }
 
@@ -262,7 +281,7 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 		if r.URL.Path != "/vpn/conn" || r.Method != http.MethodPost {
 			t.Fatalf("unexpected data-plane request: %s %s", r.Method, r.URL.Path)
 		}
-		_, _ = io.WriteString(w, `{"code":0,"data":{"ip":"10.113.65.196","ipv6":"","ip_mask":"24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","setting":{"vpn_mtu":1400}}}`)
+		_, _ = io.WriteString(w, `{"code":0,"data":{"ip":"10.113.65.196","ipv6":"","ip_mask":"24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","setting":{"vpn_mtu":1400,"vpn_dns":"not-an-ip","vpn_dns_domain_split":["bad/domain"]}}}`)
 	}))
 	defer data.Close()
 	_, port, _ := net.SplitHostPort(data.Listener.Addr().String())
@@ -361,6 +380,7 @@ func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
 			APIServer: control.URL, CookieFile: cookieFile,
 			VPNServerName: name, PublicKey: publicKeys[index],
 			Code: "JBSWY3DPEHPK3PXP", DeviceID: "shared-device",
+			UseVPNDNS: index == 1,
 		})
 		if err != nil {
 			t.Fatalf("node %s failed: %v", name, err)
@@ -368,7 +388,11 @@ func TestCorplinkTwoNodesUseSeparateTokensAndKeys(t *testing.T) {
 		if info.IP != ips[index] || info.Port != 34080+index {
 			t.Fatalf("node %s used another tunnel IP or endpoint: %+v", name, info)
 		}
-		if len(info.DNSAddresses) != 1 || info.DNSAddresses[0].String() != dnsIPs[index] ||
+		if index == 0 {
+			if len(info.DNSAddresses) != 0 || len(info.DNSDomains) != 0 {
+				t.Fatal("public-DoH node retained unrequested private DNS metadata")
+			}
+		} else if len(info.DNSAddresses) != 1 || info.DNSAddresses[0].String() != dnsIPs[index] ||
 			len(info.DNSDomains) != 1 || info.DNSDomains[0] != "corp.example.invalid" {
 			t.Fatalf("node %s did not retain its private DNS metadata", name)
 		}

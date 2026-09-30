@@ -394,6 +394,18 @@ func (p *autoCloseProxyAdapter) CorplinkDNSAddress() (string, error) {
 	return "", fmt.Errorf("private VPN DNS provider unavailable")
 }
 
+func (p *autoCloseProxyAdapter) CorplinkDNSAddressAt(index int) (string, error) {
+	if provider, ok := UnderlyingProxyAdapter(p).(interface {
+		CorplinkDNSAddressAt(int) (string, error)
+	}); ok {
+		return provider.CorplinkDNSAddressAt(index)
+	}
+	if index == 0 {
+		return p.CorplinkDNSAddress()
+	}
+	return "", fmt.Errorf("private VPN backup DNS unavailable")
+}
+
 func (p *autoCloseProxyAdapter) MatchCorplinkPrivateDomain(domain string) bool {
 	if provider, ok := UnderlyingProxyAdapter(p).(interface {
 		MatchCorplinkPrivateDomain(string) bool

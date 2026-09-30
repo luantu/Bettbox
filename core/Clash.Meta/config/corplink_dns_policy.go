@@ -20,11 +20,8 @@ func (m corplinkDomainRuleMatcher) MatchDomain(domain string) bool {
 type corplinkProviderDomainMatcher struct{ provider P.RuleProvider }
 
 func (m corplinkProviderDomainMatcher) MatchDomain(domain string) bool {
-	if m.provider.Count() == 0 {
-		// Until the provider is ready, its protected scope is unknown. Claim
-		// queries rather than allowing the public resolver to see a private name.
-		return true
-	}
+	// An empty or not-yet-loaded provider cannot match a routing rule either.
+	// Never widen its DNS policy to unrelated public domains.
 	return m.provider.Match(&C.Metadata{Host: domain}, C.RuleMatchHelper{})
 }
 
@@ -94,11 +91,11 @@ func appendCorplinkDNSPolicies(
 					return errors.New("corplink DNS rule provider unavailable")
 				}
 				if provider.Behavior() == P.IPCIDR {
-					return errors.New("corplink DNS IP-only rule cannot protect a domain")
+					continue // IP-only sets have no query name to protect.
 				}
 				matchers = append(matchers, corplinkProviderDomainMatcher{provider: provider})
 			default:
-				return errors.New("corplink DNS rule type cannot be protected")
+				continue // Non-domain rules cannot choose DNS before routing.
 			}
 		}
 		wg.SetCorplinkDNSMatchers(matchers)

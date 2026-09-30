@@ -87,9 +87,11 @@ func TestCorplinkOneNodeFailureKeepsOtherNodesAndAirportConfig(t *testing.T) {
 			continue
 		}
 		protected = true
-		if len(policy.NameServers) != 2 ||
+		if len(policy.NameServers) != 4 ||
 			!policy.NameServers[0].DynamicAddress ||
 			!policy.NameServers[1].DynamicAddress ||
+			policy.NameServers[2].DynamicAddressIndex != 1 ||
+			!policy.NameServers[3].DynamicAddress ||
 			policy.NameServers[0].ProxyAdapter == nil ||
 			policy.NameServers[1].ProxyAdapter == nil {
 			t.Fatal("CorpLink private DNS policy was not bound to the active WG")

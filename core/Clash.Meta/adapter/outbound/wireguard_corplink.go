@@ -575,15 +575,17 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 	}
 	if wg.Data.Setting != nil {
 		info.MTU = wg.Data.Setting.VPNMTU
-		info.DNSAddresses, err = parseCorplinkDNSAddresses(
-			wg.Data.Setting.VPNDNS, wg.Data.Setting.VPNDNSBackup,
-		)
-		if err != nil {
-			return nil, err
-		}
-		info.DNSDomains, err = normalizeCorplinkDNSDomains(wg.Data.Setting.VPNDNSDomainSplit)
-		if err != nil {
-			return nil, err
+		if opt.UseVPNDNS {
+			info.DNSAddresses, err = parseCorplinkDNSAddresses(
+				wg.Data.Setting.VPNDNS, wg.Data.Setting.VPNDNSBackup,
+			)
+			if err != nil {
+				return nil, err
+			}
+			info.DNSDomains, err = normalizeCorplinkDNSDomains(wg.Data.Setting.VPNDNSDomainSplit)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	log.Infoln("[WG-Corplink] fetched wg_info: ip=%s", info.IP)

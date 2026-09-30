@@ -12,6 +12,18 @@ type dynamicDNSAdapter struct {
 	address string
 }
 
+type dynamicBackupDNSAdapter struct {
+	C.ProxyAdapter
+	addresses []string
+}
+
+func (d *dynamicBackupDNSAdapter) CorplinkDNSAddressAt(index int) (string, error) {
+	if index >= len(d.addresses) {
+		return "", errors.New("VPN backup DNS unavailable")
+	}
+	return d.addresses[index], nil
+}
+
 func (d *dynamicDNSAdapter) CorplinkDNSAddress() (string, error) {
 	return d.address, nil
 }
@@ -59,5 +71,30 @@ func TestDynamicPrivateDNSNameServerUsesItsProxyAddressProvider(t *testing.T) {
 	adapter.address = "10.0.0.54:53"
 	if address, err := client.dialAddress(); err != nil || address != "10.0.0.54:53" {
 		t.Fatal("name server retained stale DNS after node rebuild")
+	}
+}
+
+func TestDynamicPrivateDNSBackupUsesCurrentSecondAddress(t *testing.T) {
+	adapter := &dynamicBackupDNSAdapter{addresses: []string{
+		"10.0.0.53:53", "10.0.0.54:53",
+	}}
+	servers := transform([]NameServer{{
+		Net: "tcp", Addr: "192.0.2.1:53", ProxyAdapter: adapter,
+		DynamicAddress: true, DynamicAddressIndex: 1,
+	}}, nil)
+	client, ok := servers[0].(*client)
+	if !ok {
+		t.Fatal("unexpected dynamic backup DNS transport")
+	}
+	if address, err := client.dialAddress(); err != nil || address != "10.0.0.54:53" {
+		t.Fatal("backup DNS did not select the second server")
+	}
+	adapter.addresses[1] = "10.0.0.55:53"
+	if address, err := client.dialAddress(); err != nil || address != "10.0.0.55:53" {
+		t.Fatal("backup DNS address stayed stale after rebuild")
+	}
+	adapter.addresses = adapter.addresses[:1]
+	if address, err := client.dialAddress(); err == nil || address != "" {
+		t.Fatal("missing backup DNS fell back outside the VPN")
 	}
 }

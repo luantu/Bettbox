@@ -109,13 +109,17 @@ func NewCorplinkPrivateDNSMatcher(adapter C.ProxyAdapter) C.DomainMatcher {
 }
 
 func CorplinkPrivateNameServers(adapter C.ProxyAdapter) []dns.NameServer {
-	udp := dns.NameServer{
-		Net: "", Addr: "192.0.2.1:53", ProxyAdapter: adapter,
-		DynamicAddress: true,
+	servers := make([]dns.NameServer, 0, 4)
+	for index := 0; index < 2; index++ {
+		udp := dns.NameServer{
+			Net: "", Addr: "192.0.2.1:53", ProxyAdapter: adapter,
+			DynamicAddress: true, DynamicAddressIndex: index,
+		}
+		tcp := udp
+		tcp.Net = "tcp"
+		servers = append(servers, udp, tcp)
 	}
-	tcp := udp
-	tcp.Net = "tcp"
-	return []dns.NameServer{udp, tcp}
+	return servers
 }
 
 func (w *WireGuard) SetCorplinkDNSMatchers(matchers []C.DomainMatcher) {
@@ -168,12 +172,17 @@ func (w *WireGuard) CorplinkDNSPolicyInfo() CorplinkDNSPolicyInfo {
 // DNS transports bound to this same WireGuard instance. A targeted rebuild
 // updates the address with the IP stack, so no stale server can be queried.
 func (w *WireGuard) CorplinkDNSAddress() (string, error) {
+	return w.CorplinkDNSAddressAt(0)
+}
+
+func (w *WireGuard) CorplinkDNSAddressAt(index int) (string, error) {
 	w.lifecycleMu.RLock()
 	defer w.lifecycleMu.RUnlock()
-	if w.closed.Load() || !w.option.Corplink.UseVPNDNS || len(w.option.corplinkDNS) == 0 {
+	if w.closed.Load() || !w.option.Corplink.UseVPNDNS ||
+		index < 0 || index >= len(w.option.corplinkDNS) {
 		return "", E.New("corplink private VPN DNS unavailable")
 	}
-	address := w.option.corplinkDNS[0]
+	address := w.option.corplinkDNS[index]
 	if !address.IsValid() || !address.IsPrivate() {
 		return "", E.New("corplink private VPN DNS invalid")
 	}

@@ -60,7 +60,7 @@ func getMsgFromCache(c dnsCache, q D.Question) (*D.Msg, time.Time, bool) {
 func putMsgToCache(c dnsCache, q D.Question, msg *D.Msg) {
 	// skip dns cache for acme challenge
 	if q.Qtype == D.TypeTXT && strings.HasPrefix(q.Name, "_acme-challenge.") {
-		log.Debugln("[DNS] dns cache ignored because of acme challenge for: %s", q.Name)
+		log.Debugln("[DNS] dns cache ignored for ACME challenge")
 		return
 	}
 
@@ -135,7 +135,8 @@ func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
 		case "quic":
 			c = newDoQ(s.Addr, resolver, s.Params, s.ProxyAdapter, s.ProxyName)
 		default:
-			c = newClient(s.Addr, resolver, s.Net, s.Params, s.ProxyAdapter, s.ProxyName, s.DynamicAddress)
+			c = newClient(s.Addr, resolver, s.Net, s.Params, s.ProxyAdapter, s.ProxyName,
+				s.DynamicAddress, s.DynamicAddressIndex)
 		}
 		c = rewrapClient(c, s.Params)
 		ret = append(ret, c)
@@ -416,7 +417,6 @@ func batchExchange(ctx context.Context, clients []dnsClient, m *D.Msg) (msg *D.M
 	cache = true
 	fast, ctx := picker.WithTimeout[*D.Msg](ctx, resolver.DefaultDNSTimeout)
 	defer fast.Close()
-	domain := msgToDomain(m)
 	_, qTypeStr := msgToQtype(m)
 	for _, client := range clients {
 		if _, isRCodeClient := client.(rcodeClient); isRCodeClient {
@@ -425,7 +425,7 @@ func batchExchange(ctx context.Context, clients []dnsClient, m *D.Msg) (msg *D.M
 		}
 		client := client // shadow define client to ensure the value captured by the closure will not be changed in the next loop
 		fast.Go(func() (*D.Msg, error) {
-			log.Debugln("[DNS] resolve %s %s from %s", domain, qTypeStr, client.Address())
+			log.Debugln("[DNS] resolve %s through configured resolver", qTypeStr)
 			m, err := client.ExchangeContext(ctx, m)
 			if err != nil {
 				return nil, err
@@ -434,7 +434,7 @@ func batchExchange(ctx context.Context, clients []dnsClient, m *D.Msg) (msg *D.M
 				// so we would ignore RCode errors from RCode clients.
 				return nil, errors.New("server failure: " + D.RcodeToString[m.Rcode])
 			}
-			log.Debugln("[DNS] %s --> %s from %s", domain, msgToLogString(m), client.Address())
+			log.Debugln("[DNS] %s answer received through configured resolver", qTypeStr)
 			return m, nil
 		})
 	}
