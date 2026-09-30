@@ -2,6 +2,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/enum/enum.dart';
 import 'package:bett_box/models/models.dart';
+import 'package:bett_box/services/corplink_node_delay_url.dart';
 import 'package:bett_box/state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -515,8 +516,13 @@ String getRealTestUrl(Ref ref, [String? testUrl]) {
 @riverpod
 int? getDelay(Ref ref, {required String proxyName, String? testUrl}) {
   final proxyCardState = ref.watch(getProxyCardStateProvider(proxyName));
-  final currentTestUrl = ref.watch(
-    getRealTestUrlProvider(proxyCardState.testUrl.getSafeValue(testUrl ?? '')),
+  final preferredUrl = proxyCardState.testUrl.getSafeValue(testUrl ?? '');
+  final ordinaryUrl = ref.watch(getRealTestUrlProvider(preferredUrl));
+  final currentTestUrl = resolveCorplinkDelayUrl(
+    proxyName: proxyCardState.proxyName,
+    preferredUrl: preferredUrl,
+    ordinaryUrl: ordinaryUrl,
+    groups: ref.watch(groupsProvider),
   );
   final delay = ref.watch(
     delayDataSourceProvider.select((state) {

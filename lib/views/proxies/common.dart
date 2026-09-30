@@ -2,6 +2,7 @@ import 'package:bett_box/clash/clash.dart';
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/enum/enum.dart';
 import 'package:bett_box/models/models.dart';
+import 'package:bett_box/services/corplink_node_delay_url.dart';
 import 'package:bett_box/state.dart';
 
 import 'package:flutter/foundation.dart';
@@ -93,8 +94,12 @@ Future<void> proxyDelayTest(Proxy proxy, [String? testUrl]) async {
   if (_isNonTestableProxy(proxy)) return;
   final appController = globalState.appController;
   final state = appController.getProxyCardState(proxy.name);
-  final url = appController.getRealTestUrl(
-    state.testUrl.getSafeValue(testUrl ?? ''),
+  final preferredUrl = state.testUrl.getSafeValue(testUrl ?? '');
+  final url = resolveCorplinkDelayUrl(
+    proxyName: state.proxyName,
+    preferredUrl: preferredUrl,
+    ordinaryUrl: appController.getRealTestUrl(preferredUrl),
+    groups: appController.getCurrentGroups(),
   );
   if (state.proxyName.isEmpty) {
     return;
@@ -152,8 +157,12 @@ Future<void> delayTest(
         continue;
       }
       final state = appController.getProxyCardState(proxy.name);
-      final url = appController.getRealTestUrl(
-        state.testUrl.getSafeValue(testUrl ?? ''),
+      final preferredUrl = state.testUrl.getSafeValue(testUrl ?? '');
+      final url = resolveCorplinkDelayUrl(
+        proxyName: state.proxyName,
+        preferredUrl: preferredUrl,
+        ordinaryUrl: appController.getRealTestUrl(preferredUrl),
+        groups: appController.getCurrentGroups(),
       );
       final name = state.proxyName;
       if (name.isEmpty ||
