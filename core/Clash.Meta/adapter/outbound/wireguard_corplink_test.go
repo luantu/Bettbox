@@ -14,9 +14,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/dns"
+	"github.com/metacubex/mihomo/log"
 )
 
 func TestConfiguredDoHEndpointMatchesOnlyHTTPSResolver(t *testing.T) {
@@ -300,6 +302,8 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 
 	// The test server uses a self-signed certificate; the implementation's
 	// transport intentionally mirrors the current Feilian client behavior.
+	logs := log.Subscribe()
+	defer log.UnSubscribe(logs)
 	got, err := fetchCorplinkWgInfo(CorplinkOption{
 		APIServer:     control.URL,
 		Code:          "JBSWY3DPEHPK3PXP",
@@ -314,6 +318,20 @@ func TestFetchCorplinkWgInfoSelectsNamedTCPNode(t *testing.T) {
 	}
 	if got.Server != "127.0.0.1" || got.Port != 34080 || got.IP != "10.113.65.196" || got.IPMask != "24" || got.MTU != 1400 {
 		t.Fatalf("unexpected dynamic info: %+v", got)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-logs:
+			if strings.Contains(event.Payload, "[WG-Corplink] fetched wg_info") {
+				if strings.Contains(event.Payload, got.IP) {
+					t.Fatal("control-plane info log exposed the private tunnel IP")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("missing control-plane completion log")
+		}
 	}
 }
 

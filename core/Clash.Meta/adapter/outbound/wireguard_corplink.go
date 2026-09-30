@@ -588,7 +588,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 			}
 		}
 	}
-	log.Infoln("[WG-Corplink] fetched wg_info: ip=%s", info.IP)
+	log.Infoln("[WG-Corplink] fetched wg_info for selected server")
 	return info, nil
 }
 
