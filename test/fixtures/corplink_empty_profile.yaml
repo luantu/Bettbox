@@ -1,0 +1,12 @@
+# Emulator-only empty subscription fixture; the application injects checked nodes.
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - https://1.1.1.1/dns-query

@@ -56,4 +56,25 @@ APK 已下载到本地 `outputs/android-sg-arm64-2026-09-29-upstream-merge/app-r
 - 覆盖层生成 `<服务器名称>-WG` 代理及与上游服务器同名的组；旧 `SG-Node` 保留为隐藏别名，`SG-OpenAI` 和原自动规则继续指向 INTL。脚本新增的 `RULE-SET` 保持原样；订阅里已有同名组（包括指向 `REJECT` 的组）会触发冲突，不被静默覆盖。首次注入与脚本处理后的二次注入通过可信的托管名称交接。主要代码：`lib/services/corplink_sg_overlay.dart`、`lib/state.dart`。
 - Mihomo-SG 返回每节点状态，支持定向重连、无公网网站的握手检查与单节点 IP 栈重建。一个节点在配置载入时无法连接飞连控制面，会留作不可直连、可重试的占位出站，不再令机场代理和另一健康节点整份配置失效。首页磁贴显示已连接数量，设置页显示每节点 IP、端点及变化次数；Wi‑Fi/蜂窝切换后只对未就绪节点补偿重连。主要代码：`core/Clash.Meta/adapter/outbound/wireguard.go`、`core/hub.go`、`lib/services/corplink_sg_runtime.dart`、`lib/controller.dart`、`lib/main.dart`、`lib/views/corplink_sg.dart`、`lib/views/dashboard/widgets/sg_node_status.dart`。
 - 新增回归用例覆盖双节点密钥/令牌/IP 隔离、单节点 401 时完整配置仍加载、同名组与同名代理保护、脚本改写或部分删除托管名称时的失败关闭、IP 变化只替换一个设备、并发重建/关闭及网络切换补偿。Go 低并发测试和重建路径的竞态检测已通过。提交 `e7295e8` 的 [Android SG APK 工作流](https://github.com/luantu/Bettbox/actions/runs/36555032514) 全部成功；该包 SHA-256 为 `4ec0db639ce8a2dace869082d1ec59cc5b4282262b5e886993e98efb1ba4a95f`，现作为预览包保存。外置盘空白模拟器验证了授权失败时的 `REJECT` 占位组和 VPN 启动；保留旧授权的 AVD 发现节点时暴露 `_TypeError`，已在 `b0e75fc` 修复并通过云端构建，但设备复测仍未完成。
-- 独立复核后，`3e2ebb3` 将脚本二次合并的组名与代理名分开捕获；其 [Actions run](https://github.com/luantu/Bettbox/actions/runs/36562257686) 已成功，但还可能因误删脚本新增机场代理留下悬空规则。`eebeb52` 改为来源无法判定时回退整次脚本、保留原机场配置并阻断飞连组；被抑制 `-WG` 代理的直指规则改为 `REJECT`。该版的 [Actions run 36563900839](https://github.com/luantu/Bettbox/actions/runs/36563900839) 正在进行。真机双节点和真实路由均未验收。逐项结果见 `docs/03-Bettbox飞连多节点验证用例与结果.md`，不能沿用上文单节点真机结果判定多节点完成。
+- 独立复核后，`3e2ebb3` 将脚本二次合并的组名与代理名分开捕获；其 [Actions run](https://github.com/luantu/Bettbox/actions/runs/36562257686) 已成功，但还可能因误删脚本新增机场代理留下悬空规则。`eebeb52` 改为来源无法判定时回退整次脚本、保留原机场配置并阻断飞连组；被抑制 `-WG` 代理的直指规则改为 `REJECT`。该版的 [Actions run 36563900839](https://github.com/luantu/Bettbox/actions/runs/36563900839) 已成功，但不能代替后续安全修订的构建。真机双节点和真实路由均未验收。逐项结果见 `docs/03-Bettbox飞连多节点验证用例与结果.md`，不能沿用上文单节点真机结果判定多节点完成。
+- 后续复核发现异常脚本回退时删除 `-WG` 代理名称会使下载配置中的组、子规则或 `dialer-proxy` 引用悬空。`da32aba` 改为保留同名 `type: reject` 代理，并用 Mihomo 完整配置解析测试覆盖这三类引用。进一步检查又发现普通停用和未授权状态有相同缺口：测试先行的 [run 36568251383](https://github.com/luantu/Bettbox/actions/runs/36568251383) 在旧逻辑下出现两处预期失败，`25a5a04` 将拒绝占位扩展到所有未生成真实 WireGuard 出站的已配置节点。最新完整构建为 [run 36568584470](https://github.com/luantu/Bettbox/actions/runs/36568584470)，仍需 APK 和设备验收；旧包不能作为双节点测试结论。
+
+## 2026-09-30 当前多节点方案
+
+用户随后明确缩小配置生成范围：只有勾选且授权成功的服务器才创建同名组和 `-WG` 出站；不再生成 `SG-Node`、`SG-OpenAI` 或未选节点的拒绝占位。误填为 URL 的手动节点会被拒绝并从旧保存项中过滤。ChatGPT 自动规则直指已选 INTL；INTL 未选时不生成。若脚本仍引用未选节点，相关规则改指 Mihomo 内置 `REJECT`，以免落入后续 `MATCH,DIRECT`，但不创建新的拒绝节点或组。这一版在过渡包 `ba6dc8d` 的真实账号模拟器上已确认只出现两组和两条 WG，ChatGPT 请求经 INTL WG 返回 HTTP 200；福州内网 HTTPS 当时仍超时。
+
+提交 `224338c` 进一步处理福州 DNS：同次 `/vpn/conn` 下发的私网 DNS 留在该节点会话内，受保护域名走福州 WireGuard 的 UDP/TCP 53，其他域名仍走隧道内 DoH。最终域名规则、服务端分域与设备探针共用动态匹配范围；fake-IP 不吞掉这些域名，单节点重建后更新 DNS 并清缓存。其他 TCP 服务器不默认使用福州私网 DNS。页面新增各节点最近 HTTPS 探针结果和时间。低并发 Go 目标、core、CorpLink 定向及重建竞态测试已通过；[Actions run 36648138256](https://github.com/luantu/Bettbox/actions/runs/36648138256) 正在构建。新 APK 尚未安装设备，DNS 隧道路径、福州业务、脚本实流量和真机切网仍需验证。
+
+`bd492fc` 后的模拟器和真机阶段验证显示：只生成已勾选且已授权的两个同名组与两条 WG，旧 `SG-Node`/`SG-OpenAI` 组不再出现。手机原脚本仍指旧 `SG-OpenAI`，已保留原件并启用修订副本 `CorpLinkMultiNode`。脚本修订前，一条福州内网请求记录显示 `DIRECT → BASE`；修订后的对应请求记录显示福州组/WG 和双向字节，证明后者经代理转发。手机 Wi‑Fi 本身也能访问该内网站点，因此 HTTP 200、飞连页“有响应”都不是隧道证据。Wi‑Fi／蜂窝互切时双节点保持就绪、隧道地址未见漂移，但未为每个阶段留存同一请求的出口链，切网后的业务路由仍未闭环。内网 DNS UDP 53 经福州 WG 有双向流量；公网域名的 DoH 路径仍按逐项验证记录判断。长时间稳态、单节点故障隔离和订阅更新也未通过验收，详见 `docs/03-Bettbox飞连多节点验证用例与结果.md`。
+
+2026-09-30 曾对飞连下发的两台内网 DNS 尝试标准 HTTPS `/dns-query`，均未完成 TLS 握手；但失败连接未进入手机请求历史，无法确认是否走福州 WG。手机 Wi‑Fi 又在公司内网，所以这轮测试不具备判定 DoH 能力的条件，不能据此说服务器不支持 DoH。当前保持福州 WG 内的 UDP/TCP 53，不自动切换。代理页专属测速第一次修订 `8a84d85` 虽全链构建成功，真机福州 WG 卡片仍 `Timeout`；同版本飞连页专属 HTTPS 探针有响应，也不能单独证明转发路径。脱敏诊断提交 `bafd362` 的 Actions 已成功，APK 尚未装机；后续需核对代理页选址、内核返回和对应请求出口。fork `main` 与现有 Release 未更新。
+
+## 2026-09-30 专属探针覆写修复与设备验证
+
+诊断包 `bafd362` 在真实账号 AVD 复现“设置和最终 YAML 有探针，但代理卡片没有 URL”。根因在 `core/common.go`：开启全局测速覆写后，核心载入配置时再次把所有组 URL 改成全局值，前端无法恢复原值。`7c8a76b` 根据 WG 出站已有的 CorpLink 服务器元数据识别同名 select 组，保留明确配置的专属探针；机场组继续遵循全局地址。配合 `lib/services/corplink_node_delay_url.dart` 的卡片、批量测试和结果展示选址，这次 AVD 中福州连续五次测速为 32、24、94、53、35 ms，INTL 手动测试也有响应。core 全套及 Mihomo config/dns/outbound/executor 本地测试通过，回归测试重现旧覆盖时出现预期断言失败。
+
+`7c8a76b` 的 [Actions run 36667371047](https://github.com/luantu/Bettbox/actions/runs/36667371047) 全链成功，APK SHA-256 `90aa99636554645231e488717d8bf96f53ffc1eeb84dfeaed0e373e998258298`；已同签名保留数据安装 AVD，数据目录标识未变。普通混合端口请求的实际链证实 ChatGPT 走 INTL WG、内网 RuleSet 走福州 WG，机场普通请求正常。只阻断福州外层 TCP 约 24 秒时，福州三次请求失败、页面 `1/2`，INTL 两次和机场一次请求成功；解除后约 5.1 秒自动恢复为 `2/2`。恢复时仅福州隧道地址改变，INTL 地址及两个节点端点保持不变。
+
+真实授权空 Profile 也完成验证：应用自动创建两个选中组和 WG、ChatGPT 规则，实际请求链分别命中各自 WG。恢复原订阅并下载一次更新后，两个 SG 组仍自动注入，普通代理和 ChatGPT 可用。两台下发内网 DNS 的 UDP 53 都有福州 WG 往返记录；通过固定福州入口向标准 IP/443 DoH 端点发送 RFC 8484 查询均在 TLS 握手阶段超时，因此没有启用未经验证的内网 DoH。
+
+`test/fixtures/corplink_android_validation.js`、`test/fixtures/corplink_empty_profile.yaml` 保存了不含真实域名或授权信息的复测夹具。Android SG 主工作流补充 core 与 config/dns/executor 测试，云端运行待验证。所有临时设备配置、脚本、监听端口、ADB 转发、阻断规则和下载副本已撤销，原订阅恢复，AVD 已关闭。真机仍为 `8a84d85`；新包真机测速、故障隔离、切网路径和浏览器验收、默认企业规则以及长期后台稳态尚未完成。`main` 和 Release 仍未更新。

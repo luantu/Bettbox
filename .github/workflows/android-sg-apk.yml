@@ -85,7 +85,11 @@ jobs:
 
       - name: Run Go outbound tests
         working-directory: core/Clash.Meta
-        run: go test -p 1 ./adapter/outbound/...
+        run: go test -p 1 ./adapter/outbound/... ./config ./dns ./hub/executor
+
+      - name: Run Go application core tests
+        working-directory: core
+        run: go test -p 1 ./...
 
       - name: Build corplink-rs Android login helper
         shell: bash
