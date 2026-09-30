@@ -532,10 +532,11 @@ type WireGuardOption struct {
 
 	Peers []WireGuardPeerOption `proxy:"peers,omitempty"`
 
-	RemoteDnsResolve   bool         `proxy:"remote-dns-resolve,omitempty"`
-	Dns                []string     `proxy:"dns,omitempty"`
-	corplinkDNS        []netip.Addr `proxy:"-"`
-	corplinkDNSDomains []string     `proxy:"-"`
+	RemoteDnsResolve   bool              `proxy:"remote-dns-resolve,omitempty"`
+	Dns                []string          `proxy:"dns,omitempty"`
+	corplinkDNS        []netip.Addr      `proxy:"-"`
+	corplinkDNSDomains []string          `proxy:"-"`
+	corplinkRoutes     corplinkRouteInfo `proxy:"-"`
 
 	RefreshServerIPInterval int `proxy:"refresh-server-ip-interval,omitempty"`
 }
@@ -1090,6 +1091,7 @@ func refreshCorplinkOption(option *WireGuardOption) error {
 	if err := applyCorplinkInternalDNS(option, info); err != nil {
 		return err
 	}
+	option.corplinkRoutes = info.Routes
 	if info.IP != "" {
 		option.Ip = info.IP
 		if info.IPMask != "" && !strings.Contains(option.Ip, "/") {
@@ -1420,12 +1422,16 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 
 // CorplinkStatus contains only connection telemetry; no cookies, keys or OTP.
 type CorplinkStatus struct {
-	Initialized     bool   `json:"initialized"`
-	Ready           bool   `json:"ready"`
-	RebuildRequired bool   `json:"rebuildRequired"`
-	Closed          bool   `json:"closed"`
-	TunnelIP        string `json:"tunnelIp"`
-	Endpoint        string `json:"endpoint"`
+	Initialized     bool     `json:"initialized"`
+	Ready           bool     `json:"ready"`
+	RebuildRequired bool     `json:"rebuildRequired"`
+	Closed          bool     `json:"closed"`
+	TunnelIP        string   `json:"tunnelIp"`
+	Endpoint        string   `json:"endpoint"`
+	RoutesPresent   bool     `json:"routesPresent"`
+	RouteSplit      []string `json:"routeSplit,omitempty"`
+	RouteFull       []string `json:"routeFull,omitempty"`
+	RouteInvalid    int      `json:"routeInvalid,omitempty"`
 }
 
 func (w *WireGuard) CorplinkStatus() CorplinkStatus {
@@ -1437,10 +1443,18 @@ func (w *WireGuard) CorplinkStatus() CorplinkStatus {
 		Closed:          w.closed.Load(),
 		TunnelIP:        w.option.Ip,
 		Endpoint:        w.tcpDialTarget(),
+		RoutesPresent:   w.option.corplinkRoutes.Present,
+		RouteSplit:      append([]string(nil), w.option.corplinkRoutes.Split...),
+		RouteFull:       append([]string(nil), w.option.corplinkRoutes.Full...),
+		RouteInvalid:    w.option.corplinkRoutes.Invalid,
 	}
 	if w.device == nil && w.requiresRebuild.Load() && !w.initOk.Load() {
 		status.TunnelIP = ""
 		status.Endpoint = ""
+		status.RoutesPresent = false
+		status.RouteSplit = nil
+		status.RouteFull = nil
+		status.RouteInvalid = 0
 	}
 	if status.Initialized && !status.RebuildRequired && !status.Closed {
 		if bind, ok := w.bind.(interface{ HasReadyConn() bool }); ok {

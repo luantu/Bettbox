@@ -172,21 +172,71 @@ type CorplinkOption struct {
 	RefreshHour int `proxy:"corplink-refresh-hour,omitempty"`
 }
 
+type corplinkWgSettings struct {
+	VPNMTU            int      `json:"vpn_mtu"`
+	VPNDNS            string   `json:"vpn_dns"`
+	VPNDNSBackup      string   `json:"vpn_dns_backup"`
+	VPNDNSDomainSplit []string `json:"vpn_dns_domain_split"`
+	VPNRouteSplit     []string `json:"vpn_route_split"`
+	VPNRouteFull      []string `json:"vpn_route_full"`
+	IPv6RouteSplit    []string `json:"v6_route_split"`
+	IPv6RouteFull     []string `json:"v6_route_full"`
+}
+
+// Route metadata is read-only; forwarding policy remains in user scripts.
+type corplinkRouteInfo struct {
+	Present bool
+	Split   []string
+	Full    []string
+	Invalid int
+}
+
+func corplinkRoutesFromSettings(setting *corplinkWgSettings) corplinkRouteInfo {
+	var result corplinkRouteInfo
+	if setting == nil {
+		return result
+	}
+	result.Present = setting.VPNRouteSplit != nil || setting.VPNRouteFull != nil ||
+		setting.IPv6RouteSplit != nil || setting.IPv6RouteFull != nil
+	parse := func(lists ...[]string) []string {
+		var prefixes []string
+		seen := make(map[string]bool)
+		for _, list := range lists {
+			for _, raw := range list {
+				value := strings.TrimSpace(raw)
+				prefix, err := netip.ParsePrefix(value)
+				if err != nil {
+					if address, addressErr := netip.ParseAddr(value); addressErr == nil && address.Zone() == "" {
+						prefix = netip.PrefixFrom(address, address.BitLen())
+					} else {
+						result.Invalid++
+						continue
+					}
+				}
+				value = prefix.Masked().String()
+				if !seen[value] {
+					prefixes = append(prefixes, value)
+					seen[value] = true
+				}
+			}
+		}
+		return prefixes
+	}
+	result.Split = parse(setting.VPNRouteSplit, setting.IPv6RouteSplit)
+	result.Full = parse(setting.VPNRouteFull, setting.IPv6RouteFull)
+	return result
+}
+
 type corplinkRespWgInfo struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    *struct {
-		IP        string `json:"ip"`
-		IPv6      string `json:"ipv6"`
-		IPMask    string `json:"ip_mask"`
-		Mode      int    `json:"mode"`
-		PublicKey string `json:"public_key"`
-		Setting   *struct {
-			VPNMTU            int      `json:"vpn_mtu"`
-			VPNDNS            string   `json:"vpn_dns"`
-			VPNDNSBackup      string   `json:"vpn_dns_backup"`
-			VPNDNSDomainSplit []string `json:"vpn_dns_domain_split"`
-		} `json:"setting"`
+		IP        string              `json:"ip"`
+		IPv6      string              `json:"ipv6"`
+		IPMask    string              `json:"ip_mask"`
+		Mode      int                 `json:"mode"`
+		PublicKey string              `json:"public_key"`
+		Setting   *corplinkWgSettings `json:"setting"`
 	} `json:"data"`
 }
 
@@ -201,6 +251,7 @@ type corplinkWgInfo struct {
 	Port            int
 	DNSAddresses    []netip.Addr
 	DNSDomains      []string
+	Routes          corplinkRouteInfo
 }
 
 func applyCorplinkInternalDNS(option *WireGuardOption, info *corplinkWgInfo) error {
@@ -572,6 +623,7 @@ func fetchCorplinkWgInfo(opt CorplinkOption) (*corplinkWgInfo, error) {
 		MTU:             0,
 		Server:          node.IP,
 		Port:            node.VPNPort,
+		Routes:          corplinkRoutesFromSettings(wg.Data.Setting),
 	}
 	if wg.Data.Setting != nil {
 		info.MTU = wg.Data.Setting.VPNMTU
