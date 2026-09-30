@@ -13,6 +13,10 @@ class SgCoreStatus {
     required this.closed,
     required this.tunnelIp,
     required this.endpoint,
+    this.routesPresent = false,
+    this.routeSplit = const [],
+    this.routeFull = const [],
+    this.routeInvalid = 0,
   });
 
   final String serverName;
@@ -23,6 +27,14 @@ class SgCoreStatus {
   final bool closed;
   final String tunnelIp;
   final String endpoint;
+  final bool routesPresent;
+  final List<String> routeSplit;
+  final List<String> routeFull;
+  final int routeInvalid;
+
+  static List<String> _routeList(dynamic value) => List<String>.unmodifiable(
+        value is List ? value.whereType<String>() : const <String>[],
+      );
 
   factory SgCoreStatus.fromJson(Map<dynamic, dynamic> json) => SgCoreStatus(
         serverName: json['serverName'] as String? ?? '',
@@ -33,6 +45,12 @@ class SgCoreStatus {
         closed: json['closed'] == true,
         tunnelIp: json['tunnelIp'] as String? ?? '',
         endpoint: json['endpoint'] as String? ?? '',
+        routesPresent: json['routesPresent'] == true,
+        routeSplit: _routeList(json['routeSplit']),
+        routeFull: _routeList(json['routeFull']),
+        routeInvalid: json['routeInvalid'] is num
+            ? (json['routeInvalid'] as num).toInt()
+            : 0,
       );
 
   SgConnectionPhase get phase {

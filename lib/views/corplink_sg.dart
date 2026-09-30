@@ -140,6 +140,15 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           if (status != null && status.endpoint.isNotEmpty) {
             lines.add('  上游端点：${status.endpoint}');
           }
+          if (status != null && status.routesPresent) {
+            lines.add('  下发分流路由：${status.routeSplit.isEmpty ? '空列表' : status.routeSplit.join('、')}');
+            lines.add('  全隧道路由：${status.routeFull.length} 条（不自动用于分流）');
+            if (status.routeInvalid > 0) {
+              lines.add('  路由字段中 ${status.routeInvalid} 条无效，未纳入列表');
+            }
+          } else {
+            lines.add('  下发路由：尚未取得');
+          }
           if (effectiveCorplinkNodeProbeUrl(node).isNotEmpty) {
             final observation = _nodeProbeResults[node.serverName];
             final label = isIntlCorplinkServerName(node.serverName)
