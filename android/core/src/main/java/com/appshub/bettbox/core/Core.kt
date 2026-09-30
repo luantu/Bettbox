@@ -8,7 +8,7 @@ object Core {
 
     private val protectLogCount = AtomicInteger(0)
 
-    private external fun startTun(fd: Int, cb: TunInterface)
+    private external fun startTun(fd: Int, cb: TunInterface): Boolean
     private external fun suspend(suspended: Int)
     external fun stopTun()
 
@@ -32,8 +32,8 @@ object Core {
         fd: Int,
         protect: (Int) -> Boolean,
         resolverProcess: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress, uid: Int) -> String
-    ) {
-        startTun(fd, object : TunInterface {
+    ): Boolean {
+        return startTun(fd, object : TunInterface {
             override fun protect(fd: Int) {
                 runCatching {
                     val accepted = protect(fd)

@@ -348,6 +348,7 @@ const _$ActionMethodEnumMap = {
   ActionMethod.startTun: 'startTun',
   ActionMethod.stopTun: 'stopTun',
   ActionMethod.getRunTime: 'getRunTime',
+  ActionMethod.getAndroidVpnReady: 'getAndroidVpnReady',
   ActionMethod.updateDns: 'updateDns',
   ActionMethod.getAndroidVpnOptions: 'getAndroidVpnOptions',
   ActionMethod.getCurrentProfileName: 'getCurrentProfileName',

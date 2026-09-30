@@ -669,11 +669,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         if (!canStart) return
 
-        com.appshub.bettbox.core.Core.startTun(
+        val coreStarted = com.appshub.bettbox.core.Core.startTun(
             fd = fd ?: 0,
             protect = this@VpnPlugin::protect,
             resolverProcess = this@VpnPlugin::resolverProcess,
         )
+
+        if (!coreStarted) {
+            GlobalState.runLock.withLock { GlobalState.updateRunState(RunState.STOP) }
+            bettBoxService?.stop()
+            ServicePlugin.notifyVpnStartFailed()
+            return
+        }
 
         GlobalState.runLock.withLock {
             if (GlobalState.currentRunState != RunState.START) {

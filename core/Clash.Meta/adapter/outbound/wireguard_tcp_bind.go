@@ -47,6 +47,9 @@ const tcpStaleTimeout = 90 * time.Second
 // 读循环应跳过该帧继续处理，而不是终止整条隧道连接。
 var errBadFrameLength = errors.New("invalid TCP WireGuard frame length")
 
+// An explicit reset invalidates a dial, not the endpoint's health/backoff.
+var errTCPTransportReset = errors.New("TCP WireGuard transport reset")
+
 type tcpReqLen [4]byte
 
 func (l *tcpReqLen) Len() int {
@@ -130,12 +133,13 @@ type tcpWireGuardBind struct {
 	// mu guards the single-flight dial + per-endpoint backoff state so that
 	// only one goroutine establishes a TCP connection at a time, and broken
 	// tunnels fail fast and back off instead of causing a dial storm.
-	mu        sync.Mutex
-	lastFail  map[string]time.Time
-	failCount map[string]uint32
-	dialing   map[string]bool
-	dialDone  map[string]chan struct{}
-	connSeq   atomic.Uint64 // 连接代次分配器
+	mu                  sync.Mutex
+	lastFail            map[string]time.Time
+	failCount           map[string]uint32
+	dialing             map[string]bool
+	dialDone            map[string]chan struct{}
+	connSeq             atomic.Uint64 // 连接代次分配器
+	transportGeneration uint64        // guarded by mu; fences in-flight dials across reset
 }
 
 var _ wgconn.Bind = (*tcpWireGuardBind)(nil)
@@ -298,14 +302,21 @@ func (t *tcpWireGuardBind) InvalidateEndpoint(endpoint string) {
 // between the resolved dial target and the connectAddr host form.
 func (t *tcpWireGuardBind) ReconnectTransport() {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.transportGeneration++
+	for key, done := range t.dialDone {
+		close(done)
+		delete(t.dialDone, key)
+		delete(t.dialing, key)
+	}
 	for k := range t.lastFail {
 		delete(t.lastFail, k)
 	}
 	for k := range t.failCount {
 		delete(t.failCount, k)
 	}
-	t.mu.Unlock()
-
+	// Keep reset and dial publication atomic. A new-generation dial must not
+	// publish a socket while this sweep is still clearing the previous map.
 	t.tcpConnMap.Range(func(k, v interface{}) bool {
 		if state, ok := v.(*tcpConnState); ok && state != nil {
 			key, _ := k.(string)
@@ -510,7 +521,21 @@ func (t *tcpWireGuardBind) getConn(endpoint wgconn.Endpoint) (*tcpConnState, err
 
 func (t *tcpWireGuardBind) dialSingleFlight(endpoint wgconn.Endpoint, key string) (*tcpConnState, error) {
 	t.mu.Lock()
-	if t.dialing[key] {
+	generation := t.transportGeneration
+	for {
+		if generation != t.transportGeneration {
+			t.mu.Unlock()
+			return nil, errTCPTransportReset
+		}
+		// Recheck under the flight lock: getConn's fast-path miss may have
+		// raced another dial publishing its connection.
+		if v, ok := t.tcpConnMap.Load(key); ok {
+			t.mu.Unlock()
+			return v.(*tcpConnState), nil
+		}
+		if !t.dialing[key] {
+			break
+		}
 		// 已有 goroutine 正在 dial：等它完成，然后复用已建立的连接（或重试）
 		ch := t.dialDone[key]
 		t.mu.Unlock()
@@ -521,10 +546,7 @@ func (t *tcpWireGuardBind) dialSingleFlight(endpoint wgconn.Endpoint, key string
 		case <-t.ctx.Done():
 			return nil, net.ErrClosed
 		}
-		if v, ok := t.tcpConnMap.Load(key); ok {
-			return v.(*tcpConnState), nil
-		}
-		return t.dialSingleFlight(endpoint, key)
+		t.mu.Lock()
 	}
 
 	if remaining := t.backoffRemainingLocked(key); remaining > 0 {
@@ -534,13 +556,24 @@ func (t *tcpWireGuardBind) dialSingleFlight(endpoint wgconn.Endpoint, key string
 	}
 
 	t.dialing[key] = true
-	t.dialDone[key] = make(chan struct{})
+	ch := make(chan struct{})
+	t.dialDone[key] = ch
 	t.mu.Unlock()
 
 	log.Infoln("[WG-TCP] dialing %s", key)
 	dialCtx, cancel := context.WithTimeout(t.ctx, tcpDialTimeout)
 	raw, err := t.dialer(dialCtx)
 	cancel()
+	t.mu.Lock()
+	if generation != t.transportGeneration {
+		// Reset already released this flight's waiters. Never remove or close
+		// the next generation's flight, or record an obsolete dial failure.
+		t.mu.Unlock()
+		if raw != nil {
+			_ = raw.Close()
+		}
+		return nil, errTCPTransportReset
+	}
 	if err == nil {
 		select {
 		case <-t.closeChan:
@@ -550,14 +583,14 @@ func (t *tcpWireGuardBind) dialSingleFlight(endpoint wgconn.Endpoint, key string
 		}
 	}
 
-	t.mu.Lock()
 	delete(t.dialing, key)
-	ch := t.dialDone[key]
 	delete(t.dialDone, key)
 	var state *tcpConnState
 	if err != nil {
-		t.lastFail[key] = time.Now()
-		t.failCount[key]++
+		if !errors.Is(err, ErrCorplinkNativeNotReady) {
+			t.lastFail[key] = time.Now()
+			t.failCount[key]++
+		}
 	} else {
 		tcpConn, ok := raw.(*net.TCPConn)
 		if !ok {
@@ -568,15 +601,19 @@ func (t *tcpWireGuardBind) dialSingleFlight(endpoint wgconn.Endpoint, key string
 		} else {
 			configureTCPConn(tcpConn)
 			state = newTCPConnState(tcpConn, t.connSeq.Add(1))
-			t.handleConn(state, endpoint, t.closeChan)
 			t.tcpConnMap.Store(key, state)
+			t.handleConn(state, endpoint, t.closeChan)
 		}
 	}
-	t.mu.Unlock()
 	close(ch)
+	t.mu.Unlock()
 
 	if err != nil {
-		log.Warnln("[WG-TCP] dial %s failed: %v", key, err)
+		if errors.Is(err, ErrCorplinkNativeNotReady) {
+			log.Debugln("[WG-TCP] dial %s deferred until native transport is ready", key)
+		} else {
+			log.Warnln("[WG-TCP] dial %s failed: %v", key, err)
+		}
 		return nil, err
 	}
 	log.Infoln("[WG-TCP] connected conn_id=%d to %s (TCP established, awaiting handshake)", state.connID, key)

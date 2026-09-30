@@ -4,9 +4,9 @@ import "testing"
 
 func TestNativeVpnReadinessRequiresBothProtectionAndListener(t *testing.T) {
 	for _, test := range []struct {
-		name                         string
+		name                          string
 		running, protection, listener bool
-		want                         bool
+		want                          bool
 	}{
 		{"stopped", false, true, true, false},
 		{"no protection callback", true, false, true, false},

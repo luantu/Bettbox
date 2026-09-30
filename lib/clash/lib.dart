@@ -144,6 +144,9 @@ class ClashLib extends ClashHandlerInterface with AndroidClashInterface {
     return invoke<bool>(method: ActionMethod.reconnectTunnels);
   }
 
+  Future<bool> getAndroidVpnReady() =>
+      invoke<bool>(method: ActionMethod.getAndroidVpnReady);
+
   @override
   Future<DateTime?> getRunTime() async {
     final runTimeString = await invoke<String>(method: ActionMethod.getRunTime);

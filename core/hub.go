@@ -965,6 +965,9 @@ func handleGetMode() string {
 
 func handleSetState(params string) {
 	_ = json.Unmarshal([]byte(params), state.CurrentState)
+	if nativeVpnStateChanged != nil {
+		nativeVpnStateChanged(params)
+	}
 }
 
 func handleGetConfig(params *GetConfigParams) (*config.RawConfig, error) {

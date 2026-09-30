@@ -123,6 +123,7 @@ const (
 	setStateMethod                       Method = "setState"
 	getAndroidVpnOptionsMethod           Method = "getAndroidVpnOptions"
 	getRunTimeMethod                     Method = "getRunTime"
+	getAndroidVpnReadyMethod             Method = "getAndroidVpnReady"
 	getCurrentProfileNameMethod          Method = "getCurrentProfileName"
 	crashMethod                          Method = "crash"
 	setupConfigMethod                    Method = "setupConfig"

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/component/process"
 	"github.com/metacubex/mihomo/constant"
@@ -85,13 +86,25 @@ func (t *TunHandler) handleResolveProcess(source, target net.Addr) string {
 }
 
 var (
-	tunLock    sync.Mutex
-	runTime    *time.Time
-	errBlocked = errors.New("blocked")
-	tunHandler atomic.Pointer[TunHandler]
+	tunLock      sync.Mutex
+	runTime      *time.Time
+	errBlocked   = errors.New("blocked")
+	tunHandler   atomic.Pointer[TunHandler]
+	vpnAdmission nativeVpnAdmission
 )
 
 func init() {
+	outbound.CorplinkTCPTransportReady = vpnAdmission.AllowsTransport
+	nativeVpnStateChanged = func(params string) {
+		var mode struct {
+			VPN *struct {
+				Enable *bool `json:"enable"`
+			} `json:"vpn-props"`
+		}
+		if json.Unmarshal([]byte(params), &mode) == nil && mode.VPN != nil && mode.VPN.Enable != nil {
+			vpnAdmission.SetMode(*mode.VPN.Enable)
+		}
+	}
 	dialer.DefaultSocketHook = func(network, address string, conn syscall.RawConn) error {
 		if platform.ShouldBlockConnection() {
 			return errBlocked
@@ -109,6 +122,7 @@ func init() {
 func handleStopTun() {
 	tunLock.Lock()
 	defer tunLock.Unlock()
+	vpnAdmission.SetReady(false)
 	runTime = nil
 	handler := tunHandler.Swap(nil)
 	if handler != nil {
@@ -116,17 +130,26 @@ func handleStopTun() {
 	}
 }
 
-func handleStartTun(fd int, callback unsafe.Pointer) {
+func handleStartTun(fd int, callback unsafe.Pointer) bool {
 	handleStopTun()
 	tunLock.Lock()
 	defer tunLock.Unlock()
 	now := time.Now()
 	runTime = &now
 	if fd != 0 {
+		if callback == nil {
+			runTime = nil
+			_ = syscall.Close(fd)
+			return false
+		}
 		if currentConfig == nil {
 			log.Warnln("[APP] handleStartTun called before setupConfig")
-			handleStopTun()
-			return
+			runTime = nil
+			_ = syscall.Close(fd)
+			if callback != nil {
+				releaseObject(callback)
+			}
+			return false
 		}
 		handler := &TunHandler{
 			callback: callback,
@@ -134,15 +157,35 @@ func handleStartTun(fd int, callback unsafe.Pointer) {
 		}
 		tunHandler.Store(handler)
 		initTunHook()
-		tunListener, _ := t.Start(fd, currentConfig.General.Tun.Device, currentConfig.General.Tun.Stack, currentConfig.General.Tun.DisableICMPForwarding, uint32(currentConfig.General.Tun.MTU), currentConfig.General.IPv6, currentConfig.General.Tun.CongestionController)
-		if tunListener != nil {
+		tunListener, err := t.Start(fd, currentConfig.General.Tun.Device, currentConfig.General.Tun.Stack, currentConfig.General.Tun.DisableICMPForwarding, uint32(currentConfig.General.Tun.MTU), currentConfig.General.IPv6, currentConfig.General.Tun.CongestionController)
+		if err == nil && tunListener != nil {
 			log.Infoln("TUN address: %v", tunListener.Address())
 			handler.listener = tunListener
+			vpnAdmission.SetReady(true)
 		} else {
-			removeTunHook()
+			if tunListener != nil {
+				_ = tunListener.Close()
+			}
 			tunHandler.Store(nil)
+			handler.close()
+			runTime = nil
+			log.Warnln("[APP] Android TUN initialization failed")
+			return false
 		}
+	} else if callback != nil {
+		// Proxy-only mode has no TUN handler to own the JNI reference.
+		releaseObject(callback)
 	}
+	return true
+}
+
+func handleGetAndroidVpnReady() bool {
+	tunLock.Lock()
+	defer tunLock.Unlock()
+	handler := tunHandler.Load()
+	return nativeVpnReady(runTime != nil,
+		handler != nil && handler.callback != nil,
+		handler != nil && handler.listener != nil)
 }
 
 func handleGetRunTime() string {
@@ -237,6 +280,9 @@ func nextHandle(action *Action, result ActionResult) bool {
 	case getRunTimeMethod:
 		result.success(handleGetRunTime())
 		return true
+	case getAndroidVpnReadyMethod:
+		result.success(handleGetAndroidVpnReady())
+		return true
 	case getCurrentProfileNameMethod:
 		result.success(handleGetCurrentProfileName())
 		return true
@@ -262,8 +308,7 @@ func quickStart(initParamsChar *C.char, paramsChar *C.char, stateParamsChar *C.c
 
 //export startTUN
 func startTUN(fd C.int, callback unsafe.Pointer) bool {
-	handleStartTun(int(fd), callback)
-	return true
+	return handleStartTun(int(fd), callback)
 }
 
 //export getRunTime

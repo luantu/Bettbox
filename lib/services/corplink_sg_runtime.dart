@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:bett_box/clash/clash.dart';
+import 'package:bett_box/common/system.dart';
 import 'package:bett_box/plugins/vpn.dart';
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
@@ -69,19 +71,29 @@ class CorplinkNodeProbeObservation {
 final _corplinkVpnStartGate = CorplinkVpnStartGate();
 
 Future<void> ensureCorplinkVpnReady() async {
+  final needsNativeTun = system.isAndroid && globalState.config.vpnProps.enable;
   final ready = await _corplinkVpnStartGate.ensureReady(
-    // This native time exists only after startTUN completed, not merely after
-    // Kotlin accepted the asynchronous VpnService start request.
-    isNativeReady: () async => await clashLib?.getRunTime() != null,
+    waitForNative: needsNativeTun,
+    isNativeReady: () async => await clashLib?.getAndroidVpnReady() == true,
     requestStart: () async {
-      if (!globalState.isStart) {
+      // Native readiness, not an optimistic UI timestamp, governs Android
+      // retries after a cancelled permission prompt or a failed constructor.
+      if (needsNativeTun || !globalState.isStart) {
         await globalState.appController.updateStatus(true);
       }
     },
     settle: () => Future<void>.delayed(const Duration(milliseconds: 200)),
   );
   if (!ready) throw StateError('ANDROID_VPN_START_TIMEOUT');
-  await globalState.updateStartTime();
+  if (system.isAndroid) {
+    try {
+      final nativeTime = await clashLib?.getRunTime().timeout(const Duration(seconds: 1));
+      if (nativeTime != null) globalState.startTime = nativeTime;
+    } on TimeoutException {
+      // The readiness decision already succeeded; a delayed clock read must
+      // not hold the user action for the IPC's much longer default timeout.
+    }
+  }
 }
 
 Future<SgCoreStatus> refreshCorplinkNodeStatus(

@@ -54,7 +54,7 @@ void main() {
     expect(starts, 1);
   });
 
-  test('native startup resets pre-TUN transports once before permitting either node', () async {
+  test('successful native startup does not restart on later checks', () async {
     final gate = CorplinkVpnStartGate();
     var nativeReady = false;
     final events = <String>[];
@@ -62,12 +62,11 @@ void main() {
       if (await gate.ensureReady(
         isNativeReady: () async => nativeReady,
         requestStart: () async { events.add('start'); nativeReady = true; },
-        afterStartup: () async { events.add('reset-pre-tun-transports'); },
         settle: () async {},
       )) events.add(name);
     }
     await Future.wait([refresh('INTL'), refresh('Office')]);
-    expect(events, ['start', 'reset-pre-tun-transports', 'INTL', 'Office']);
+    expect(events, ['start', 'INTL', 'Office']);
     events.clear();
     await refresh('INTL');
     expect(events, ['INTL']);

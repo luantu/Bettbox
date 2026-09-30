@@ -11,32 +11,50 @@ class CorplinkVpnStartGate {
     required Future<bool> Function() isNativeReady,
     required Future<void> Function() requestStart,
     required Future<void> Function() settle,
+    bool waitForNative = true,
+    Duration timeout = const Duration(seconds: 10),
     int maxChecks = 40,
   }) {
     if (maxChecks < 1) throw ArgumentError.value(maxChecks, 'maxChecks');
+    if (timeout <= Duration.zero) throw ArgumentError.value(timeout, 'timeout');
     final active = _inFlight;
     if (active != null) return active;
     final completer = Completer<bool>();
     _inFlight = completer.future;
+    final elapsed = Stopwatch()..start();
+    Future<T> bounded<T>(Future<T> Function() action) {
+      final remaining = timeout - elapsed.elapsed;
+      if (remaining <= Duration.zero) throw TimeoutException('VPN startup deadline');
+      return action().timeout(remaining);
+    }
     () async {
       try {
-        if (await isNativeReady()) {
+        if (!waitForNative) {
+          // Preserve desktop/proxy-only startup semantics (including their
+          // own authorization flows); this deadline is for Android TUN startup.
+          await requestStart();
           completer.complete(true);
           return;
         }
-        await requestStart();
+        if (await bounded(isNativeReady)) {
+          completer.complete(true);
+          return;
+        }
+        await bounded(requestStart);
         for (var attempt = 0; attempt < maxChecks; attempt++) {
-          if (await isNativeReady()) {
+          if (await bounded(isNativeReady)) {
             completer.complete(true);
             return;
           }
-          if (attempt + 1 < maxChecks) await settle();
+          if (attempt + 1 < maxChecks) await bounded(settle);
         }
+        completer.complete(false);
+      } on TimeoutException {
         completer.complete(false);
       } catch (error, stack) {
         completer.completeError(error, stack);
       } finally {
-        _inFlight = null;
+        if (identical(_inFlight, completer.future)) _inFlight = null;
       }
     }();
     return completer.future;

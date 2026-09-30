@@ -281,6 +281,7 @@ enum ActionMethod {
   startTun,
   stopTun,
   getRunTime,
+  getAndroidVpnReady,
   updateDns,
   getAndroidVpnOptions,
   getCurrentProfileName,

@@ -26,6 +26,7 @@ import com.appshub.bettbox.R
 import com.appshub.bettbox.extensions.awaitResult
 import com.appshub.bettbox.extensions.getActionIntent
 import com.appshub.bettbox.models.Package
+import com.appshub.bettbox.RunState
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -44,6 +45,7 @@ import java.lang.ref.WeakReference
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.withLock
 import android.content.res.Configuration
 import android.net.Uri
 import android.graphics.Bitmap
@@ -515,9 +517,16 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
 
     private fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (!isActivityAttached) return false
-        if (requestCode == VPN_PERMISSION_REQUEST_CODE && resultCode == FlutterActivity.RESULT_OK) {
-            GlobalState.initServiceEngine()
-            vpnCallBack?.invoke()
+        if (requestCode == VPN_PERMISSION_REQUEST_CODE) {
+            val callback = vpnCallBack
+            vpnCallBack = null
+            if (resultCode == FlutterActivity.RESULT_OK) {
+                GlobalState.initServiceEngine()
+                callback?.invoke()
+            } else {
+                GlobalState.runLock.withLock { GlobalState.updateRunState(RunState.STOP) }
+                ServicePlugin.notifyVpnStartFailed()
+            }
         }
         return true
     }

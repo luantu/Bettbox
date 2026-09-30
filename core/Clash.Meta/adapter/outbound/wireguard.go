@@ -44,6 +44,15 @@ type wireguardGoDevice interface {
 	IpcSet(uapiConf string) error
 }
 
+// CorplinkTCPTransportReady is installed once by Android root init, before any
+// outbounds run. The callback must be nonblocking and read atomic admission;
+// nil preserves other platforms. It applies only to CorpLink TCP transports.
+var CorplinkTCPTransportReady func() bool
+
+// ErrCorplinkNativeNotReady is a retryable native startup condition, not an
+// endpoint/handshake failure. Callers can recognize wrapped errors with Is.
+var ErrCorplinkNativeNotReady = errors.New("CorpLink native transport not ready")
+
 // wireGuardBind 抽象 UDP（sing ClientBind）与 TCP（自定义）两种 transport，
 // 统一暴露 wireguard-go conn.Bind 及 ClientBind 的附加方法。
 type wireGuardBind interface {
@@ -375,7 +384,7 @@ func tunnelReadyTimeout() time.Duration { return tunnelReadyTimeoutValue }
 // isTunnelFailure 判断业务错误是否属于"隧道数据面失败"（应触发重建）。
 // DNS 解析失败/超时属于外部解析问题，不应误判为隧道不可用而反复重建。
 func isTunnelFailure(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, ErrCorplinkNativeNotReady) {
 		return false
 	}
 	msg := err.Error()
@@ -409,16 +418,16 @@ func isTunnelFailure(err error) bool {
 // 返回 true 表示就绪；false 表示超时或连接不存在。仅 TCP 模式使用。
 // 连接尚未建立时先主动触发底层 TCP dial（EnsureConn），保证首次业务请求/
 // 测速不会与握手竞态——DNS-over-tunnel 与连接都需隧道 ready 后才能放行。
-func (w *WireGuard) waitTunnelReady(ctx context.Context) bool {
+func (w *WireGuard) waitTunnelReady(ctx context.Context) (bool, error) {
 	if !w.option.TCP {
-		return true
+		return true, nil
 	}
 	tcpBind, ok := w.bind.(interface {
 		IsConnReady(string) bool
 		EnsureConn(string, time.Duration) (bool, error)
 	})
 	if !ok {
-		return true
+		return true, nil
 	}
 	ep := w.connectAddr.String()
 	// 连接不存在（尚未建立）时直接放行，让 Send 触发建连
@@ -433,27 +442,31 @@ func (w *WireGuard) waitTunnelReady(ctx context.Context) bool {
 			// EnsureConn forces the lazy dial and blocks on handshake completion;
 			// fall back to WaitConnReady only if EnsureConn is not usable.
 			if ready, err := tcpBind.EnsureConn(ep, timeout); err == nil {
-				return ready
+				return ready, nil
+			} else if errors.Is(err, ErrCorplinkNativeNotReady) {
+				// Native startup is a transient admission refusal. Preserve it
+				// rather than turning it into a handshake failure/rebuild signal.
+				return false, err
 			}
-			return waiter.WaitConnReady(ep, timeout)
+			return waiter.WaitConnReady(ep, timeout), nil
 		}
 		// 等待 ready 或超时
 		deadline := time.NewTimer(tunnelReadyTimeout())
 		defer deadline.Stop()
 		for {
 			if tcpBind.IsConnReady(ep) {
-				return true
+				return true, nil
 			}
 			select {
 			case <-ctx.Done():
-				return false
+				return false, nil
 			case <-deadline.C:
-				return false
+				return false, nil
 			case <-time.After(200 * time.Millisecond):
 			}
 		}
 	}
-	return true
+	return true, nil
 }
 
 // registerBusyFailure 登记一次业务失败；达到阈值时返回 true（调用方触发重建）。
@@ -645,6 +658,23 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 	return newWireGuard(option, true)
 }
 
+func (w *WireGuard) dialTCPTransport(ctx context.Context) (net.Conn, error) {
+	if w.IsCorplink() {
+		if ready := CorplinkTCPTransportReady; ready != nil && !ready() {
+			return nil, ErrCorplinkNativeNotReady
+		}
+	}
+	d := net.Dialer{}
+	// Protect the transport socket on Android before connecting the VPN peer.
+	if hook := dialer.DefaultSocketHook; hook != nil {
+		d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
+			log.Infoln("[WG](%s) protecting TCP transport socket", w.option.Name)
+			return hook(network, address, c)
+		}
+	}
+	return d.DialContext(ctx, "tcp", w.tcpDialTarget())
+}
+
 func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuard, error) {
 	outbound := &WireGuard{
 		Base: NewBase(BaseOption{
@@ -685,30 +715,7 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 		} else {
 			log.Infoln("[WG](%s) corplink auth NOT enabled", option.Name)
 		}
-		outbound.bind = newTCPWireGuardBind(context.Background(), func(ctx context.Context) (net.Conn, error) {
-			d := net.Dialer{}
-			// Android: the WireGuard TCP control connection (dialing the VPN
-			// endpoint to build the tunnel) must bypass the local VpnService,
-			// otherwise it is captured by tun0 and routed back through the
-			// proxy - which on a rule/global mode pointing at this very
-			// SG-Node proxy becomes a self-loop ("tunnel not ready" /
-			// recursive proxy of 140.224.74.169:34080 via GLOBAL). Applying
-			// dialer.DefaultSocketHook (= VpnService.protect on Android)
-			// makes this socket egress via the physical network, matching how
-			// every other outbound in mihomo is protected.
-			if hook := dialer.DefaultSocketHook; hook != nil {
-				h := hook
-				d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
-					log.Infoln("[WG](%s) protecting TCP transport socket", option.Name)
-					return h(network, address, c)
-				}
-			}
-			nc, err := d.DialContext(ctx, "tcp", outbound.tcpDialTarget())
-			if err != nil {
-				return nil, err
-			}
-			return nc, nil
-		})
+		outbound.bind = newTCPWireGuardBind(context.Background(), outbound.dialTCPTransport)
 	} else {
 		outbound.bind = wireguard.NewClientBind(context.Background(), wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
 	}
@@ -1495,7 +1502,11 @@ func (w *WireGuard) EnsureCorplinkReady(ctx context.Context) bool {
 	if w.closed.Load() || !w.IsCorplink() {
 		return false
 	}
-	return w.init(ctx) == nil && w.waitTunnelReady(ctx)
+	if w.init(ctx) != nil {
+		return false
+	}
+	ready, _ := w.waitTunnelReady(ctx)
+	return ready
 }
 
 // Reconnect forces the WireGuard transport to tear down and re-establish its
@@ -1542,7 +1553,12 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 	// traverse the tunnel; if they race the handshake the tunnel is not ready
 	// yet and the delay test times out while later traffic works. Forcing
 	// readiness here makes the very first dial succeed.
-	if !w.waitTunnelReady(ctx) {
+	ready, readinessErr := w.waitTunnelReady(ctx)
+	if readinessErr != nil {
+		w.lifecycleMu.RUnlock()
+		return nil, readinessErr
+	}
+	if !ready {
 		log.Warnln("[WG](%s) tunnel not ready within %v before dial, treating as failure", w.option.Name, tunnelReadyTimeout())
 		if w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()
@@ -1593,8 +1609,12 @@ func (w *WireGuard) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 	}
 	// TCP 建连成功，但需等待 WireGuard 握手完成（隧道 ready）业务才可用
 	w.lifecycleMu.RLock()
-	ready := w.waitTunnelReady(ctx)
+	ready, readinessErr = w.waitTunnelReady(ctx)
 	w.lifecycleMu.RUnlock()
+	if readinessErr != nil {
+		_ = conn.Close()
+		return nil, readinessErr
+	}
 	if !ready {
 		log.Warnln("[WG](%s) tunnel not ready within %v after TCP connect, treating as failure", activeOption.Name, tunnelFailureDialTimeout())
 		_ = conn.Close()
@@ -1640,7 +1660,12 @@ func (w *WireGuard) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 	}
 	// Same ordering guarantee as DialContext: wait for handshake before any
 	// tunnel traffic (UDP resolve + bind) so first-packet dials do not race it.
-	if !w.waitTunnelReady(ctx) {
+	ready, readinessErr := w.waitTunnelReady(ctx)
+	if readinessErr != nil {
+		w.lifecycleMu.RUnlock()
+		return nil, readinessErr
+	}
+	if !ready {
 		log.Warnln("[WG](%s) tunnel not ready within %v before UDP dial, treating as failure", w.option.Name, tunnelReadyTimeout())
 		if w.registerBusyFailure() {
 			w.invalidateTunnelForBusyFailure()
