@@ -95,16 +95,52 @@ Future<void> proxyDelayTest(Proxy proxy, [String? testUrl]) async {
   final appController = globalState.appController;
   final state = appController.getProxyCardState(proxy.name);
   final preferredUrl = state.testUrl.getSafeValue(testUrl ?? '');
+  final groups = appController.getCurrentGroups();
   final url = resolveCorplinkDelayUrl(
     proxyName: state.proxyName,
     preferredUrl: preferredUrl,
     ordinaryUrl: appController.getRealTestUrl(preferredUrl),
-    groups: appController.getCurrentGroups(),
+    groups: groups,
   );
   if (state.proxyName.isEmpty) {
     return;
   }
-  await _testProxyDelay(DelayTestTarget(name: state.proxyName, url: url));
+  final serverName = state.proxyName.endsWith('-WG')
+      ? state.proxyName.substring(0, state.proxyName.length - 3)
+      : '';
+  final group = groups.where((item) => item.name == serverName).firstOrNull;
+  final isDedicatedWireGuard = group != null &&
+      group.all.length == 1 &&
+      group.all.single.name == state.proxyName &&
+      group.all.single.type.toLowerCase() == 'wireguard';
+  if (isDedicatedWireGuard) {
+    // Keep the private probe URL and tunnel details out of runtime logs.
+    final source = preferredUrl.isEmpty
+        ? 'empty'
+        : url == preferredUrl
+            ? 'group'
+            : 'global';
+    commonPrint.log('[CorpLinkDelay] card probeSource=$source '
+        'groupHasProbe=${group?.testUrl?.isNotEmpty == true}');
+  }
+  try {
+    final delay = await _testProxyDelay(
+      DelayTestTarget(name: state.proxyName, url: url),
+    );
+    if (isDedicatedWireGuard) {
+      final result = delay.value == null
+          ? 'null'
+          : delay.value! > 0
+              ? 'responsive'
+              : 'timeout';
+      commonPrint.log('[CorpLinkDelay] card result=$result');
+    }
+  } catch (_) {
+    if (isDedicatedWireGuard) {
+      commonPrint.log('[CorpLinkDelay] card result=error');
+    }
+    rethrow;
+  }
   appController.addSortNum();
 }
 
