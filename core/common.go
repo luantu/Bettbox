@@ -397,10 +397,8 @@ func setupConfig(params *SetupParams) error {
 		return err
 	}
 
-	if params.OverrideTestUrl && rawCfg.ProxyGroup != nil {
-		for _, group := range rawCfg.ProxyGroup {
-			group["url"] = params.TestURL
-		}
+	if params.OverrideTestUrl {
+		overrideGroupTestURLs(rawCfg, params.TestURL)
 	}
 
 	currentConfig, err = config.ParseRawConfig(rawCfg)
@@ -415,6 +413,33 @@ func setupConfig(params *SetupParams) error {
 	runtime.GC()
 	debug.FreeOSMemory()
 	return nil
+}
+
+// Keep an explicitly configured probe on a CorpLink-managed select group.
+// Other groups retain the user's global delay-test override.
+func overrideGroupTestURLs(rawCfg *config.RawConfig, globalURL string) {
+	managedGroups := make(map[string]struct{})
+	for _, proxy := range rawCfg.Proxy {
+		name, _ := proxy["name"].(string)
+		proxyType, _ := proxy["type"].(string)
+		corplink, _ := proxy["corplink"].(map[string]any)
+		serverName, _ := corplink["corplink-vpn-server-name"].(string)
+		if strings.EqualFold(proxyType, "wireguard") && serverName != "" &&
+			name == serverName+"-WG" {
+			managedGroups[serverName] = struct{}{}
+		}
+	}
+	for _, group := range rawCfg.ProxyGroup {
+		name, _ := group["name"].(string)
+		groupType, _ := group["type"].(string)
+		probeURL, _ := group["url"].(string)
+		_, managed := managedGroups[name]
+		if managed && strings.EqualFold(groupType, "select") &&
+			strings.TrimSpace(probeURL) != "" {
+			continue
+		}
+		group["url"] = globalURL
+	}
 }
 
 func UnmarshalJson(data []byte, v any) error {
