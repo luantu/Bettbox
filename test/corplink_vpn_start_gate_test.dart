@@ -4,6 +4,75 @@ import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('an unresponsive native getter is bounded and cannot start late', () async {
+    final gate = CorplinkVpnStartGate();
+    final nativeRead = Completer<bool>();
+    var starts = 0;
+    expect(await gate.ensureReady(
+      isNativeReady: () => nativeRead.future,
+      requestStart: () async { starts++; },
+      settle: () async {},
+      timeout: const Duration(milliseconds: 30),
+    ), isFalse);
+    nativeRead.complete(false);
+    await Future<void>.delayed(Duration.zero);
+    expect(starts, 0);
+    expect(await gate.ensureReady(
+      isNativeReady: () async => true,
+      requestStart: () async { starts++; },
+      settle: () async {},
+    ), isTrue);
+    expect(starts, 0);
+  });
+
+  test('an unresponsive startup does not hold the shared gate forever', () async {
+    final gate = CorplinkVpnStartGate();
+    expect(await gate.ensureReady(
+      isNativeReady: () async => false,
+      requestStart: () => Completer<void>().future,
+      settle: () async {},
+      timeout: const Duration(milliseconds: 30),
+    ), isFalse);
+    expect(await gate.ensureReady(
+      isNativeReady: () async => true,
+      requestStart: () async {},
+      settle: () async {},
+    ), isTrue);
+  });
+
+  test('desktop and Android proxy-only startup never poll for a native TUN', () async {
+    final gate = CorplinkVpnStartGate();
+    var nativeReads = 0;
+    var starts = 0;
+    expect(await gate.ensureReady(
+      waitForNative: false,
+      isNativeReady: () async { nativeReads++; return false; },
+      requestStart: () async { starts++; },
+      settle: () async {},
+    ), isTrue);
+    expect(nativeReads, 0);
+    expect(starts, 1);
+  });
+
+  test('native startup resets pre-TUN transports once before permitting either node', () async {
+    final gate = CorplinkVpnStartGate();
+    var nativeReady = false;
+    final events = <String>[];
+    Future<void> refresh(String name) async {
+      if (await gate.ensureReady(
+        isNativeReady: () async => nativeReady,
+        requestStart: () async { events.add('start'); nativeReady = true; },
+        afterStartup: () async { events.add('reset-pre-tun-transports'); },
+        settle: () async {},
+      )) events.add(name);
+    }
+    await Future.wait([refresh('INTL'), refresh('Office')]);
+    expect(events, ['start', 'reset-pre-tun-transports', 'INTL', 'Office']);
+    events.clear();
+    await refresh('INTL');
+    expect(events, ['INTL']);
+  });
+
   test('concurrent nodes wait for native TUN readiness with one VPN start', () async {
     final gate = CorplinkVpnStartGate();
     final nativeStarted = Completer<void>();
