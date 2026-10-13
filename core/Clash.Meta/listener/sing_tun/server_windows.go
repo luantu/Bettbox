@@ -26,6 +26,8 @@ func tunNew(options tun.Options) (tunIf tun.Tun, err error) {
 	return
 }
 
+func closeUnadoptedFileDescriptor(_ int, _ bool, _ error) {}
+
 func init() {
 	tun.TunnelType = InterfaceName
 

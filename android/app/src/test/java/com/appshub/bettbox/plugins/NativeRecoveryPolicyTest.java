@@ -23,6 +23,10 @@ public final class NativeRecoveryPolicyTest {
         check(NativeRecoveryPolicy.shouldStartCore(false, true),
                 "stopped service still needs the normal start path");
         NativeRecoveryPolicy policy = new NativeRecoveryPolicy();
+        long proxyEpoch = policy.getIntentEpoch();
+        policy.cancelIntent();
+        check(policy.getIntentEpoch() != proxyEpoch,
+                "stop must invalidate a pending proxy-only bind even when VPN wanted is already false");
         check(policy.tryBegin(0, true, false, false, true) == null,
                 "an error must not start VPN without user running intent");
         policy.setWanted(true);

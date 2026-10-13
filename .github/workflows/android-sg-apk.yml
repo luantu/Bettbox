@@ -6,6 +6,8 @@ on:
     branches:
       - feat/corplink-sg-node
       - codex/feilian-android
+      - codex/corplink-native-auto-recovery
+      - main
 
 concurrency:
   group: android-sg-apk-${{ github.ref }}
@@ -94,8 +96,10 @@ jobs:
       - name: Run app-clone access policy tests
         run: |
           mkdir -p build/clone-access-tests
-          javac -d build/clone-access-tests \
+          javac -cp "$ANDROID_SDK_ROOT/platforms/android-35/android.jar" \
+            -d build/clone-access-tests \
             android/app/src/main/java/com/appshub/bettbox/services/CloneProfileAccessPolicy.java \
+            android/app/src/main/java/com/appshub/bettbox/services/CloneProfilePackageDetector.java \
             android/app/src/test/java/com/appshub/bettbox/services/CloneProfileAccessPolicyTest.java
           java -cp build/clone-access-tests com.appshub.bettbox.services.CloneProfileAccessPolicyTest
 

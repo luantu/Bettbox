@@ -157,6 +157,10 @@ func checkTunName(tunName string) (ok bool) {
 }
 
 func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Listener, err error) {
+	fileDescriptorAdopted := false
+	defer func() {
+		closeUnadoptedFileDescriptor(options.FileDescriptor, fileDescriptorAdopted, err)
+	}()
 	if len(additions) == 0 {
 		additions = []inbound.Addition{
 			inbound.WithInName("DEFAULT-TUN"),
@@ -498,6 +502,9 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
 	if err != nil {
 		err = E.Cause(err, "configure tun interface")
 		return
+	}
+	if options.FileDescriptor > 0 {
+		fileDescriptorAdopted = true
 	}
 
 	l.dnsServerIp = dnsServerIp

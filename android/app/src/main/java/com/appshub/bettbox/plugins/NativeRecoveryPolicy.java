@@ -37,6 +37,15 @@ public final class NativeRecoveryPolicy {
         retryAt = 0;
     }
 
+    public synchronized void cancelIntent() {
+        wanted = false;
+        intentEpoch++;
+        serial++;
+        inFlight = null;
+        failures = 0;
+        retryAt = 0;
+    }
+
     public synchronized boolean isWanted() {
         return wanted;
     }
@@ -47,6 +56,10 @@ public final class NativeRecoveryPolicy {
 
     public synchronized boolean isIntentCurrent(long epoch) {
         return wanted && intentEpoch == epoch;
+    }
+
+    public synchronized boolean isEpochCurrent(long epoch) {
+        return intentEpoch == epoch;
     }
 
     public synchronized boolean shouldStartAfterBind(long epoch, boolean automatic,

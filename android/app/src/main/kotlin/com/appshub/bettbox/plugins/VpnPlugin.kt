@@ -94,20 +94,29 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            var accepted = false
             val request = synchronized(bindingLock) {
-                isBind = true
-                bettBoxService = when (service) {
-                    is BettboxVpnService.LocalBinder -> service.getService()
-                    is BettboxService.LocalBinder -> service.getService()
-                    else -> throw Exception("invalid binder")
-                }
                 val pending = pendingBindRequest
                 pendingBindRequest = null
                 isBinding.set(false)
+                if (pending != null && nativeRecoveryPolicy.isEpochCurrent(pending.intentEpoch) &&
+                    !GlobalState.isCurrentlyStopping()) {
+                    isBind = true
+                    bettBoxService = when (service) {
+                        is BettboxVpnService.LocalBinder -> service.getService()
+                        is BettboxService.LocalBinder -> service.getService()
+                        else -> throw Exception("invalid binder")
+                    }
+                    accepted = true
+                }
                 pending
             }
             bindTimeoutJob?.cancel()
             bindTimeoutJob = null
+            if (!accepted) {
+                runCatching { BettboxApplication.getAppContext().unbindService(this) }
+                return
+            }
             // Automatic binds only restore the service reference. The watchdog
             // retries with a fresh token and rechecks actual native readiness.
             if (request != null && nativeRecoveryPolicy.shouldStartAfterBind(
@@ -906,24 +915,42 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStop(force: Boolean = false) {
-        nativeRecoveryPolicy.setWanted(false)
+        nativeRecoveryPolicy.cancelIntent()
         nativeRecoveryJob?.cancel()
         nativeRecoveryJob = null
+        bindTimeoutJob?.cancel()
+        bindTimeoutJob = null
+        val hadBinding = synchronized(bindingLock) {
+            pendingBindRequest = null
+            val active = isBind || isBinding.getAndSet(false)
+            isBind = false
+            active
+        }
+        if (hadBinding) {
+            runCatching { BettboxApplication.getAppContext().unbindService(connection) }
+                .onFailure { android.util.Log.w("VpnPlugin", "cancel pending bind: ${it.message}") }
+        }
         android.util.Log.i(
             "VpnPlugin",
             "handleStop force=$force caller=${Throwable().stackTrace.getOrNull(1)?.methodName ?: "unknown"}",
         )
-        val serviceRef: BaseServiceInterface?
-        val wasBound: Boolean
-        val shouldForceStop: Boolean
+        var serviceRef: BaseServiceInterface? = null
+        var shouldForceStop = false
+        var alreadyStopped = false
         GlobalState.runLock.withLock {
-            if (!force && GlobalState.currentRunState == RunState.STOP) return
-            GlobalState.updateIsStopping(true)
-            GlobalState.updateRunState(RunState.STOP)
-            ServicePlugin.notifyRunStateChanged(RunState.STOP)
-            serviceRef = bettBoxService
-            wasBound = isBind
-            shouldForceStop = force || bettBoxService == null
+            alreadyStopped = !force && GlobalState.currentRunState == RunState.STOP
+            if (!alreadyStopped) {
+                GlobalState.updateIsStopping(true)
+                GlobalState.updateRunState(RunState.STOP)
+                ServicePlugin.notifyRunStateChanged(RunState.STOP)
+                serviceRef = bettBoxService
+                shouldForceStop = force || bettBoxService == null
+            }
+        }
+
+        if (alreadyStopped) {
+            bettBoxService = null
+            return
         }
 
         suspendModule?.uninstall()
@@ -932,10 +959,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         serviceRef?.stop()
 
         runCatching {
-            if (wasBound) {
-                BettboxApplication.getAppContext().unbindService(connection)
-                isBind = false
-            }
             bettBoxService = null
         }.onFailure {
             android.util.Log.e("VpnPlugin", "unbindService error: ${it.message}")
@@ -1022,6 +1045,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         intentEpoch: Long = nativeRecoveryPolicy.intentEpoch,
     ) {
         val beginBinding = synchronized(bindingLock) {
+            if (!nativeRecoveryPolicy.isEpochCurrent(intentEpoch)) return@synchronized false
             pendingBindRequest = NativeRecoveryPolicy.mergeBind(pendingBindRequest,
                 NativeRecoveryPolicy.BindRequest(intentEpoch, automatic))
             isBinding.compareAndSet(false, true)
@@ -1032,6 +1056,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         bindTimeoutJob = scope.launch {
             delay(10_000L)
             if (isBinding.compareAndSet(true, false)) {
+                synchronized(bindingLock) { pendingBindRequest = null }
                 android.util.Log.w("VpnPlugin", "bindService timeout (10s), resetting bind state")
                 GlobalState.runLock.withLock {
                     if (GlobalState.currentRunState == RunState.PENDING) {
@@ -1052,13 +1077,28 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             )
             val res = BettboxApplication.getAppContext().bindService(intent, connection, Context.BIND_AUTO_CREATE)
             if (!res) {
-                isBinding.set(false)
+                synchronized(bindingLock) {
+                    isBinding.set(false)
+                    pendingBindRequest = null
+                }
                 bindTimeoutJob?.cancel()
                 bindTimeoutJob = null
                 android.util.Log.e("VpnPlugin", "bindService returned false (rejected by system)")
+            } else {
+                val keepBinding = synchronized(bindingLock) {
+                    isBind || (isBinding.get() && pendingBindRequest?.let {
+                        nativeRecoveryPolicy.isEpochCurrent(it.intentEpoch)
+                    } == true)
+                }
+                if (!keepBinding) runCatching {
+                    BettboxApplication.getAppContext().unbindService(connection)
+                }
             }
         } catch (e: Exception) {
-            isBinding.set(false)
+            synchronized(bindingLock) {
+                isBinding.set(false)
+                pendingBindRequest = null
+            }
             bindTimeoutJob?.cancel()
             bindTimeoutJob = null
             android.util.Log.e("VpnPlugin", "bindService error: ${e.message}")

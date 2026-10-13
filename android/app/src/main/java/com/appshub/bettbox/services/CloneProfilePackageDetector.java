@@ -17,6 +17,7 @@ import java.util.Set;
 /** Reads launchable packages installed in Android app-clone profiles. */
 public final class CloneProfilePackageDetector {
     private static final int XIAOMI_XSPACE_USER_ID = 999;
+    private static final int PER_USER_UID_RANGE = 100000;
 
     private CloneProfilePackageDetector() {}
 
@@ -48,7 +49,9 @@ public final class CloneProfilePackageDetector {
                 if (packageName != null && !packageName.trim().isEmpty()) packages.add(packageName);
             }
         }
-        if (!cloneProfileFound) return CloneProfileAccessPolicy.CloneState.none();
+        if (!cloneProfileFound) {
+            return CloneProfileAccessPolicy.CloneState.noVisibleProfile(isXiaomiFamily());
+        }
         if (packages.isEmpty()) return CloneProfileAccessPolicy.CloneState.unavailable();
         return CloneProfileAccessPolicy.CloneState.known(packages);
     }
@@ -64,9 +67,14 @@ public final class CloneProfilePackageDetector {
                 // Fall through to Xiaomi's stable XSpace user identifier.
             }
         }
+        UserHandle xspace = UserHandle.getUserHandleForUid(
+                XIAOMI_XSPACE_USER_ID * PER_USER_UID_RANGE);
+        return isXiaomiFamily() && user.equals(xspace);
+    }
+
+    private static boolean isXiaomiFamily() {
         String manufacturer = Build.MANUFACTURER.toLowerCase(Locale.ROOT);
-        boolean xiaomiFamily = manufacturer.equals("xiaomi") || manufacturer.equals("redmi") ||
+        return manufacturer.equals("xiaomi") || manufacturer.equals("redmi") ||
                 manufacturer.equals("poco");
-        return xiaomiFamily && user.getIdentifier() == XIAOMI_XSPACE_USER_ID;
     }
 }

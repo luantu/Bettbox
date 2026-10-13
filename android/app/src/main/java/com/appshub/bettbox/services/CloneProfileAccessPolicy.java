@@ -32,6 +32,10 @@ public final class CloneProfileAccessPolicy {
         public static CloneState unavailable() {
             return new CloneState(State.UNAVAILABLE, Collections.emptySet());
         }
+
+        public static CloneState noVisibleProfile(boolean cloneCapableVendor) {
+            return cloneCapableVendor ? unavailable() : none();
+        }
     }
 
     public static final class Plan {

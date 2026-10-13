@@ -134,16 +134,18 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
             packageName,
             cloneState,
         )
-        if (accessControl.enable && !accessPlan.applyPackageFilter) {
-            Log.w(TAG, "App-clone profile packages unavailable; package access control skipped to prevent clone traffic bypass")
-        } else if (accessPlan.applyPackageFilter) {
+        val filterPackages = accessPlan.allowedPackages + accessPlan.disallowedPackages
+        val packageFilterReady = accessPlan.applyPackageFilter && filterPackages.all { appPkg ->
+            runCatching { packageManager.getApplicationInfo(appPkg, 0) }.isSuccess
+        }
+        if (accessControl.enable && !packageFilterReady) {
+            Log.w(TAG, "Package access control skipped to prevent app-clone traffic bypass")
+        } else if (packageFilterReady) {
             accessPlan.allowedPackages.forEach { appPkg ->
-                runCatching { addAllowedApplication(appPkg) }
-                    .onFailure { Log.e(TAG, "Failed to allow package $appPkg: ${it.message}", it) }
+                addAllowedApplication(appPkg)
             }
             accessPlan.disallowedPackages.forEach { appPkg ->
-                runCatching { addDisallowedApplication(appPkg) }
-                    .onFailure { Log.e(TAG, "Failed to disallow package $appPkg: ${it.message}", it) }
+                addDisallowedApplication(appPkg)
             }
             Log.i(
                 TAG,

@@ -13,6 +13,13 @@ public final class CloneProfileAccessPolicyTest {
         String self = "com.appshub.bettbox.sg";
         String chatgpt = "com.openai.chatgpt";
 
+        check(CloneProfileAccessPolicy.CloneState.noVisibleProfile(true).state ==
+                        CloneProfileAccessPolicy.State.UNAVAILABLE,
+                "a clone-capable vendor with no visible profile cannot prove that app clones are absent");
+        check(CloneProfileAccessPolicy.CloneState.noVisibleProfile(false).state ==
+                        CloneProfileAccessPolicy.State.NONE,
+                "other devices may preserve the existing package-filter behavior when no clone profile exists");
+
         CloneProfileAccessPolicy.Plan disabled = CloneProfileAccessPolicy.build(
                 false, true, List.of("owner.selected"), List.of(), self,
                 CloneProfileAccessPolicy.CloneState.known(Set.of(chatgpt)));
