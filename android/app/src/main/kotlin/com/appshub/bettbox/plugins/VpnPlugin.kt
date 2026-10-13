@@ -1055,9 +1055,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         bindTimeoutJob?.cancel()
         bindTimeoutJob = scope.launch {
             delay(10_000L)
-            if (isBinding.compareAndSet(true, false)) {
-                synchronized(bindingLock) { pendingBindRequest = null }
+            val timedOut = synchronized(bindingLock) {
+                if (!isBinding.get()) false
+                else {
+                    isBinding.set(false)
+                    pendingBindRequest = null
+                    true
+                }
+            }
+            if (timedOut) {
                 android.util.Log.w("VpnPlugin", "bindService timeout (10s), resetting bind state")
+                runCatching { BettboxApplication.getAppContext().unbindService(connection) }
+                    .onFailure { android.util.Log.w("VpnPlugin", "unbind timed out service: ${it.message}") }
                 GlobalState.runLock.withLock {
                     if (GlobalState.currentRunState == RunState.PENDING) {
                         GlobalState.updateRunState(RunState.STOP)
