@@ -83,6 +83,22 @@ jobs:
       - name: Run Flutter unit tests
         run: flutter test
 
+      - name: Run native recovery policy tests
+        run: |
+          mkdir -p build/native-recovery-tests
+          javac -d build/native-recovery-tests \
+            android/app/src/main/java/com/appshub/bettbox/plugins/NativeRecoveryPolicy.java \
+            android/app/src/test/java/com/appshub/bettbox/plugins/NativeRecoveryPolicyTest.java
+          java -cp build/native-recovery-tests com.appshub.bettbox.plugins.NativeRecoveryPolicyTest
+
+      - name: Run app-clone access policy tests
+        run: |
+          mkdir -p build/clone-access-tests
+          javac -d build/clone-access-tests \
+            android/app/src/main/java/com/appshub/bettbox/services/CloneProfileAccessPolicy.java \
+            android/app/src/test/java/com/appshub/bettbox/services/CloneProfileAccessPolicyTest.java
+          java -cp build/clone-access-tests com.appshub.bettbox.services.CloneProfileAccessPolicyTest
+
       - name: Run Go outbound tests
         working-directory: core/Clash.Meta
         run: go test -p 1 ./adapter/outbound/... ./config ./dns ./hub/executor

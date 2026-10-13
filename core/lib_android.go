@@ -131,6 +131,11 @@ func handleStopTun() {
 }
 
 func handleStartTun(fd int, callback unsafe.Pointer) bool {
+	if fd > 0 {
+		// Tighten admission before teardown, including a stale proxy-only mode.
+		// This does not publish readiness; the new TUN must still finish startup.
+		vpnAdmission.SetMode(true)
+	}
 	handleStopTun()
 	tunLock.Lock()
 	defer tunLock.Unlock()
@@ -161,7 +166,6 @@ func handleStartTun(fd int, callback unsafe.Pointer) bool {
 		if err == nil && tunListener != nil {
 			log.Infoln("TUN address: %v", tunListener.Address())
 			handler.listener = tunListener
-			vpnAdmission.SetReady(true)
 		} else {
 			if tunListener != nil {
 				_ = tunListener.Close()
@@ -176,6 +180,9 @@ func handleStartTun(fd int, callback unsafe.Pointer) bool {
 		// Proxy-only mode has no TUN handler to own the JNI reference.
 		releaseObject(callback)
 	}
+	// fd is authoritative for this successful native start. Publish only after
+	// the protection callback/listener (or proxy-only cleanup) is installed.
+	vpnAdmission.SetStarted(fd > 0)
 	return true
 }
 
@@ -319,6 +326,26 @@ func getRunTime() *C.char {
 //export stopTun
 func stopTun() {
 	handleStopTun()
+}
+
+//export nativeVpnRepairRequired
+func nativeVpnRepairRequired() bool {
+	return vpnAdmission.RepairRequired()
+}
+
+//export androidTunReady
+func androidTunReady() bool {
+	return handleGetAndroidVpnReady()
+}
+
+//export restoreNativeVpnAdmission
+func restoreNativeVpnAdmission() bool {
+	tunLock.Lock()
+	defer tunLock.Unlock()
+	handler := tunHandler.Load()
+	return vpnAdmission.RestoreReady(runTime != nil,
+		handler != nil && handler.callback != nil,
+		handler != nil && handler.listener != nil)
 }
 
 //export getCurrentProfileName

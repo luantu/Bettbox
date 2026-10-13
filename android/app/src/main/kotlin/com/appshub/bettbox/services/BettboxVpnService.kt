@@ -125,19 +125,31 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
         setMtu(options.mtu.takeIf { it in 1280..65535 } ?: 9000)
 
         val accessControl = options.accessControl
-        if (accessControl.enable) {
-            when (accessControl.mode) {
-                AccessControlMode.acceptSelected -> {
-                    (accessControl.acceptList + packageName).filter { it.isNotBlank() }.distinct().forEach { appPkg ->
-                        runCatching { addAllowedApplication(appPkg) }
-                            .onFailure { Log.e(TAG, "Failed to allow package $appPkg: ${it.message}", it) }
-                    }
-                }
-                AccessControlMode.rejectSelected -> (accessControl.rejectList - packageName).filter { it.isNotBlank() }.distinct().forEach { appPkg ->
-                    runCatching { addDisallowedApplication(appPkg) }
-                        .onFailure { Log.e(TAG, "Failed to disallow package $appPkg: ${it.message}", it) }
-                }
+        val cloneState = CloneProfilePackageDetector.detect(this@BettboxVpnService)
+        val accessPlan = CloneProfileAccessPolicy.build(
+            accessControl.enable,
+            accessControl.mode == AccessControlMode.acceptSelected,
+            accessControl.acceptList,
+            accessControl.rejectList,
+            packageName,
+            cloneState,
+        )
+        if (accessControl.enable && !accessPlan.applyPackageFilter) {
+            Log.w(TAG, "App-clone profile packages unavailable; package access control skipped to prevent clone traffic bypass")
+        } else if (accessPlan.applyPackageFilter) {
+            accessPlan.allowedPackages.forEach { appPkg ->
+                runCatching { addAllowedApplication(appPkg) }
+                    .onFailure { Log.e(TAG, "Failed to allow package $appPkg: ${it.message}", it) }
             }
+            accessPlan.disallowedPackages.forEach { appPkg ->
+                runCatching { addDisallowedApplication(appPkg) }
+                    .onFailure { Log.e(TAG, "Failed to disallow package $appPkg: ${it.message}", it) }
+            }
+            Log.i(
+                TAG,
+                "Applied package access control with cloneState=${accessPlan.cloneState}, " +
+                    "allowed=${accessPlan.allowedPackages.size}, disallowed=${accessPlan.disallowedPackages.size}",
+            )
         }
 
         setSession("Bettbox")

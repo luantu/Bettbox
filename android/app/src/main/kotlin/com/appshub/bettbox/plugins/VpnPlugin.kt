@@ -11,6 +11,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.widget.Toast
 import androidx.core.content.getSystemService
 import com.appshub.bettbox.BettboxApplication
@@ -41,6 +42,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock as withCoroutineLock
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
@@ -56,6 +59,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     @Volatile
     private var isBind = false
     private val isBinding = AtomicBoolean(false)
+    private val bindingLock = Any()
+    @Volatile private var pendingBindRequest: NativeRecoveryPolicy.BindRequest? = null
 
     private var job = SupervisorJob()
     private var scope = CoroutineScope(Dispatchers.Default + job as kotlin.coroutines.CoroutineContext)
@@ -66,6 +71,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     @Volatile
     private var quickResponseEnabled = false
     private var quickResponseJob: Job? = null
+    private val nativeRecoveryPolicy = NativeRecoveryPolicy()
+    private val coreStartInFlight = AtomicBoolean(false)
+    private val coreStartMutex = Mutex()
+    @Volatile private var nativeRecoveryJob: Job? = null
     private val networkChangeLock = Any()
     private var networkBaselineReady = false
     private var lastUnderlyingNetwork: Network? = null
@@ -85,16 +94,27 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val request = synchronized(bindingLock) {
+                isBind = true
+                bettBoxService = when (service) {
+                    is BettboxVpnService.LocalBinder -> service.getService()
+                    is BettboxService.LocalBinder -> service.getService()
+                    else -> throw Exception("invalid binder")
+                }
+                val pending = pendingBindRequest
+                pendingBindRequest = null
+                isBinding.set(false)
+                pending
+            }
             bindTimeoutJob?.cancel()
             bindTimeoutJob = null
-            isBind = true
-            isBinding.set(false)
-            bettBoxService = when (service) {
-                is BettboxVpnService.LocalBinder -> service.getService()
-                is BettboxService.LocalBinder -> service.getService()
-                else -> throw Exception("invalid binder")
+            // Automatic binds only restore the service reference. The watchdog
+            // retries with a fresh token and rechecks actual native readiness.
+            if (request != null && nativeRecoveryPolicy.shouldStartAfterBind(
+                    request.intentEpoch, request.automatic,
+                    GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) {
+                handleStartService(request.intentEpoch)
             }
-            handleStartService()
         }
 
         override fun onServiceDisconnected(arg: ComponentName) {
@@ -126,6 +146,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         if (isFirstAttach) {
             scope.launch { registerNetworkCallback() }
+            if (nativeRecoveryPolicy.isWanted) startNativeRecoveryWatchdog()
         }
 
         scope.launch {
@@ -147,7 +168,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         if (GlobalState.currentRunState == RunState.START && bettBoxService == null) {
             android.util.Log.d("VpnPlugin", "VPN is running but service connection lost, rebinding...")
-            options?.let { bindService() }
+            options?.let { bindService(automatic = it.enable) }
         }
     }
 
@@ -159,6 +180,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         if (attachedMessengers.isEmpty()) {
+            nativeRecoveryJob?.cancel()
+            nativeRecoveryJob = null
             unRegisterNetworkCallback()
             job.cancel()
         }
@@ -321,6 +344,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             this.bettBoxService = null
         }
         this.options = options
+        nativeRecoveryPolicy.setWanted(options.enable)
+        if (options.enable) startNativeRecoveryWatchdog()
         when (options.enable) {
             true -> handleStartVpn()
             false -> handleStartService()
@@ -328,9 +353,79 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return true
     }
 
+    @Synchronized
+    private fun startNativeRecoveryWatchdog() {
+        if (nativeRecoveryJob?.isActive == true) return
+        nativeRecoveryJob = scope.launch {
+            while (isActive && nativeRecoveryPolicy.isWanted) {
+                delay(2000)
+                if (coreStartInFlight.get()) continue
+                // Initial permission prompts belong to the user's normal start
+                // flow. Background recovery must neither cancel nor replace it.
+                if (runCatching {
+                        android.net.VpnService.prepare(BettboxApplication.getAppContext()) != null
+                    }.getOrDefault(true)) continue
+                val token = runCatching {
+                    nativeRecoveryPolicy.tryBegin(
+                        android.os.SystemClock.elapsedRealtime(),
+                        Core.nativeVpnRepairRequired(),
+                        GlobalState.isSmartStopped,
+                        GlobalState.isCurrentlyStopping(),
+                        getActivePhysicalNetworks().isNotEmpty(),
+                    )
+                }.getOrNull() ?: continue
+                try {
+                    recoverNativeTransport(token)
+                } catch (e: Exception) {
+                    android.util.Log.w("VpnPlugin", "Native recovery failed: ${e.javaClass.simpleName}")
+                } finally {
+                    val ready = runCatching {
+                        Core.androidTunReady() && !Core.nativeVpnRepairRequired()
+                    }.getOrDefault(false)
+                    nativeRecoveryPolicy.finish(token, android.os.SystemClock.elapsedRealtime(), ready)
+                }
+            }
+        }
+    }
+
+    private suspend fun recoverNativeTransport(token: Long) {
+        if (!nativeRecoveryPolicy.isCurrent(token) || coreStartInFlight.get()) return
+        // This error can be a mode/admission mismatch, not a broken system TUN.
+        // Reconcile only after Go verifies the actual listener/protect owner.
+        if (Core.restoreNativeVpnAdmission()) {
+            android.util.Log.i("VpnPlugin", "Native transport admission reconciled without TUN restart")
+            return
+        }
+        val currentOptions = options?.takeIf { it.enable } ?: return
+        if (bettBoxService == null) {
+            bindService(automatic = true)
+            return
+        }
+        if (android.net.VpnService.prepare(BettboxApplication.getAppContext()) != null) {
+            // Revoked permission is not consent to bring up a background prompt.
+            android.util.Log.w("VpnPlugin", "Native recovery stopped: VPN permission unavailable")
+            handleStop(force = true)
+            return
+        }
+        val allowed = GlobalState.runLock.withLock {
+            if (!nativeRecoveryPolicy.isCurrent(token) || GlobalState.isSmartStopped ||
+                GlobalState.isCurrentlyStopping()) false
+            else {
+                GlobalState.updateRunState(RunState.START)
+                true
+            }
+        }
+        if (!allowed) return
+        android.util.Log.i("VpnPlugin", "Native transport unavailable; rebuilding native TUN")
+        // A failed automatic attempt keeps running intent for bounded retries.
+        // It must not send the UI's user-stop path or reauthorize the account.
+        performStartCore(currentOptions, retry = true, notifyOnFailure = false, recoveryToken = token)
+    }
+
     private fun handleStartVpn() {
+        val intentEpoch = nativeRecoveryPolicy.intentEpoch
         GlobalState.getCurrentAppPlugin()?.requestVpnPermission {
-            handleStartService()
+            if (nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) handleStartService(intentEpoch)
         }
     }
 
@@ -570,18 +665,23 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun handleStartService() {
-        if (GlobalState.isCurrentlyStopping()) {
+    private fun handleStartService(intentEpoch: Long = nativeRecoveryPolicy.intentEpoch) {
+        if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
+                GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) {
             android.util.Log.w("VpnPlugin", "VPN is in stopping state, ignore start request")
             return
         }
         if (bettBoxService == null) {
-            bindService()
+            bindService(intentEpoch = intentEpoch)
             return
         }
         
         scope.launch {
+            coreStartMutex.withCoroutineLock {
+            coreStartInFlight.set(true)
             try {
+                if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
+                        GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) return@launch
                 if (options?.enable == true) {
                     val prepareIntent = try {
                         android.net.VpnService.prepare(BettboxApplication.getAppContext())
@@ -594,7 +694,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         GlobalState.updateRunState(RunState.STOP)
                         withContext(Dispatchers.Main) {
                             GlobalState.getCurrentAppPlugin()?.requestVpnPermission {
-                                handleStartService()
+                                handleStartService(intentEpoch)
                             }
                         }
                         return@launch
@@ -602,8 +702,15 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
 
                 val currentOptions = options
+                val nativeReady = currentOptions?.enable != true ||
+                    (Core.androidTunReady() && !Core.nativeVpnRepairRequired())
                 val startAllowed = GlobalState.runLock.withLock {
-                    if (GlobalState.currentRunState == RunState.START) {
+                    if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
+                            GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) return@withLock false
+                    if (currentOptions?.enable == true &&
+                        !nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) return@withLock false
+                    if (!NativeRecoveryPolicy.shouldStartCore(
+                            GlobalState.currentRunState == RunState.START, nativeReady)) {
                         android.util.Log.d("VpnPlugin", "Service already running, refreshing notification")
                         scope.launch { startForeground() }
                         return@withLock false
@@ -620,10 +727,13 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
                 if (!startAllowed || currentOptions == null) return@launch
 
-                performStartCore(currentOptions, retry = true, notifyOnFailure = true)
+                performStartCoreInternal(currentOptions, retry = true, notifyOnFailure = true, intentEpoch = intentEpoch)
             } catch (e: Exception) {
                 android.util.Log.e("VpnPlugin", "Fatal error in start flow: ${e.message}")
-                GlobalState.updateRunState(RunState.STOP)
+                if (nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) GlobalState.updateRunState(RunState.STOP)
+            } finally {
+                coreStartInFlight.set(false)
+            }
             }
         }
     }
@@ -631,11 +741,50 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private suspend fun performStartCore(
         currentOptions: VpnOptions,
         retry: Boolean,
-        notifyOnFailure: Boolean
+        notifyOnFailure: Boolean,
+        recoveryToken: Long? = null,
     ) {
+        val intentEpoch = nativeRecoveryPolicy.intentEpoch
+        coreStartMutex.withCoroutineLock {
+            coreStartInFlight.set(true)
+            try {
+                if (recoveryToken != null) {
+                    if (!nativeRecoveryPolicy.isCurrent(recoveryToken) ||
+                        GlobalState.isSmartStopped || GlobalState.isCurrentlyStopping() ||
+                        getActivePhysicalNetworks().isEmpty()) return@withCoroutineLock
+                    // A queued normal start may already have repaired the core.
+                    // Reconcile admission from resources before deciding to rebuild.
+                    if (!Core.nativeVpnRepairRequired() || Core.restoreNativeVpnAdmission()) {
+                        return@withCoroutineLock
+                    }
+                }
+                performStartCoreInternal(currentOptions, retry, notifyOnFailure, intentEpoch, recoveryToken)
+            } finally {
+                coreStartInFlight.set(false)
+            }
+        }
+    }
+
+    private suspend fun performStartCoreInternal(
+        currentOptions: VpnOptions,
+        retry: Boolean,
+        notifyOnFailure: Boolean,
+        intentEpoch: Long,
+        recoveryToken: Long? = null,
+    ) {
+        fun currentRequest(): Boolean =
+            nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
+                GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping()) &&
+            (!currentOptions.enable ||
+            (nativeRecoveryPolicy.isIntentCurrent(intentEpoch) &&
+                (recoveryToken == null || nativeRecoveryPolicy.isCurrent(recoveryToken))))
+        if (!currentRequest()) return
+        val serviceRef = bettBoxService
         var fd: Int? = 0
+        var nativeOwnsFd = false
         try {
-            fd = bettBoxService?.start(currentOptions)
+        try {
+            fd = serviceRef?.start(currentOptions)
         } catch (e: Exception) {
             android.util.Log.e("VpnPlugin", "First start attempt failed: ${e.message}")
         }
@@ -645,13 +794,17 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 android.util.Log.w("VpnPlugin", "VPN establish failed, retrying...")
                 delay(300)
                 try {
-                    fd = bettBoxService?.start(currentOptions)
+                    fd = serviceRef?.start(currentOptions)
                 } catch (e: Exception) {
                     android.util.Log.e("VpnPlugin", "Retry start failed: ${e.message}")
                 }
             }
         }
 
+        if (!currentRequest()) {
+            serviceRef?.stop()
+            return
+        }
         if (fd == null || (currentOptions.enable && fd <= 0)) {
             android.util.Log.e("VpnPlugin", "VPN start failed after all attempts")
             GlobalState.runLock.withLock { GlobalState.updateRunState(RunState.STOP) }
@@ -663,22 +816,29 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         val canStart = GlobalState.runLock.withLock {
             if (GlobalState.currentRunState != RunState.START) {
-                bettBoxService?.stop()
+                serviceRef?.stop()
                 false
             } else true
         }
         if (!canStart) return
 
+        nativeOwnsFd = true
         val coreStarted = com.appshub.bettbox.core.Core.startTun(
             fd = fd ?: 0,
             protect = this@VpnPlugin::protect,
             resolverProcess = this@VpnPlugin::resolverProcess,
         )
 
+        if (!currentRequest()) {
+            Core.stopTun()
+            serviceRef?.stop()
+            return
+        }
+
         if (!coreStarted) {
             GlobalState.runLock.withLock { GlobalState.updateRunState(RunState.STOP) }
-            bettBoxService?.stop()
-            ServicePlugin.notifyVpnStartFailed()
+            serviceRef?.stop()
+            if (notifyOnFailure) ServicePlugin.notifyVpnStartFailed()
             return
         }
 
@@ -695,6 +855,13 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         onUpdateNetwork()
+        } finally {
+            // establish().detachFd() transfers ownership to this coroutine.
+            // Go owns it only after JNI entry; stopSelf() does not close it.
+            if (!nativeOwnsFd && (fd ?: 0) > 0) {
+                runCatching { ParcelFileDescriptor.adoptFd(fd!!).close() }
+            }
+        }
     }
 
     private fun protect(fd: Int): Boolean {
@@ -739,6 +906,9 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStop(force: Boolean = false) {
+        nativeRecoveryPolicy.setWanted(false)
+        nativeRecoveryJob?.cancel()
+        nativeRecoveryJob = null
         android.util.Log.i(
             "VpnPlugin",
             "handleStop force=$force caller=${Throwable().stackTrace.getOrNull(1)?.methodName ?: "unknown"}",
@@ -816,6 +986,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleSmartResume(options: VpnOptions): Boolean {
+        nativeRecoveryPolicy.setWanted(options.enable)
+        if (options.enable) startNativeRecoveryWatchdog()
         scope.launch {
             val startAllowed = GlobalState.runLock.withLock {
                 if (GlobalState.currentRunState == RunState.START) return@withLock false
@@ -845,8 +1017,16 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return true
     }
 
-    private fun bindService() {
-        if (!isBinding.compareAndSet(false, true)) return
+    private fun bindService(
+        automatic: Boolean = false,
+        intentEpoch: Long = nativeRecoveryPolicy.intentEpoch,
+    ) {
+        val beginBinding = synchronized(bindingLock) {
+            pendingBindRequest = NativeRecoveryPolicy.mergeBind(pendingBindRequest,
+                NativeRecoveryPolicy.BindRequest(intentEpoch, automatic))
+            isBinding.compareAndSet(false, true)
+        }
+        if (!beginBinding) return
 
         bindTimeoutJob?.cancel()
         bindTimeoutJob = scope.launch {

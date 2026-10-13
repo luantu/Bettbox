@@ -11,6 +11,9 @@ object Core {
     private external fun startTun(fd: Int, cb: TunInterface): Boolean
     private external fun suspend(suspended: Int)
     external fun stopTun()
+    external fun androidTunReady(): Boolean
+    external fun nativeVpnRepairRequired(): Boolean
+    external fun restoreNativeVpnAdmission(): Boolean
 
     init {
         System.loadLibrary("core")

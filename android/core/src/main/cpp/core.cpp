@@ -18,6 +18,24 @@ Java_com_appshub_bettbox_core_Core_stopTun(JNIEnv *) {
 }
 
 extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_appshub_bettbox_core_Core_androidTunReady(JNIEnv *, jobject) {
+    return androidTunReady() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_appshub_bettbox_core_Core_nativeVpnRepairRequired(JNIEnv *, jobject) {
+    return nativeVpnRepairRequired() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_appshub_bettbox_core_Core_restoreNativeVpnAdmission(JNIEnv *, jobject) {
+    return restoreNativeVpnAdmission() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
 JNIEXPORT void JNICALL
 Java_com_appshub_bettbox_core_Core_suspend(JNIEnv *, jobject, jint suspended) {
     suspend(suspended);
