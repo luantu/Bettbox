@@ -157,6 +157,10 @@ class MessageLookup extends MessageLookupByLibrary {
     "bypassPrivateRouteDesc": MessageLookupByLibrary.simpleMessage(
       "自動繞過私有網路 IP 位址",
     ),
+    "lanDirectRoutes": MessageLookupByLibrary.simpleMessage("區域網路直連網段"),
+    "lanDirectRoutesDesc": MessageLookupByLibrary.simpleMessage(
+      "這些網段及區域網路探索流量不進入 Android TUN",
+    ),
     "cacheAlgorithm": MessageLookupByLibrary.simpleMessage("快取演算法"),
     "cacheCorrupt": MessageLookupByLibrary.simpleMessage("快取已損壞，是否清空？"),
     "cameraPermissionDenied": MessageLookupByLibrary.simpleMessage("相機權限被拒絕"),

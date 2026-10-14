@@ -216,6 +216,12 @@ class MessageLookup extends MessageLookupByLibrary {
     "bypassPrivateRouteDesc": MessageLookupByLibrary.simpleMessage(
       "Automatically bypass private network IP addresses",
     ),
+    "lanDirectRoutes": MessageLookupByLibrary.simpleMessage(
+      "Local Network Direct Routes",
+    ),
+    "lanDirectRoutesDesc": MessageLookupByLibrary.simpleMessage(
+      "These CIDRs and local discovery traffic bypass the Android TUN",
+    ),
     "cacheAlgorithm": MessageLookupByLibrary.simpleMessage("Cache Algorithm"),
     "cacheCorrupt": MessageLookupByLibrary.simpleMessage(
       "Cache corrupted. Clear it?",

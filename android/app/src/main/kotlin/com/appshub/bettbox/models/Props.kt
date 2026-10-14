@@ -23,6 +23,7 @@ data class VpnOptions(
     val systemProxy: Boolean,
     val bypassDomain: List<String>,
     val routeAddress: List<String>,
+    val routeExcludeAddress: List<String> = emptyList(),
     val routeMode: String = "config",
     val ipv4Address: String,
     val ipv6Address: String,

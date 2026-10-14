@@ -103,6 +103,14 @@ jobs:
             android/app/src/test/java/com/appshub/bettbox/services/CloneProfileAccessPolicyTest.java
           java -cp build/clone-access-tests com.appshub.bettbox.services.CloneProfileAccessPolicyTest
 
+      - name: Run LAN route exclusion policy tests
+        run: |
+          mkdir -p build/lan-route-tests
+          javac -d build/lan-route-tests \
+            android/app/src/main/java/com/appshub/bettbox/services/LanRouteExclusionPolicy.java \
+            android/app/src/test/java/com/appshub/bettbox/services/LanRouteExclusionPolicyTest.java
+          java -cp build/lan-route-tests com.appshub.bettbox.services.LanRouteExclusionPolicyTest
+
       - name: Run Go outbound tests
         working-directory: core/Clash.Meta
         run: go test -p 1 ./adapter/outbound/... ./config ./dns ./hub/executor

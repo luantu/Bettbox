@@ -4464,6 +4464,26 @@ class AppLocalizations {
     );
   }
 
+  /// `Local Network Direct Routes`
+  String get lanDirectRoutes {
+    return Intl.message(
+      'Local Network Direct Routes',
+      name: 'lanDirectRoutes',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `These CIDRs and local discovery traffic bypass the Android TUN`
+  String get lanDirectRoutesDesc {
+    return Intl.message(
+      'These CIDRs and local discovery traffic bypass the Android TUN',
+      name: 'lanDirectRoutesDesc',
+      desc: '',
+      args: [],
+    );
+  }
+
   /// `Please enter the admin password`
   String get pleaseInputAdminPassword {
     return Intl.message(

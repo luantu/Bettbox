@@ -244,6 +244,7 @@ func handleGetAndroidVpnOptions() string {
 		SystemProxy:           state.CurrentState.VpnProps.SystemProxy,
 		AllowBypass:           state.CurrentState.VpnProps.AllowBypass,
 		RouteAddress:          currentConfig.General.Tun.RouteAddress,
+		RouteExcludeAddress:   currentConfig.General.Tun.RouteExcludeAddress,
 		RouteMode:             state.CurrentState.VpnProps.RouteMode,
 		BypassDomain:          state.CurrentState.BypassDomain,
 		DnsServerAddress:      state.GetDnsServerAddress(),

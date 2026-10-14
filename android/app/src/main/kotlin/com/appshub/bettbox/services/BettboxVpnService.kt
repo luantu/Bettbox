@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.IpPrefix
 import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Binder
@@ -17,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import com.appshub.bettbox.GlobalState
 import com.appshub.bettbox.extensions.getIpv4RouteAddress
 import com.appshub.bettbox.extensions.getIpv6RouteAddress
+import com.appshub.bettbox.extensions.getRouteExcludeAddress
 import com.appshub.bettbox.extensions.toCIDR
 import com.appshub.bettbox.models.AccessControlMode
 import com.appshub.bettbox.models.VpnOptions
@@ -115,6 +117,20 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
                     addRoute("::", 0)
                 }
             }.onFailure { Log.d("addAddress6", "IPv6 is not supported.") }
+        }
+
+        val routeExclusions = options.getRouteExcludeAddress().filter { cidr ->
+            cidr.address.address.size == 4 || options.ipv6Address.isNotEmpty()
+        }
+        if (routeExclusions.isNotEmpty()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                routeExclusions.forEach { cidr ->
+                    excludeRoute(IpPrefix(cidr.address, cidr.prefixLength))
+                }
+                Log.i(TAG, "Applied ${routeExclusions.size} Android TUN route exclusions")
+            } else {
+                Log.w(TAG, "Android TUN route exclusions require Android 13 or newer")
+            }
         }
 
         if (options.dnsServerAddress.isNotBlank()) {

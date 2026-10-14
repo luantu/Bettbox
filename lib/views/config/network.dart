@@ -676,6 +676,46 @@ class BypassPrivateRouteItem extends ConsumerWidget {
   }
 }
 
+class LanDirectRouteItem extends StatelessWidget {
+  const LanDirectRouteItem({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListItem.next(
+      title: Text(appLocalizations.lanDirectRoutes),
+      subtitle: Text(appLocalizations.lanDirectRoutesDesc),
+      delegate: NextDelegate(
+        blur: false,
+        title: appLocalizations.lanDirectRoutes,
+        widget: Consumer(
+          builder: (_, ref, _) {
+            final routes = ref.watch(
+              patchClashConfigProvider.select(
+                (state) => state.tun.routeExcludeAddress,
+              ),
+            );
+            return ListInputPage(
+              title: appLocalizations.lanDirectRoutes,
+              items: routes,
+              titleBuilder: (item) => Text(item),
+              onChange: (items) async {
+                ref
+                    .read(patchClashConfigProvider.notifier)
+                    .updateState(
+                      (state) => state.copyWith.tun(
+                        routeExcludeAddress: List.from(items),
+                      ),
+                    );
+                await _handleNetworkConfigChange(ref);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class NetworkListView extends ConsumerWidget {
   const NetworkListView({super.key});
 
@@ -716,6 +756,7 @@ class NetworkListView extends ConsumerWidget {
           if (isMipsStack) const TunCongestionControllerItem(),
           const MtuItem(),
           const BypassPrivateRouteItem(),
+          if (system.isAndroid) const LanDirectRouteItem(),
         ],
       ),
     ];

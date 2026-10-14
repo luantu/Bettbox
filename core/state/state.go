@@ -14,6 +14,7 @@ type AndroidVpnOptions struct {
 	SystemProxy           bool           `json:"systemProxy"`
 	BypassDomain          []string       `json:"bypassDomain"`
 	RouteAddress          []netip.Prefix `json:"routeAddress"`
+	RouteExcludeAddress   []netip.Prefix `json:"routeExcludeAddress"`
 	RouteMode             string         `json:"routeMode"`
 	Ipv4Address           string         `json:"ipv4Address"`
 	Ipv6Address           string         `json:"ipv6Address"`
@@ -24,10 +25,10 @@ type AndroidVpnOptions struct {
 }
 
 type AccessControl struct {
-	Enable            bool     `json:"enable"`
-	Mode              string   `json:"mode"`
-	AcceptList        []string `json:"acceptList"`
-	RejectList        []string `json:"rejectList"`
+	Enable     bool     `json:"enable"`
+	Mode       string   `json:"mode"`
+	AcceptList []string `json:"acceptList"`
+	RejectList []string `json:"rejectList"`
 }
 
 type AndroidVpnRawOptions struct {
@@ -50,8 +51,6 @@ var CurrentState = &State{
 	OnlyStatisticsProxy: false,
 	CurrentProfileName:  "",
 }
-
-
 
 func GetDnsServerAddress() string {
 	return DefaultDnsAddress
