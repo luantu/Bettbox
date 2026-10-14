@@ -16,7 +16,6 @@ import com.appshub.bettbox.TempActivity
 import com.appshub.bettbox.models.CIDR
 import com.appshub.bettbox.models.Metadata
 import com.appshub.bettbox.models.VpnOptions
-import com.appshub.bettbox.services.LanRouteExclusionPolicy
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -54,9 +53,6 @@ fun Metadata.getProtocol(): Int? = when {
 fun VpnOptions.getIpv4RouteAddress(): List<CIDR> = routeAddress.filter { it.isIpv4() }.map { it.toCIDR() }
 
 fun VpnOptions.getIpv6RouteAddress(): List<CIDR> = routeAddress.filter { it.isIpv6() }.map { it.toCIDR() }
-
-fun VpnOptions.getRouteExcludeAddress(): List<CIDR> =
-    LanRouteExclusionPolicy.effective(routeExcludeAddress).map { it.toCIDR() }
 
 fun String.isIpv4(): Boolean {
     val parts = split("/")

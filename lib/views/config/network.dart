@@ -699,11 +699,16 @@ class LanDirectRouteItem extends StatelessWidget {
               items: routes,
               titleBuilder: (item) => Text(item),
               onChange: (items) async {
+                final normalized = utils.normalizeCidrRoutes(items);
+                if (normalized == null) {
+                  globalState.showNotifier(appLocalizations.invalidIpFormat);
+                  return;
+                }
                 ref
                     .read(patchClashConfigProvider.notifier)
                     .updateState(
                       (state) => state.copyWith.tun(
-                        routeExcludeAddress: List.from(items),
+                        routeExcludeAddress: normalized,
                       ),
                     );
                 await _handleNetworkConfigChange(ref);

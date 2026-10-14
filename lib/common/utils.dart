@@ -19,6 +19,23 @@ enum IpCategory {
 }
 
 class Utils {
+  List<String>? normalizeCidrRoutes(Iterable<String> values) {
+    final normalized = <String>{};
+    for (final value in values) {
+      final route = value.trim();
+      if (route.isEmpty) continue;
+      final parts = route.split('/');
+      if (parts.length != 2) return null;
+      final address = InternetAddress.tryParse(parts[0]);
+      final prefix = int.tryParse(parts[1]);
+      if (address == null || prefix == null) return null;
+      final maxPrefix = address.type == InternetAddressType.IPv4 ? 32 : 128;
+      if (prefix < 0 || prefix > maxPrefix) return null;
+      normalized.add('${address.address.toLowerCase()}/$prefix');
+    }
+    return normalized.toList(growable: false);
+  }
+
   Color? getDelayColor(int? delay) {
     if (delay == null) return null;
     if (delay < 0) return Colors.red;

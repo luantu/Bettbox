@@ -28,6 +28,17 @@ public final class LanRouteExclusionPolicyTest {
         check(invalidIgnored.get(0).equals("10.0.0.0/8"),
                 "invalid CIDRs must not prevent a valid exclusion from applying");
 
+        check(LanRouteExclusionPolicy.forAndroid(
+                List.of("192.168.110.0/24"), 32, true).isEmpty(),
+                "Android 12 must not call the Android 13 excludeRoute API");
+        check(LanRouteExclusionPolicy.forAndroid(
+                List.of("192.168.110.0/24"), 33, false).equals(List.of(
+                "192.168.110.0/24", "169.254.0.0/16", "224.0.0.0/4")),
+                "IPv6 exclusions must be omitted when the Android VPN has no IPv6 address");
+        check(LanRouteExclusionPolicy.forAndroid(
+                List.of("192.168.110.0/24"), 33, true).size() == 5,
+                "Android 13 with IPv6 enabled must apply every effective exclusion");
+
         System.out.println("LanRouteExclusionPolicy: all behavior checks passed");
     }
 }

@@ -28,6 +28,18 @@ public final class LanRouteExclusionPolicy {
         return Collections.unmodifiableList(new ArrayList<>(routes));
     }
 
+    public static List<String> forAndroid(List<String> configured, int sdk,
+                                          boolean ipv6Enabled) {
+        if (sdk < 33) return Collections.emptyList();
+        List<String> effective = effective(configured);
+        if (ipv6Enabled || effective.isEmpty()) return effective;
+        List<String> ipv4Only = new ArrayList<>();
+        for (String route : effective) {
+            if (route.indexOf(':') < 0) ipv4Only.add(route);
+        }
+        return Collections.unmodifiableList(ipv4Only);
+    }
+
     private static boolean isValidCidr(String value) {
         int slash = value.lastIndexOf('/');
         if (slash <= 0 || slash == value.length() - 1) return false;
