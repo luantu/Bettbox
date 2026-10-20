@@ -277,8 +277,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             "beginControlPlaneBypass" -> {
                 scope.launch {
-                    val token = beginControlPlaneBypass()
-                    withContext(Dispatchers.Main) { result.success(token) }
+                    try {
+                        val token = beginControlPlaneBypass()
+                        withContext(Dispatchers.Main) { result.success(token) }
+                    } catch (_: Exception) {
+                        withContext(Dispatchers.Main) {
+                            result.error(
+                                "CONTROL_PLANE_BYPASS_FAILED",
+                                "Android VPN could not pause for CorpLink authorization",
+                                null,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1093,12 +1103,15 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 controlPlanePaused.set(false)
                 return@withCoroutineLock null
             }
-            if (Core.androidTunReady()) {
+            if (!NativeRecoveryPolicy.canStartControlPlaneHelper(
+                    true,
+                    Core.androidTunReady(),
+                )) {
                 Core.suspended(false)
                 nativeRecoveryPolicy.cancelControlPlaneBypass()
                 controlPlanePaused.set(false)
                 android.util.Log.e("VpnPlugin", "CorpLink control-plane bypass could not stop native TUN")
-                return@withCoroutineLock null
+                throw IllegalStateException("native TUN remained ready")
             }
             android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass started")
             token

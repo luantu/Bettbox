@@ -12,6 +12,11 @@ public final class NativeRecoveryPolicy {
         }
     }
 
+    public static boolean canStartControlPlaneHelper(boolean bypassRequired,
+                                                     boolean nativeTunReady) {
+        return !bypassRequired || !nativeTunReady;
+    }
+
     public static BindRequest mergeBind(BindRequest pending, BindRequest incoming) {
         if (pending == null || incoming.intentEpoch > pending.intentEpoch) return incoming;
         if (incoming.intentEpoch < pending.intentEpoch) return pending;

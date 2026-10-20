@@ -7,6 +7,12 @@ public final class NativeRecoveryPolicyTest {
     }
 
     public static void main(String[] args) {
+        check(NativeRecoveryPolicy.canStartControlPlaneHelper(false, true),
+                "a stopped or smart-paused VPN needs no temporary bypass");
+        check(NativeRecoveryPolicy.canStartControlPlaneHelper(true, false),
+                "authorization may start after a required bypass removes native TUN");
+        check(!NativeRecoveryPolicy.canStartControlPlaneHelper(true, true),
+                "authorization must fail closed while required native TUN remains ready");
         NativeRecoveryPolicy.BindRequest oldBind = new NativeRecoveryPolicy.BindRequest(1, true);
         NativeRecoveryPolicy.BindRequest newStart = new NativeRecoveryPolicy.BindRequest(3, false);
         check(NativeRecoveryPolicy.mergeBind(oldBind, newStart) == newStart,
