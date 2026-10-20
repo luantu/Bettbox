@@ -83,28 +83,16 @@ void main() {
       );
     });
 
-    test('legacy runtime state is consumed only during one-time migration', () {
+    test('legacy runtime state is never promoted to explicit user intent', () {
       expect(
         resolveVpnUserRunIntent(
           explicitIntent: null,
-          migrationComplete: false,
-          legacyRuntimeState: false,
-        ),
-        isFalse,
-      );
-      expect(
-        resolveVpnUserRunIntent(
-          explicitIntent: null,
-          migrationComplete: true,
-          legacyRuntimeState: false,
         ),
         isNull,
       );
       expect(
         resolveVpnUserRunIntent(
           explicitIntent: true,
-          migrationComplete: true,
-          legacyRuntimeState: false,
         ),
         isTrue,
       );

@@ -6,12 +6,10 @@ bool allowsAutomaticVpnRestart(bool? lastRunIntent) => lastRunIntent != false;
 
 bool? resolveVpnUserRunIntent({
   required bool? explicitIntent,
-  required bool migrationComplete,
-  required bool? legacyRuntimeState,
 }) {
-  if (explicitIntent != null) return explicitIntent;
-  if (migrationComplete) return null;
-  return legacyRuntimeState;
+  // The legacy runtime flag was also cleared by failures and internal stops,
+  // so it cannot safely be promoted to an explicit user choice.
+  return explicitIntent;
 }
 
 bool shouldStartVpnAtStartup({

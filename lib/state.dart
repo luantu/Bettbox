@@ -464,13 +464,8 @@ class GlobalState {
         prefs.getBool(vpnUserRunIntentMigratedPreferenceKey) ?? false;
     final resolved = resolveVpnUserRunIntent(
       explicitIntent: explicitIntent,
-      migrationComplete: migrationComplete,
-      legacyRuntimeState: prefs.getBool(vpnRuntimePreferenceKey),
     );
     if (explicitIntent == null && !migrationComplete) {
-      if (resolved != null) {
-        await prefs.setBool(vpnUserRunIntentPreferenceKey, resolved);
-      }
       await prefs.setBool(vpnUserRunIntentMigratedPreferenceKey, true);
     }
     return resolved;

@@ -10,6 +10,8 @@ public final class VpnRunIntentSourceRegressionTest {
         String state = read("lib/state.dart");
         String servicePlugin = read(
             "android/app/src/main/kotlin/com/appshub/bettbox/plugins/ServicePlugin.kt");
+        String vpnPlugin = read(
+            "android/app/src/main/kotlin/com/appshub/bettbox/plugins/VpnPlugin.kt");
         String bootReceiver = read(
             "android/app/src/main/kotlin/com/appshub/bettbox/receivers/BootReceiver.kt");
         String packageReceiver = read(
@@ -29,10 +31,18 @@ public final class VpnRunIntentSourceRegressionTest {
             "silent boot must honor the explicit stop intent");
         require(controller.contains("handleStop(true, false)"),
             "internal core restart must preserve user intent");
+        require(controller.contains("setVpnRunIntent(isStart)"),
+            "explicit user action must persist intent before setup work");
+        require(controller.contains("_startCoreIfStillWanted()"),
+            "main-isolate startup must recheck cross-isolate user intent");
         require(controller.contains("recordRunIntent: false"),
-            "automatic runtime failures must preserve user intent");
+            "automatic app startup must preserve user intent");
+        require(!controller.contains("updateStatus(false, recordRunIntent: false)"),
+            "native failures must not cancel the native recovery state machine");
         require(!servicePlugin.contains("VpnRunIntentStore.write("),
             "low-level service transitions must not overwrite user intent");
+        require(vpnPlugin.contains("notifyRunStateChanged(RunState.START)"),
+            "native recovery must notify the UI when runtime is restored");
         require(!vpnService.contains("getCurrentTilePlugin()?.handleStop()"),
             "binder failures must not masquerade as a user tile stop");
         require(bootReceiver.contains("VpnRunIntentStore.allowsAutomaticStart(context)"),

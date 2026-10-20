@@ -938,6 +938,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         onUpdateNetwork()
+        ServicePlugin.notifyRunStateChanged(RunState.START)
         } finally {
             // establish().detachFd() transfers ownership to this coroutine.
             // Go owns it only after JNI entry; stopSelf() does not close it.

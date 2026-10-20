@@ -181,11 +181,8 @@ class AppController {
     }
 
     if (wasRunning) {
-      await globalState.handleStart(
-        [updateRunTime, updateTraffic],
-        true,
-        false,
-      );
+      final resumed = await _startCoreIfStillWanted();
+      if (!resumed) return;
       _scheduleCheckIpRefresh();
       _backgroundLoad();
     }
@@ -194,18 +191,16 @@ class AppController {
   Future<void> updateStatus(
     bool isStart, {
     bool recordRunIntent = true,
-  }) {
-    return _coreLifecycleLock.synchronized(
-      () => _updateStatus(isStart, recordRunIntent: recordRunIntent),
+  }) async {
+    if (recordRunIntent) await globalState.setVpnRunIntent(isStart);
+    await _coreLifecycleLock.synchronized(
+      () => _updateStatus(isStart),
     );
   }
 
-  Future<void> _updateStatus(
-    bool isStart, {
-    required bool recordRunIntent,
-  }) async {
+  Future<void> _updateStatus(bool isStart) async {
     if (isStart) {
-      await _fastStart(recordRunIntent: recordRunIntent);
+      await _fastStart();
       if (globalState.isStart) _startSgHealthMonitor();
       if (globalState.isStart && !_ref.read(runTimeProvider.notifier).isStart) {
         _ref.read(runTimeProvider.notifier).value = 0;
@@ -213,13 +208,55 @@ class AppController {
     } else {
       _sgHealthTimer?.cancel();
       _sgHealthTimer = null;
-      await globalState.handleStop(true, recordRunIntent);
+      await globalState.handleStop(true, false);
       clashCore.resetTraffic();
       _ref.read(trafficsProvider.notifier).clear();
       _ref.read(totalTrafficProvider.notifier).value = Traffic();
       _ref.read(runTimeProvider.notifier).value = null;
       addCheckIpNumDebounce();
     }
+  }
+
+  Future<bool> _startCoreIfStillWanted() async {
+    final before = await globalState.getVpnRunIntent(reload: true);
+    if (!allowsAutomaticVpnRestart(before)) {
+      commonPrint.log('VPN start canceled by explicit user stop');
+      return false;
+    }
+    await globalState.handleStart(
+      [updateRunTime, updateTraffic],
+      true,
+      false,
+    );
+    final after = await globalState.getVpnRunIntent(reload: true);
+    if (allowsAutomaticVpnRestart(after)) return true;
+    commonPrint.log('VPN start rolled back after explicit user stop');
+    await globalState.handleStop(true, false);
+    return false;
+  }
+
+  Future<void> _syncNativeRuntimeStopped() async {
+    _sgHealthTimer?.cancel();
+    _sgHealthTimer = null;
+    globalState.startTime = null;
+    await globalState.setVpnRuntimeState(false);
+    globalState.stopUpdateTasks();
+    clashCore.resetTraffic();
+    _ref.read(trafficsProvider.notifier).clear();
+    _ref.read(totalTrafficProvider.notifier).value = Traffic();
+    _ref.read(runTimeProvider.notifier).value = null;
+    addCheckIpNumDebounce();
+  }
+
+  Future<void> _syncNativeRuntimeStarted() async {
+    globalState.startTime ??= DateTime.now();
+    await globalState.setVpnRuntimeState(true);
+    if (!_ref.read(runTimeProvider.notifier).isStart) {
+      _ref.read(runTimeProvider.notifier).value = 0;
+    }
+    await globalState.startUpdateTasks([updateRunTime, updateTraffic]);
+    _startSgHealthMonitor();
+    addCheckIpNumDebounce();
   }
 
   void _startSgHealthMonitor() {
@@ -340,7 +377,7 @@ class AppController {
     }
   }
 
-  Future<void> _fastStart({required bool recordRunIntent}) async {
+  Future<void> _fastStart() async {
     await ensureSgBootstrapProfile();
     final currentProfile = _ref.read(currentProfileProvider);
     if (currentProfile == null) {
@@ -361,11 +398,7 @@ class AppController {
             await restartCore();
             return;
           }
-          await globalState.handleStart(
-            [updateRunTime, updateTraffic],
-            true,
-            recordRunIntent,
-          );
+          if (!await _startCoreIfStillWanted()) return;
           if (!res.isError) {
             Future.microtask(() async {
               try {
@@ -380,22 +413,14 @@ class AppController {
           }
         } catch (e) {
           commonPrint.log('FastStart macOS auth error: $e');
-          await globalState.handleStart(
-            [updateRunTime, updateTraffic],
-            true,
-            recordRunIntent,
-          );
+          if (!await _startCoreIfStillWanted()) return;
           _backgroundLoad();
         }
         _scheduleCheckIpRefresh();
         return;
       }
 
-      await globalState.handleStart(
-        [updateRunTime, updateTraffic],
-        true,
-        recordRunIntent,
-      );
+      if (!await _startCoreIfStillWanted()) return;
 
       Future.microtask(() async {
         try {
@@ -426,11 +451,7 @@ class AppController {
       }
     }
 
-    await globalState.handleStart(
-      [updateRunTime, updateTraffic],
-      true,
-      recordRunIntent,
-    );
+    if (!await _startCoreIfStillWanted()) return;
 
     _scheduleCheckIpRefresh();
 
@@ -1533,11 +1554,13 @@ class AppController {
     vpn_service.service?.addNativeEventCallback((method, arguments) async {
       if (method == 'vpnStartFailed') {
         globalState.showNotifier('Failed, Please try again later');
-        await updateStatus(false, recordRunIntent: false);
+        await _syncNativeRuntimeStopped();
       } else if (method == 'runStateChanged') {
         final state = arguments as String?;
-        if (state == 'STOP' && globalState.isStart) {
-          await updateStatus(false, recordRunIntent: false);
+        if (state == 'STOP') {
+          await _syncNativeRuntimeStopped();
+        } else if (state == 'START') {
+          await _syncNativeRuntimeStarted();
         }
       }
     });
@@ -1633,7 +1656,7 @@ class AppController {
       await macOS?.updateDns(true);
     }
     final hasProfile = _ref.read(currentProfileProvider) != null;
-    final lastRunIntent = await globalState.getVpnRunIntent();
+    final lastRunIntent = await globalState.getVpnRunIntent(reload: true);
     final shouldStart = shouldStartVpnAtStartup(
       hasProfile: hasProfile,
       alreadyRunning: globalState.isStart,
