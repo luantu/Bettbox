@@ -276,7 +276,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
 
             "beginControlPlaneBypass" -> {
-                result.success(beginControlPlaneBypass())
+                scope.launch {
+                    val token = beginControlPlaneBypass()
+                    withContext(Dispatchers.Main) { result.success(token) }
+                }
             }
 
             "endControlPlaneBypass" -> {
@@ -388,6 +391,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             while (isActive && nativeRecoveryPolicy.isWanted) {
                 delay(2000)
                 if (coreStartInFlight.get()) continue
+                val expiredBypass = nativeRecoveryPolicy.expiredControlPlaneBypass(
+                    android.os.SystemClock.elapsedRealtime(),
+                )
+                if (expiredBypass != null) {
+                    android.util.Log.w("VpnPlugin", "CorpLink control-plane bypass lease expired")
+                    endControlPlaneBypass(expiredBypass)
+                    continue
+                }
                 // Initial permission prompts belong to the user's normal start
                 // flow. Background recovery must neither cancel nor replace it.
                 if (runCatching {
@@ -969,7 +980,12 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     fun handleStop(force: Boolean = false) {
         nativeRecoveryPolicy.cancelIntent()
-        controlPlanePaused.set(false)
+        if (controlPlanePaused.getAndSet(false)) {
+            // A control-plane pause is temporary, unlike Smart Auto Stop.
+            // Clear it so a later explicit user start cannot inherit a
+            // suspended core after this stop completes.
+            Core.suspended(false)
+        }
         nativeRecoveryJob?.cancel()
         nativeRecoveryJob = null
         bindTimeoutJob?.cancel()
@@ -1047,34 +1063,48 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * cannot call VpnService.protect for its own sockets, so leaving tun0 up
      * would route the recovery request back into the failed SG node.
      */
-    fun beginControlPlaneBypass(): Long? {
-        val token = nativeRecoveryPolicy.beginControlPlaneBypass(
-            GlobalState.currentRunState == RunState.START,
-            GlobalState.isSmartStopped,
-            GlobalState.isCurrentlyStopping(),
-        ) ?: return null
-        controlPlanePaused.set(true)
-        val paused = GlobalState.runLock.withLock {
-            if (!nativeRecoveryPolicy.isControlPlaneBypassCurrent(token) ||
-                GlobalState.currentRunState != RunState.START ||
-                GlobalState.isSmartStopped || GlobalState.isCurrentlyStopping()) {
-                false
-            } else {
-                GlobalState.updateRunState(RunState.STOP)
-                true
+    suspend fun beginControlPlaneBypass(): Long? = coreStartMutex.withCoroutineLock {
+        coreStartInFlight.set(true)
+        try {
+            val token = nativeRecoveryPolicy.beginControlPlaneBypass(
+                android.os.SystemClock.elapsedRealtime(),
+                GlobalState.currentRunState == RunState.START,
+                GlobalState.isSmartStopped,
+                GlobalState.isCurrentlyStopping(),
+            ) ?: return@withCoroutineLock null
+            controlPlanePaused.set(true)
+            val paused = GlobalState.runLock.withLock {
+                nativeRecoveryPolicy.isControlPlaneBypassCurrent(token) &&
+                    GlobalState.currentRunState == RunState.START &&
+                    !GlobalState.isSmartStopped && !GlobalState.isCurrentlyStopping()
             }
+            if (!paused) {
+                nativeRecoveryPolicy.cancelControlPlaneBypass()
+                controlPlanePaused.set(false)
+                return@withCoroutineLock null
+            }
+            suspendModule?.uninstall()
+            suspendModule = null
+            Core.stopTun()
+            Core.suspended(true)
+            if (!nativeRecoveryPolicy.isControlPlaneBypassCurrent(token) ||
+                GlobalState.isSmartStopped || GlobalState.isCurrentlyStopping()) {
+                if (!GlobalState.isSmartStopped) Core.suspended(false)
+                controlPlanePaused.set(false)
+                return@withCoroutineLock null
+            }
+            if (Core.androidTunReady()) {
+                Core.suspended(false)
+                nativeRecoveryPolicy.cancelControlPlaneBypass()
+                controlPlanePaused.set(false)
+                android.util.Log.e("VpnPlugin", "CorpLink control-plane bypass could not stop native TUN")
+                return@withCoroutineLock null
+            }
+            android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass started")
+            token
+        } finally {
+            coreStartInFlight.set(false)
         }
-        if (!paused) {
-            nativeRecoveryPolicy.cancelControlPlaneBypass()
-            controlPlanePaused.set(false)
-            return null
-        }
-        suspendModule?.uninstall()
-        suspendModule = null
-        Core.stopTun()
-        Core.suspended(true)
-        android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass started")
-        return token
     }
 
     fun endControlPlaneBypass(token: Long): Boolean {
@@ -1082,9 +1112,17 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val shouldResume = nativeRecoveryPolicy.finishControlPlaneBypass(token)
         if (owned) controlPlanePaused.set(false)
         if (!shouldResume) return false
+        Core.suspended(false)
         val currentOptions = options?.takeIf { it.enable } ?: return false
         android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass finished; resuming VPN")
-        return handleSmartResume(currentOptions)
+        if (bettBoxService == null) {
+            bindService(intentEpoch = nativeRecoveryPolicy.intentEpoch)
+            return true
+        }
+        scope.launch {
+            performStartCore(currentOptions, retry = false, notifyOnFailure = false)
+        }
+        return true
     }
 
     fun handleSmartStop() {

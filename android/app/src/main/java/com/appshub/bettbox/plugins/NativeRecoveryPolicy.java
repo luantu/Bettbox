@@ -2,6 +2,7 @@ package com.appshub.bettbox.plugins;
 
 /** Coalesces real native transport failures without undoing user stop intent. */
 public final class NativeRecoveryPolicy {
+    private static final long CONTROL_PLANE_BYPASS_LEASE_MILLIS = 420000L;
     public static final class BindRequest {
         public final long intentEpoch;
         public final boolean automatic;
@@ -26,6 +27,7 @@ public final class NativeRecoveryPolicy {
     private Long inFlight;
     private Long controlPlaneBypass;
     private long controlPlaneBypassEpoch;
+    private long controlPlaneBypassExpiresAt;
     private int failures;
     private long retryAt;
 
@@ -36,6 +38,7 @@ public final class NativeRecoveryPolicy {
         serial++;
         inFlight = null;
         controlPlaneBypass = null;
+        controlPlaneBypassExpiresAt = 0;
         failures = 0;
         retryAt = 0;
     }
@@ -46,6 +49,7 @@ public final class NativeRecoveryPolicy {
         serial++;
         inFlight = null;
         controlPlaneBypass = null;
+        controlPlaneBypassExpiresAt = 0;
         failures = 0;
         retryAt = 0;
     }
@@ -96,13 +100,14 @@ public final class NativeRecoveryPolicy {
         }
     }
 
-    public synchronized Long beginControlPlaneBypass(boolean running, boolean smartPaused,
+    public synchronized Long beginControlPlaneBypass(long now, boolean running, boolean smartPaused,
                                                       boolean stopping) {
         if (!wanted || !running || smartPaused || stopping || controlPlaneBypass != null) {
             return null;
         }
         controlPlaneBypass = ++serial;
         controlPlaneBypassEpoch = intentEpoch;
+        controlPlaneBypassExpiresAt = now + CONTROL_PLANE_BYPASS_LEASE_MILLIS;
         return controlPlaneBypass;
     }
 
@@ -113,10 +118,17 @@ public final class NativeRecoveryPolicy {
     public synchronized boolean finishControlPlaneBypass(Long token) {
         if (!isControlPlaneBypassCurrent(token)) return false;
         controlPlaneBypass = null;
+        controlPlaneBypassExpiresAt = 0;
         return wanted && intentEpoch == controlPlaneBypassEpoch;
     }
 
     public synchronized void cancelControlPlaneBypass() {
         controlPlaneBypass = null;
+        controlPlaneBypassExpiresAt = 0;
+    }
+
+    public synchronized Long expiredControlPlaneBypass(long now) {
+        if (controlPlaneBypass == null || now < controlPlaneBypassExpiresAt) return null;
+        return controlPlaneBypass;
     }
 }

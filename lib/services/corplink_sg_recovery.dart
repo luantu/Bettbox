@@ -92,8 +92,25 @@ class CorplinkAuthorizationNetworkGate {
     Object? restoreError;
     StackTrace? restoreStack;
     try {
-      final resumed = await endBypass(token);
-      if (resumed) {
+      bool? resumed;
+      Object? lastEndError;
+      StackTrace? lastEndStack;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          resumed = await endBypass(token);
+          lastEndError = null;
+          lastEndStack = null;
+          break;
+        } catch (error, stack) {
+          lastEndError = error;
+          lastEndStack = stack;
+          if (attempt < 2) await settle();
+        }
+      }
+      if (lastEndError != null) {
+        Error.throwWithStackTrace(lastEndError, lastEndStack!);
+      }
+      if (resumed == true) {
         final elapsed = Stopwatch()..start();
         var ready = false;
         for (var attempt = 0; attempt < maxChecks; attempt++) {
@@ -110,6 +127,12 @@ class CorplinkAuthorizationNetworkGate {
       restoreStack = stack;
     }
 
+    if (actionError != null && restoreError != null) {
+      throw CorplinkAuthorizationRecoveryException(
+        actionError.runtimeType.toString(),
+        restoreError.runtimeType.toString(),
+      );
+    }
     if (actionError != null) {
       Error.throwWithStackTrace(actionError, actionStack!);
     }
@@ -118,6 +141,21 @@ class CorplinkAuthorizationNetworkGate {
     }
     return value;
   }
+}
+
+class CorplinkAuthorizationRecoveryException implements Exception {
+  const CorplinkAuthorizationRecoveryException(
+    this.authorizationErrorType,
+    this.restoreErrorType,
+  );
+
+  final String authorizationErrorType;
+  final String restoreErrorType;
+
+  @override
+  String toString() =>
+      'CorpLink authorization failed ($authorizationErrorType) and '
+      'Android VPN restoration failed ($restoreErrorType)';
 }
 
 bool shouldAutoAuthorizeAfterSgSetup({
