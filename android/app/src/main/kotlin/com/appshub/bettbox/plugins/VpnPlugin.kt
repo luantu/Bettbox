@@ -1138,7 +1138,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         suspendModule?.uninstall()
         suspendModule = null
         Core.stopTun()
-        Core.suspended(true)
         (bettBoxService as? BettboxService)?.resetNotificationBuilder()
         (bettBoxService as? BettboxVpnService)?.resetNotificationBuilder()
         scope.launch {
@@ -1170,7 +1169,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             if (!startAllowed) return@launch
 
-            Core.suspended(false)
             (bettBoxService as? BettboxService)?.resetNotificationBuilder()
             (bettBoxService as? BettboxVpnService)?.resetNotificationBuilder()
             performStartCore(options, retry = false, notifyOnFailure = false)

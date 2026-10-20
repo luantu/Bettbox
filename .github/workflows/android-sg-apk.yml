@@ -101,6 +101,13 @@ jobs:
             android/app/src/test/java/com/appshub/bettbox/plugins/UnderlyingNetworkPathPolicyTest.java
           java -cp build/network-path-tests com.appshub.bettbox.plugins.UnderlyingNetworkPathPolicyTest
 
+      - name: Run Android smart-stop regression test
+        run: |
+          mkdir -p build/smart-stop-tests
+          javac -d build/smart-stop-tests \
+            android/app/src/test/java/com/appshub/bettbox/plugins/SmartStopSourceRegressionTest.java
+          java -cp build/smart-stop-tests com.appshub.bettbox.plugins.SmartStopSourceRegressionTest
+
       - name: Run app-clone access policy tests
         run: |
           mkdir -p build/clone-access-tests
