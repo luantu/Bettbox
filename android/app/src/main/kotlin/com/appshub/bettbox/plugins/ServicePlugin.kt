@@ -74,7 +74,7 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
             "setSmartStopped" -> {
-                GlobalState.isSmartStopped = call.argument<Boolean>("value") ?: false
+                VpnPlugin.setSmartStopped(call.argument<Boolean>("value") ?: false)
                 result.success(true)
             }
             "isSmartStopped" -> result.success(GlobalState.isSmartStopped)

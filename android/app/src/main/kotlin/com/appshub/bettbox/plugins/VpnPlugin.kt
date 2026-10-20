@@ -257,11 +257,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             "setSmartStopped" -> {
                 val value = call.argument<Boolean>("value") ?: false
-                if (value) {
-                    nativeRecoveryPolicy.cancelControlPlaneBypass()
-                    controlPlanePaused.set(false)
-                }
-                GlobalState.isSmartStopped = value
+                setSmartStopped(value)
                 result.success(true)
             }
 
@@ -313,6 +309,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     fun setQuickResponse(enabled: Boolean) {
         quickResponseEnabled = enabled
+    }
+
+    fun setSmartStopped(value: Boolean) {
+        if (value) {
+            nativeRecoveryPolicy.cancelControlPlaneBypass()
+            controlPlanePaused.set(false)
+        }
+        GlobalState.isSmartStopped = value
     }
 
     private fun getActivePhysicalNetworks(): Set<Network> {
@@ -720,7 +724,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun handleStartService(intentEpoch: Long = nativeRecoveryPolicy.intentEpoch) {
         if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
-                GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) {
+                GlobalState.isSmartStopped || controlPlanePaused.get(),
+                GlobalState.isCurrentlyStopping())) {
             android.util.Log.w("VpnPlugin", "VPN is in stopping state, ignore start request")
             return
         }
@@ -734,7 +739,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             coreStartInFlight.set(true)
             try {
                 if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
-                        GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) return@launch
+                        GlobalState.isSmartStopped || controlPlanePaused.get(),
+                        GlobalState.isCurrentlyStopping())) return@launch
                 if (options?.enable == true) {
                     val prepareIntent = try {
                         android.net.VpnService.prepare(BettboxApplication.getAppContext())
@@ -759,7 +765,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     (Core.androidTunReady() && !Core.nativeVpnRepairRequired())
                 val startAllowed = GlobalState.runLock.withLock {
                     if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
-                            GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) return@withLock false
+                            GlobalState.isSmartStopped || controlPlanePaused.get(),
+                            GlobalState.isCurrentlyStopping())) return@withLock false
                     if (currentOptions?.enable == true &&
                         !nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) return@withLock false
                     if (!NativeRecoveryPolicy.shouldStartCore(
@@ -803,7 +810,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             try {
                 if (recoveryToken != null) {
                     if (!nativeRecoveryPolicy.isCurrent(recoveryToken) ||
-                        GlobalState.isSmartStopped || GlobalState.isCurrentlyStopping() ||
+                        GlobalState.isSmartStopped || controlPlanePaused.get() ||
+                        GlobalState.isCurrentlyStopping() ||
                         getActivePhysicalNetworks().isEmpty()) return@withCoroutineLock
                     // A queued normal start may already have repaired the core.
                     // Reconcile admission from resources before deciding to rebuild.
@@ -827,7 +835,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     ) {
         fun currentRequest(): Boolean =
             nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
-                GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping()) &&
+                GlobalState.isSmartStopped || controlPlanePaused.get(),
+                GlobalState.isCurrentlyStopping()) &&
             (!currentOptions.enable ||
             (nativeRecoveryPolicy.isIntentCurrent(intentEpoch) &&
                 (recoveryToken == null || nativeRecoveryPolicy.isCurrent(recoveryToken))))
