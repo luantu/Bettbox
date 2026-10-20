@@ -19,6 +19,7 @@ public final class VpnRunIntentSourceRegressionTest {
         String vpnService = read(
             "android/app/src/main/kotlin/com/appshub/bettbox/services/BettboxVpnService.kt");
         String smartAutoStop = read("lib/manager/smart_auto_stop_manager.dart");
+        String dartService = read("lib/plugins/service.dart");
 
         require(controller.contains("shouldStartVpnAtStartup("),
             "app startup must consult the persisted run intent");
@@ -30,6 +31,8 @@ public final class VpnRunIntentSourceRegressionTest {
             "background startup must refresh cross-isolate intent state");
         require(main.contains("Service();"),
             "service isolate must register a native runtime event receiver");
+        require(dartService.contains("if (!globalState.isService)"),
+            "service isolate must not access UI-only appState");
         require(main.contains("shouldStartAutomaticVpnService("),
             "quick-auto and boot must honor auto-run fallback semantics");
         require(controller.contains("handleStop(true, false)"),

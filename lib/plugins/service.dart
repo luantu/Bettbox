@@ -26,8 +26,10 @@ class Service {
       final state = call.arguments as String?;
       if (state == 'STOP') {
         globalState.startTime = null;
-        globalState.appState = globalState.appState.copyWith(runTime: null);
         await globalState.setVpnRuntimeState(false);
+        if (!globalState.isService) {
+          globalState.appState = globalState.appState.copyWith(runTime: null);
+        }
       } else if (state == 'START') {
         await globalState.setVpnRuntimeState(true);
       }
