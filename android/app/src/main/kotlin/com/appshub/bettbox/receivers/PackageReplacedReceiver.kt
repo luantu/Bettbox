@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import com.appshub.bettbox.GlobalState
 import com.appshub.bettbox.RunState
+import com.appshub.bettbox.VpnRunIntentStore
 
 class PackageReplacedReceiver : BroadcastReceiver() {
     companion object {
@@ -16,7 +17,8 @@ class PackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val pending = goAsync()
-        if (Build.VERSION.SDK_INT >= 36) {
+        if (Build.VERSION.SDK_INT >= 36 &&
+            VpnRunIntentStore.allowsAutomaticStart(context)) {
             GlobalState.handleStart(skipDebounce = true)
         } else {
             runCatching {

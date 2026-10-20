@@ -18,6 +18,7 @@ import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_bootstrap.dart';
 import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
+import 'package:bett_box/services/vpn_run_intent.dart';
 import 'package:bett_box/widgets/dialog.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
@@ -1604,9 +1605,17 @@ class AppController {
       await macOS?.updateDns(true);
     }
     final hasProfile = _ref.read(currentProfileProvider) != null;
-    final shouldStart =
-        hasProfile &&
-        (globalState.isStart || _ref.read(appSettingProvider).autoRun);
+    final lastRunIntent = await globalState.getVpnRunIntent();
+    final shouldStart = shouldStartVpnAtStartup(
+      hasProfile: hasProfile,
+      alreadyRunning: globalState.isStart,
+      autoRun: _ref.read(appSettingProvider).autoRun,
+      lastRunIntent: lastRunIntent,
+    );
+
+    if (!shouldStart && lastRunIntent == false) {
+      commonPrint.log('Automatic VPN start suppressed by explicit user stop');
+    }
 
     if (shouldStart) {
       try {

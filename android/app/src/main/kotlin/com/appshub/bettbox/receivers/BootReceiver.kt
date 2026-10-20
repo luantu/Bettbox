@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.appshub.bettbox.GlobalState
+import com.appshub.bettbox.VpnRunIntentStore
 
 class BootReceiver : BroadcastReceiver() {
     companion object {
@@ -22,11 +23,11 @@ class BootReceiver : BroadcastReceiver() {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val autoLaunch = prefs.getBoolean(AUTO_LAUNCH_KEY, false)
 
-            if (autoLaunch) {
+            if (autoLaunch && VpnRunIntentStore.allowsAutomaticStart(context)) {
                 Log.d(TAG, "AutoLaunch enabled, triggering silent background boot")
                 GlobalState.initServiceEngine(listOf("boot"))
             } else {
-                Log.d(TAG, "AutoLaunch disabled, skipping background boot")
+                Log.d(TAG, "Background boot suppressed by settings or explicit user stop")
             }
         }.onFailure { Log.e(TAG, "Error in BootReceiver", it) }
     }

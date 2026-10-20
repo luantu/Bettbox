@@ -5,6 +5,7 @@ import android.os.Looper
 import android.util.Log
 import com.appshub.bettbox.GlobalState
 import com.appshub.bettbox.RunState
+import com.appshub.bettbox.VpnRunIntentStore
 import com.appshub.bettbox.models.VpnOptions
 import com.google.gson.Gson
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -60,6 +61,10 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         when (call.method) {
             "startVpn" -> handleStartVpn(call, result)
             "stopVpn" -> {
+                VpnRunIntentStore.write(
+                    com.appshub.bettbox.BettboxApplication.getAppContext(),
+                    false,
+                )
                 VpnPlugin.handleStop(force = true)
                 result.success(true)
             }
@@ -138,6 +143,10 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         runCatching { gson.fromJson(data, VpnOptions::class.java) }
             .onSuccess { options ->
+                VpnRunIntentStore.write(
+                    com.appshub.bettbox.BettboxApplication.getAppContext(),
+                    true,
+                )
                 VpnPlugin.handleStart(options)
                 result.success(true)
             }

@@ -28,6 +28,7 @@ import 'controller.dart';
 import 'models/models.dart';
 import 'services/corplink_sg.dart';
 import 'services/corplink_sg_overlay.dart';
+import 'services/vpn_run_intent.dart';
 
 typedef UpdateTasks = List<FutureOr Function()>;
 
@@ -389,6 +390,7 @@ class GlobalState {
     UpdateTasks? tasks,
     bool includeVpnService = true,
   ]) async {
+    if (includeVpnService) await setVpnRunIntent(true);
     startTime ??= DateTime.now();
     if (system.isAndroid && isService) {
       await clashLibHandler?.startListener();
@@ -398,9 +400,6 @@ class GlobalState {
     if (includeVpnService) {
       await service?.startVpn();
     }
-    final prefs = await preferences.sharedPreferencesCompleter.future;
-    await prefs?.setBool('is_vpn_running', true);
-
     if (system.isAndroid) {
       await service?.setQuickResponse(config.vpnProps.quickResponse);
       await service?.setHighPriorityNotification(
@@ -431,6 +430,7 @@ class GlobalState {
   }
 
   Future handleStop([bool includeVpnService = true]) async {
+    if (includeVpnService) await setVpnRunIntent(false);
     startTime = null;
     if (system.isAndroid && isService) {
       await clashLibHandler?.stopListener();
@@ -442,12 +442,21 @@ class GlobalState {
       return;
     }
     await service?.stopVpn();
-    final prefs = await preferences.sharedPreferencesCompleter.future;
-    await prefs?.setBool('is_vpn_running', false);
     if (system.isDesktop) {
+      final prefs = await preferences.sharedPreferencesCompleter.future;
       await prefs?.setBool('is_tun_running', false);
     }
     stopUpdateTasks();
+  }
+
+  Future<bool?> getVpnRunIntent() async {
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    return prefs?.getBool(vpnRunIntentPreferenceKey);
+  }
+
+  Future<void> setVpnRunIntent(bool wanted) async {
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    await prefs?.setBool(vpnRunIntentPreferenceKey, wanted);
   }
 
   Future<bool?> showMessage({

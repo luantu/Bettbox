@@ -27,6 +27,7 @@ import 'services/corplink_sg.dart';
 import 'services/corplink_sg_nodes.dart';
 import 'services/corplink_sg_runtime.dart';
 import 'services/sg_network_handoff.dart';
+import 'services/vpn_run_intent.dart';
 
 ReceivePort? _serviceReceiverPort;
 ReceivePort? _messageReceiverPort;
@@ -218,6 +219,7 @@ Future<void> _service(List<String> flags) async {
         },
         onStop: () async {
           networkHandoffRecovery.cancel();
+          await globalState.setVpnRunIntent(false);
           await app.tip(appLocalizations.stopVpn);
           clashLibHandler.stopListener();
           await vpn?.stop();
@@ -248,9 +250,12 @@ Future<void> _service(List<String> flags) async {
       return;
     }
 
-    if (bootStart && !globalState.config.appSetting.autoRun) {
+    final lastRunIntent = await globalState.getVpnRunIntent();
+    if (bootStart &&
+        (!globalState.config.appSetting.autoRun ||
+            !allowsAutomaticVpnRestart(lastRunIntent))) {
       commonPrint.log(
-        'Silent boot detected, but autoRun is disabled. Staying idle.',
+        'Silent boot start suppressed by settings or explicit user stop.',
       );
       _handleMainIpc(clashLibHandler);
       return;
@@ -303,6 +308,7 @@ Future<void> _service(List<String> flags) async {
           return;
         }
         await vpn?.start(clashLibHandler.getAndroidVpnOptions());
+        await globalState.setVpnRunIntent(true);
         Future.delayed(const Duration(seconds: 2), checkSmartAutoStop);
 
         if (globalState.config.vpnProps.networkSpeedNotification) {

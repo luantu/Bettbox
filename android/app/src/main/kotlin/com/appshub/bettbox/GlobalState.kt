@@ -203,6 +203,7 @@ object GlobalState {
         if (!skipDebounce && !acquireToggleSlot()) return false
         if (currentRunState != RunState.STOP) return false
 
+        VpnRunIntentStore.write(BettboxApplication.getAppContext(), true)
         updateRunState(RunState.PENDING)
         startPendingTimeout()
         runLock.withLock {
@@ -215,6 +216,7 @@ object GlobalState {
         if (!skipDebounce && !acquireToggleSlot()) return
         if (currentRunState != RunState.START) return
 
+        VpnRunIntentStore.write(BettboxApplication.getAppContext(), false)
         updateRunState(RunState.PENDING)
         startPendingTimeout()
         runLock.withLock {

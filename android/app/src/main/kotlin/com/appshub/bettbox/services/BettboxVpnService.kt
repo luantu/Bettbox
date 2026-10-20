@@ -16,6 +16,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.appshub.bettbox.GlobalState
+import com.appshub.bettbox.VpnRunIntentStore
 import com.appshub.bettbox.extensions.getIpv4RouteAddress
 import com.appshub.bettbox.extensions.getIpv6RouteAddress
 import com.appshub.bettbox.extensions.toCIDR
@@ -361,6 +362,7 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
 
     override fun onRevoke() {
         runCatching {
+            VpnRunIntentStore.write(this, false)
             VpnPlugin.handleStop()
             getSystemService(android.app.NotificationManager::class.java)
                 ?.cancel(GlobalState.NOTIFICATION_ID)
