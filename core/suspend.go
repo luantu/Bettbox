@@ -54,33 +54,6 @@ func findFieldByName(v reflect.Value, name string) reflect.Value {
 	return reflect.Value{}
 }
 
-// Reflection preserves the package-visibility flag of fields reached through
-// an embedded adapter, so calling methods on mihomo's unexported atomic/device
-// fields panics even though the containing value is addressable. Rebind the
-// same address to a fresh Value and fail closed for non-addressable inputs.
-func makeReflectValueAccessible(v reflect.Value) reflect.Value {
-	if !v.IsValid() || v.CanInterface() {
-		return v
-	}
-	if !v.CanAddr() {
-		return reflect.Value{}
-	}
-	return reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem()
-}
-
-func findCallableMethod(v reflect.Value, name string) reflect.Value {
-	if !v.IsValid() {
-		return reflect.Value{}
-	}
-	if method := v.MethodByName(name); method.IsValid() {
-		return method
-	}
-	if v.Kind() != reflect.Pointer && v.CanAddr() {
-		return v.Addr().MethodByName(name)
-	}
-	return reflect.Value{}
-}
-
 func pauseHealthChecks() {
 	suspendedHCLock.Lock()
 	defer suspendedHCLock.Unlock()
@@ -149,11 +122,9 @@ func pauseSingleWireGuard(p cProxy.Proxy) {
 		return
 	}
 
-	initOkField := makeReflectValueAccessible(
-		findFieldByName(reflect.ValueOf(p), "initOk"),
-	)
+	initOkField := findFieldByName(reflect.ValueOf(p), "initOk")
 	if initOkField.IsValid() {
-		loadMethod := findCallableMethod(initOkField, "Load")
+		loadMethod := initOkField.MethodByName("Load")
 		if loadMethod.IsValid() {
 			res := loadMethod.Call(nil)
 			if len(res) > 0 && !res[0].Bool() {
@@ -162,9 +133,7 @@ func pauseSingleWireGuard(p cProxy.Proxy) {
 		}
 	}
 
-	devField := makeReflectValueAccessible(
-		findFieldByName(reflect.ValueOf(p), "device"),
-	)
+	devField := findFieldByName(reflect.ValueOf(p), "device")
 	if !devField.IsValid() || devField.IsNil() {
 		return
 	}
@@ -185,7 +154,7 @@ func pauseSingleWireGuard(p cProxy.Proxy) {
 		return
 	}
 
-	downMethod := findCallableMethod(devVal, "Down")
+	downMethod := devVal.MethodByName("Down")
 	if !downMethod.IsValid() {
 		return
 	}
@@ -213,7 +182,7 @@ func resumeWireGuard() {
 	defer suspendedWGLock.Unlock()
 
 	for _, devVal := range suspendedWGDevices {
-		upMethod := findCallableMethod(devVal, "Up")
+		upMethod := devVal.MethodByName("Up")
 		if upMethod.IsValid() {
 			_ = upMethod.Call(nil)
 		}
