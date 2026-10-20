@@ -96,6 +96,37 @@ public final class NativeRecoveryPolicyTest {
         }
         check(policy.tryBegin(now, true, false, false, true) != null,
                 "persistent failure remains recoverable after maximum cooldown");
+
+        NativeRecoveryPolicy bypassPolicy = new NativeRecoveryPolicy();
+        check(bypassPolicy.beginControlPlaneBypass(true, false, false) == null,
+                "authorization must not suspend a VPN without running intent");
+        bypassPolicy.setWanted(true);
+        check(bypassPolicy.beginControlPlaneBypass(false, false, false) == null,
+                "authorization must not suspend an already stopped VPN");
+        check(bypassPolicy.beginControlPlaneBypass(true, true, false) == null,
+                "authorization must preserve a real smart pause");
+        check(bypassPolicy.beginControlPlaneBypass(true, false, true) == null,
+                "authorization must not cross an active stop");
+        Long bypass = bypassPolicy.beginControlPlaneBypass(true, false, false);
+        check(bypass != null && bypassPolicy.isControlPlaneBypassCurrent(bypass),
+                "a running VPN can pause once for protected control-plane login");
+        check(bypassPolicy.finishControlPlaneBypass(bypass),
+                "the current login pause must resume the same running intent");
+        check(!bypassPolicy.finishControlPlaneBypass(bypass),
+                "a completed login pause must not resume twice");
+
+        Long stoppedDuringLogin = bypassPolicy.beginControlPlaneBypass(true, false, false);
+        check(stoppedDuringLogin != null, "a later login can start another pause");
+        bypassPolicy.cancelIntent();
+        check(!bypassPolicy.finishControlPlaneBypass(stoppedDuringLogin),
+                "manual stop during login must never be undone");
+
+        bypassPolicy.setWanted(true);
+        Long smartPausedDuringLogin = bypassPolicy.beginControlPlaneBypass(true, false, false);
+        check(smartPausedDuringLogin != null, "smart-pause race needs an active login pause");
+        bypassPolicy.cancelControlPlaneBypass();
+        check(!bypassPolicy.finishControlPlaneBypass(smartPausedDuringLogin),
+                "a real smart pause during login must remain paused");
         System.out.println("NativeRecoveryPolicy: all behavior checks passed");
     }
 }

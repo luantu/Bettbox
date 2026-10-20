@@ -93,6 +93,14 @@ jobs:
             android/app/src/test/java/com/appshub/bettbox/plugins/NativeRecoveryPolicyTest.java
           java -cp build/native-recovery-tests com.appshub.bettbox.plugins.NativeRecoveryPolicyTest
 
+      - name: Run underlying network path policy tests
+        run: |
+          mkdir -p build/network-path-tests
+          javac -d build/network-path-tests \
+            android/app/src/main/java/com/appshub/bettbox/plugins/UnderlyingNetworkPathPolicy.java \
+            android/app/src/test/java/com/appshub/bettbox/plugins/UnderlyingNetworkPathPolicyTest.java
+          java -cp build/network-path-tests com.appshub.bettbox.plugins.UnderlyingNetworkPathPolicyTest
+
       - name: Run app-clone access policy tests
         run: |
           mkdir -p build/clone-access-tests
