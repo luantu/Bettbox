@@ -28,8 +28,10 @@ public final class VpnRunIntentSourceRegressionTest {
             "background tile stop must persist the stop intent");
         require(main.contains("getVpnRunIntent(reload: true)"),
             "background startup must refresh cross-isolate intent state");
-        require(main.contains("allowsAutomaticVpnRestart(lastRunIntent)"),
-            "silent boot must honor the explicit stop intent");
+        require(main.contains("Service();"),
+            "service isolate must register a native runtime event receiver");
+        require(main.contains("shouldStartAutomaticVpnService("),
+            "quick-auto and boot must honor auto-run fallback semantics");
         require(controller.contains("handleStop(true, false)"),
             "internal core restart must preserve user intent");
         require(controller.contains("setVpnRunIntent(isStart)"),

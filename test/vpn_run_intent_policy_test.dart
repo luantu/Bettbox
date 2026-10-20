@@ -50,6 +50,37 @@ void main() {
       expect(allowsAutomaticVpnRestart(true), isTrue);
     });
 
+    test('automatic service start uses explicit intent then auto-run fallback', () {
+      expect(
+        shouldStartAutomaticVpnService(
+          autoRun: true,
+          lastRunIntent: false,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldStartAutomaticVpnService(
+          autoRun: false,
+          lastRunIntent: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldStartAutomaticVpnService(
+          autoRun: false,
+          lastRunIntent: null,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldStartAutomaticVpnService(
+          autoRun: true,
+          lastRunIntent: null,
+        ),
+        isTrue,
+      );
+    });
+
     test('auto-run off and missing profile never start', () {
       expect(
         shouldStartVpnAtStartup(

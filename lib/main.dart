@@ -6,6 +6,7 @@ import 'dart:ui';
 
 import 'package:bett_box/plugins/app.dart';
 import 'package:bett_box/plugins/clipboard_ext.dart';
+import 'package:bett_box/plugins/service.dart' show Service;
 import 'package:bett_box/plugins/tile.dart';
 import 'package:bett_box/plugins/vpn.dart';
 import 'package:bett_box/state.dart';
@@ -117,9 +118,13 @@ Future<void> _service(List<String> flags) async {
   globalState.isService = true;
   WidgetsFlutterBinding.ensureInitialized();
   await globalState.init();
+  // The service isolate has no UI AppController, but it must still receive
+  // native START/STOP events to persist actual runtime state.
+  Service();
 
   {
-    final quickStart = flags.contains('quick') || flags.contains('quick-auto');
+    final automaticQuickStart = flags.contains('quick-auto');
+    final quickStart = flags.contains('quick') || automaticQuickStart;
     final bootStart = flags.contains('boot');
     final clashLibHandler = ClashLibHandler();
     final smartAutoStopLock = Lock();
@@ -252,11 +257,13 @@ Future<void> _service(List<String> flags) async {
     }
 
     final lastRunIntent = await globalState.getVpnRunIntent(reload: true);
-    if (bootStart &&
-        (!globalState.config.appSetting.autoRun ||
-            !allowsAutomaticVpnRestart(lastRunIntent))) {
+    if ((bootStart || automaticQuickStart) &&
+        !shouldStartAutomaticVpnService(
+          autoRun: globalState.config.appSetting.autoRun,
+          lastRunIntent: lastRunIntent,
+        )) {
       commonPrint.log(
-        'Silent boot start suppressed by settings or explicit user stop.',
+        'Automatic service start suppressed by settings or explicit user stop.',
       );
       _handleMainIpc(clashLibHandler);
       return;

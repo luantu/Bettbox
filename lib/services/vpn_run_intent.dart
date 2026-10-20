@@ -4,6 +4,14 @@ const vpnRuntimePreferenceKey = 'is_vpn_running';
 
 bool allowsAutomaticVpnRestart(bool? lastRunIntent) => lastRunIntent != false;
 
+bool shouldStartAutomaticVpnService({
+  required bool autoRun,
+  required bool? lastRunIntent,
+}) {
+  if (lastRunIntent != null) return lastRunIntent;
+  return autoRun;
+}
+
 bool? resolveVpnUserRunIntent({
   required bool? explicitIntent,
 }) {
