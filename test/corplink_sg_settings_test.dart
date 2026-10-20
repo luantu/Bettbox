@@ -118,6 +118,33 @@ void main() {
     expect(corplinkAuthMatchesSettings(prior, settings), isTrue);
   });
 
+  test('legacy Android cookie remains valid without forcing a TUN bypass', () {
+    expect(
+      hasPersistedCorplinkAuthorization(
+        authMatches: true,
+        rustCookiePresent: false,
+        legacyCookiePresent: true,
+      ),
+      isTrue,
+    );
+    expect(
+      hasPersistedCorplinkAuthorization(
+        authMatches: true,
+        rustCookiePresent: false,
+        legacyCookiePresent: false,
+      ),
+      isFalse,
+    );
+    expect(
+      hasPersistedCorplinkAuthorization(
+        authMatches: false,
+        rustCookiePresent: true,
+        legacyCookiePresent: true,
+      ),
+      isFalse,
+    );
+  });
+
   test('creates a fail-closed SG group before authorization', () {
     final config = <String, dynamic>{
       'proxies': <dynamic>[],
