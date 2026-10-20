@@ -101,6 +101,18 @@ class Vpn {
     });
   }
 
+  Future<int?> beginControlPlaneBypass() async {
+    return await methodChannel.invokeMethod<int>('beginControlPlaneBypass');
+  }
+
+  Future<bool> endControlPlaneBypass(int token) async {
+    return await methodChannel.invokeMethod<bool>(
+          'endControlPlaneBypass',
+          {'token': token},
+        ) ??
+        false;
+  }
+
   Future<bool> getStatus() async {
     return await methodChannel.invokeMethod<bool>('status') ?? false;
   }

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:bett_box/common/common.dart';
+import 'package:bett_box/clash/lib.dart';
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
@@ -16,6 +17,7 @@ import 'package:bett_box/plugins/app.dart';
 import 'package:bett_box/plugins/vpn.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_overlay.dart';
+import 'package:bett_box/services/corplink_sg_recovery.dart';
 
 const corplinkSgEnabledKey = 'corplinkSg.enabled';
 const corplinkSgRouteOpenAiKey = 'corplinkSg.routeOpenAi';
@@ -28,6 +30,7 @@ const _secureStorage = FlutterSecureStorage();
 final corplinkSgLastErrorCode = ValueNotifier<String?>(null);
 final corplinkSgLastCoreErrorCode = ValueNotifier<String?>(null);
 final corplinkSgLastScriptErrorCode = ValueNotifier<String?>(null);
+final _corplinkAuthorizationNetworkGate = CorplinkAuthorizationNetworkGate();
 
 class CorplinkSgSettings {
   final bool enabled;
@@ -298,6 +301,14 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   CorplinkSgSettings settings,
   {bool force = false}
 ) async {
+  if (!force) {
+    final home = await corplinkSgHomePath();
+    final current = await loadCorplinkConfig();
+    if (corplinkAuthMatchesSettings(current, settings) &&
+        File(joinPath(home, 'corplink_cookies.json')).existsSync()) {
+      return true;
+    }
+  }
   // The Rust client is the reference implementation for Feilian. It keeps a
   // domain-aware CookieStore and performs the node-side cookie migration that
   // the legacy Dart login cannot reproduce reliably. Keep the Dart flow only
@@ -308,15 +319,23 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   // legacy Dart flow: for a pure-password Feilian account the legacy flow
   // can never complete a login (it requires a TOTP completion URL), so it
   // would only convert a real helper error into a misleading LOGIN_FAILED.
-  final nativeResult = await _ensureAndroidCorplinkRsAuthorization(
-    settings,
-    force: force,
+  return _corplinkAuthorizationNetworkGate.run<bool>(
+    beginBypass: Vpn().beginControlPlaneBypass,
+    action: () async {
+      final nativeResult = await _ensureAndroidCorplinkRsAuthorization(
+        settings,
+        force: force,
+      );
+      if (nativeResult == true) return true;
+      if (nativeResult == null) {
+        return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+      }
+      return false;
+    },
+    endBypass: Vpn().endControlPlaneBypass,
+    isNativeReady: () async => await clashLib?.getAndroidVpnReady() == true,
+    settle: () => Future<void>.delayed(const Duration(milliseconds: 200)),
   );
-  if (nativeResult == true) return true;
-  if (nativeResult == null) {
-    return _ensureAndroidCorplinkAuthorizationLegacy(settings);
-  }
-  return false;
 }
 
 /// Discard renewable CorpLink session material. A server-side auth rejection

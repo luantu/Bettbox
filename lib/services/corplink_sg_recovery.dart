@@ -61,6 +61,65 @@ class CorplinkVpnStartGate {
   }
 }
 
+/// Runs the external Android login helper outside Bettbox's own TUN, then
+/// restores the same native VPN intent before configuration is applied.
+class CorplinkAuthorizationNetworkGate {
+  Future<T> run<T>({
+    required Future<int?> Function() beginBypass,
+    required Future<T> Function() action,
+    required Future<bool> Function(int token) endBypass,
+    required Future<bool> Function() isNativeReady,
+    required Future<void> Function() settle,
+    Duration timeout = const Duration(seconds: 10),
+    int maxChecks = 40,
+  }) async {
+    if (timeout <= Duration.zero) throw ArgumentError.value(timeout, 'timeout');
+    if (maxChecks < 1) throw ArgumentError.value(maxChecks, 'maxChecks');
+
+    final token = await beginBypass();
+    if (token == null) return action();
+
+    late T value;
+    Object? actionError;
+    StackTrace? actionStack;
+    try {
+      value = await action();
+    } catch (error, stack) {
+      actionError = error;
+      actionStack = stack;
+    }
+
+    Object? restoreError;
+    StackTrace? restoreStack;
+    try {
+      final resumed = await endBypass(token);
+      if (resumed) {
+        final elapsed = Stopwatch()..start();
+        var ready = false;
+        for (var attempt = 0; attempt < maxChecks; attempt++) {
+          final remaining = timeout - elapsed.elapsed;
+          if (remaining <= Duration.zero) break;
+          ready = await isNativeReady().timeout(remaining);
+          if (ready) break;
+          if (attempt + 1 < maxChecks) await settle().timeout(remaining);
+        }
+        if (!ready) throw StateError('ANDROID_VPN_RESUME_TIMEOUT');
+      }
+    } catch (error, stack) {
+      restoreError = error;
+      restoreStack = stack;
+    }
+
+    if (actionError != null) {
+      Error.throwWithStackTrace(actionError, actionStack!);
+    }
+    if (restoreError != null) {
+      Error.throwWithStackTrace(restoreError, restoreStack!);
+    }
+    return value;
+  }
+}
+
 bool shouldAutoAuthorizeAfterSgSetup({
   required bool authRejected,
   required bool authMatches,

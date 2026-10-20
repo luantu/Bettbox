@@ -73,11 +73,12 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var quickResponseJob: Job? = null
     private val nativeRecoveryPolicy = NativeRecoveryPolicy()
     private val coreStartInFlight = AtomicBoolean(false)
+    private val controlPlanePaused = AtomicBoolean(false)
     private val coreStartMutex = Mutex()
     @Volatile private var nativeRecoveryJob: Job? = null
     private val networkChangeLock = Any()
-    private var networkBaselineReady = false
-    private var lastUnderlyingNetwork: Network? = null
+    private val underlyingNetworkPathPolicy = UnderlyingNetworkPathPolicy()
+    private val networkPathFingerprints = ConcurrentHashMap<Network, String>()
     private var lastDns = ""
 
     val networks: MutableSet<Network> = Collections.newSetFromMap(ConcurrentHashMap())
@@ -121,7 +122,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             // retries with a fresh token and rechecks actual native readiness.
             if (request != null && nativeRecoveryPolicy.shouldStartAfterBind(
                     request.intentEpoch, request.automatic,
-                    GlobalState.isSmartStopped, GlobalState.isCurrentlyStopping())) {
+                    GlobalState.isSmartStopped || controlPlanePaused.get(),
+                    GlobalState.isCurrentlyStopping())) {
                 handleStartService(request.intentEpoch)
             }
         }
@@ -255,6 +257,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             "setSmartStopped" -> {
                 val value = call.argument<Boolean>("value") ?: false
+                if (value) {
+                    nativeRecoveryPolicy.cancelControlPlaneBypass()
+                    controlPlanePaused.set(false)
+                }
                 GlobalState.isSmartStopped = value
                 result.success(true)
             }
@@ -271,6 +277,15 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "smartResume" -> {
                 val data = call.argument<String>("data")
                 result.success(handleSmartResume(Gson().fromJson(data, VpnOptions::class.java)))
+            }
+
+            "beginControlPlaneBypass" -> {
+                result.success(beginControlPlaneBypass())
+            }
+
+            "endControlPlaneBypass" -> {
+                val token = call.argument<Number>("token")?.toLong()
+                result.success(token != null && endControlPlaneBypass(token))
             }
             
             "setQuickResponse" -> {
@@ -378,7 +393,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     nativeRecoveryPolicy.tryBegin(
                         android.os.SystemClock.elapsedRealtime(),
                         Core.nativeVpnRepairRequired(),
-                        GlobalState.isSmartStopped,
+                        GlobalState.isSmartStopped || controlPlanePaused.get(),
                         GlobalState.isCurrentlyStopping(),
                         getActivePhysicalNetworks().isNotEmpty(),
                     )
@@ -418,6 +433,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         val allowed = GlobalState.runLock.withLock {
             if (!nativeRecoveryPolicy.isCurrent(token) || GlobalState.isSmartStopped ||
+                controlPlanePaused.get() ||
                 GlobalState.isCurrentlyStopping()) false
             else {
                 GlobalState.updateRunState(RunState.START)
@@ -481,6 +497,9 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             networks.add(network)
+            connectivity?.getLinkProperties(network)?.let {
+                networkPathFingerprints[network] = physicalPathFingerprint(it)
+            }
             handleNetworkChange()
             invokeDart("networkChanged")
         }
@@ -488,6 +507,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         override fun onLost(network: Network) {
             networks.remove(network)
             networkDnsMap.remove(network)
+            networkPathFingerprints.remove(network)
             onUpdateNetwork()
             handleNetworkChange()
             invokeDart("networkChanged")
@@ -496,7 +516,11 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
             val dnsList = linkProperties.dnsServers.map { it.asSocketAddressText(53) }
             networkDnsMap[network] = dnsList
+            networkPathFingerprints[network] = physicalPathFingerprint(linkProperties)
             onUpdateNetwork()
+            if (networks.contains(network) && handleNetworkChange()) {
+                invokeDart("networkChanged")
+            }
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
@@ -519,8 +543,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         runCatching {
             networks.clear()
             synchronized(networkChangeLock) {
-                networkBaselineReady = false
-                lastUnderlyingNetwork = null
+                networkPathFingerprints.clear()
+                underlyingNetworkPathPolicy.reset()
             }
             connectivity?.registerNetworkCallback(request, callback)
         }.onFailure {
@@ -539,8 +563,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             networks.clear()
             networkDnsMap.clear()
             synchronized(networkChangeLock) {
-                networkBaselineReady = false
-                lastUnderlyingNetwork = null
+                networkPathFingerprints.clear()
+                underlyingNetworkPathPolicy.reset()
             }
             onUpdateNetwork()
         }
@@ -549,16 +573,16 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun handleNetworkChange(): Boolean {
         val current = selectedUnderlyingNetwork()
         val changedWhileRunning = synchronized(networkChangeLock) {
-            if (!networkBaselineReady) {
-                networkBaselineReady = true
-                lastUnderlyingNetwork = current
-                false
-            } else if (current == lastUnderlyingNetwork) {
-                false
-            } else {
-                lastUnderlyingNetwork = current
-                GlobalState.currentRunState == RunState.START
-            }
+            val fingerprint = current?.let { network ->
+                networkPathFingerprints[network]
+                    ?: connectivity?.getLinkProperties(network)?.let(::physicalPathFingerprint)
+                    ?: ""
+            } ?: ""
+            underlyingNetworkPathPolicy.update(
+                current?.networkHandle ?: 0L,
+                fingerprint,
+                GlobalState.currentRunState == RunState.START,
+            )
         }
         if (!changedWhileRunning) return false
 
@@ -578,6 +602,26 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         return true
+    }
+
+    private fun physicalPathFingerprint(properties: LinkProperties): String {
+        val addresses = properties.linkAddresses
+            .map { "${it.address.hostAddress}/${it.prefixLength}" }
+            .sorted()
+        val gateways = properties.routes
+            .filter { it.isDefaultRoute() }
+            .map { route ->
+                val gateway = route.gateway?.hostAddress ?: ""
+                "$gateway@${route.`interface` ?: properties.interfaceName.orEmpty()}"
+            }
+            .sorted()
+        return buildString {
+            append(properties.interfaceName.orEmpty())
+            append('|')
+            append(addresses.joinToString(","))
+            append('|')
+            append(gateways.joinToString(","))
+        }
     }
 
     private fun selectedUnderlyingNetwork(): Network? {
@@ -916,6 +960,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     fun handleStop(force: Boolean = false) {
         nativeRecoveryPolicy.cancelIntent()
+        controlPlanePaused.set(false)
         nativeRecoveryJob?.cancel()
         nativeRecoveryJob = null
         bindTimeoutJob?.cancel()
@@ -985,6 +1030,52 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 GlobalState.handleTryDestroy()
             }
         }
+    }
+
+    /**
+     * Temporarily removes the Android TUN while the external CorpLink login
+     * helper refreshes its session. The helper runs under this app UID and
+     * cannot call VpnService.protect for its own sockets, so leaving tun0 up
+     * would route the recovery request back into the failed SG node.
+     */
+    fun beginControlPlaneBypass(): Long? {
+        val token = nativeRecoveryPolicy.beginControlPlaneBypass(
+            GlobalState.currentRunState == RunState.START,
+            GlobalState.isSmartStopped,
+            GlobalState.isCurrentlyStopping(),
+        ) ?: return null
+        controlPlanePaused.set(true)
+        val paused = GlobalState.runLock.withLock {
+            if (!nativeRecoveryPolicy.isControlPlaneBypassCurrent(token) ||
+                GlobalState.currentRunState != RunState.START ||
+                GlobalState.isSmartStopped || GlobalState.isCurrentlyStopping()) {
+                false
+            } else {
+                GlobalState.updateRunState(RunState.STOP)
+                true
+            }
+        }
+        if (!paused) {
+            nativeRecoveryPolicy.cancelControlPlaneBypass()
+            controlPlanePaused.set(false)
+            return null
+        }
+        suspendModule?.uninstall()
+        suspendModule = null
+        Core.stopTun()
+        Core.suspended(true)
+        android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass started")
+        return token
+    }
+
+    fun endControlPlaneBypass(token: Long): Boolean {
+        val owned = nativeRecoveryPolicy.isControlPlaneBypassCurrent(token)
+        val shouldResume = nativeRecoveryPolicy.finishControlPlaneBypass(token)
+        if (owned) controlPlanePaused.set(false)
+        if (!shouldResume) return false
+        val currentOptions = options?.takeIf { it.enable } ?: return false
+        android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass finished; resuming VPN")
+        return handleSmartResume(currentOptions)
     }
 
     fun handleSmartStop() {

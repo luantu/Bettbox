@@ -24,6 +24,8 @@ public final class NativeRecoveryPolicy {
     private long intentEpoch;
     private long serial;
     private Long inFlight;
+    private Long controlPlaneBypass;
+    private long controlPlaneBypassEpoch;
     private int failures;
     private long retryAt;
 
@@ -33,6 +35,7 @@ public final class NativeRecoveryPolicy {
         intentEpoch++;
         serial++;
         inFlight = null;
+        controlPlaneBypass = null;
         failures = 0;
         retryAt = 0;
     }
@@ -42,6 +45,7 @@ public final class NativeRecoveryPolicy {
         intentEpoch++;
         serial++;
         inFlight = null;
+        controlPlaneBypass = null;
         failures = 0;
         retryAt = 0;
     }
@@ -90,5 +94,29 @@ public final class NativeRecoveryPolicy {
             long delay = Math.min(2000L << (failures - 1), 30000L);
             retryAt = now + delay;
         }
+    }
+
+    public synchronized Long beginControlPlaneBypass(boolean running, boolean smartPaused,
+                                                      boolean stopping) {
+        if (!wanted || !running || smartPaused || stopping || controlPlaneBypass != null) {
+            return null;
+        }
+        controlPlaneBypass = ++serial;
+        controlPlaneBypassEpoch = intentEpoch;
+        return controlPlaneBypass;
+    }
+
+    public synchronized boolean isControlPlaneBypassCurrent(Long token) {
+        return token != null && token.equals(controlPlaneBypass);
+    }
+
+    public synchronized boolean finishControlPlaneBypass(Long token) {
+        if (!isControlPlaneBypassCurrent(token)) return false;
+        controlPlaneBypass = null;
+        return wanted && intentEpoch == controlPlaneBypassEpoch;
+    }
+
+    public synchronized void cancelControlPlaneBypass() {
+        controlPlaneBypass = null;
     }
 }
