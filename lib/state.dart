@@ -400,7 +400,7 @@ class GlobalState {
     }
     if (includeVpnService) {
       await service?.startVpn();
-      await setVpnRuntimeState(true);
+      if (!system.isAndroid) await setVpnRuntimeState(true);
     }
     if (system.isAndroid) {
       await service?.setQuickResponse(config.vpnProps.quickResponse);

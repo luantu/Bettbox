@@ -119,7 +119,7 @@ Future<void> _service(List<String> flags) async {
   await globalState.init();
 
   {
-    final quickStart = flags.contains('quick');
+    final quickStart = flags.contains('quick') || flags.contains('quick-auto');
     final bootStart = flags.contains('boot');
     final clashLibHandler = ClashLibHandler();
     final smartAutoStopLock = Lock();
@@ -324,7 +324,6 @@ Future<void> _service(List<String> flags) async {
           await globalState.setVpnRuntimeState(false);
           return;
         }
-        await globalState.setVpnRuntimeState(true);
         Future.delayed(const Duration(seconds: 2), checkSmartAutoStop);
 
         if (globalState.config.vpnProps.networkSpeedNotification) {

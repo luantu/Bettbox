@@ -250,7 +250,10 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
       ref.read(runTimeProvider.notifier).value = null;
     } else {
       // Desktop: Full stop
-      await globalState.appController.updateStatus(false);
+      await globalState.appController.updateStatus(
+        false,
+        recordRunIntent: false,
+      );
     }
   }
 
@@ -265,7 +268,10 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
       globalState.appController.addCheckIpNumDebounce();
     } else {
       // Desktop: Full start
-      await globalState.appController.updateStatus(true);
+      await globalState.appController.updateStatus(
+        true,
+        recordRunIntent: false,
+      );
     }
   }
 

@@ -27,7 +27,12 @@ class Service {
       if (state == 'STOP') {
         globalState.startTime = null;
         globalState.appState = globalState.appState.copyWith(runTime: null);
+        await globalState.setVpnRuntimeState(false);
+      } else if (state == 'START') {
+        await globalState.setVpnRuntimeState(true);
       }
+    } else if (call.method == 'vpnStartFailed') {
+      await globalState.setVpnRuntimeState(false);
     }
     for (final callback in _nativeEventCallbacks) {
       await callback(call.method, call.arguments);

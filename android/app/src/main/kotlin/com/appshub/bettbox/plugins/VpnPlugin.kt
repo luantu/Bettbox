@@ -925,20 +925,26 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
 
-        GlobalState.runLock.withLock {
-            if (GlobalState.currentRunState != RunState.START) {
+        val started = GlobalState.runLock.withLock {
+            if (GlobalState.currentRunState != RunState.START || !currentRequest()) {
                 Core.stopTun()
-                return@withLock
-            }
-            scope.launch { startForeground() }
-            if (currentOptions.dozeSuspend) {
-                suspendModule?.uninstall()
-                suspendModule = SuspendModule(BettboxApplication.getAppContext())
-                suspendModule?.install()
+                serviceRef?.stop()
+                false
+            } else {
+                scope.launch { startForeground() }
+                if (currentOptions.dozeSuspend) {
+                    suspendModule?.uninstall()
+                    suspendModule = SuspendModule(BettboxApplication.getAppContext())
+                    suspendModule?.install()
+                }
+                // Queue START while holding the same lock used by user STOP.
+                // A later STOP is therefore posted after this notification.
+                ServicePlugin.notifyRunStateChanged(RunState.START)
+                true
             }
         }
+        if (!started) return
         onUpdateNetwork()
-        ServicePlugin.notifyRunStateChanged(RunState.START)
         } finally {
             // establish().detachFd() transfers ownership to this coroutine.
             // Go owns it only after JNI entry; stopSelf() does not close it.

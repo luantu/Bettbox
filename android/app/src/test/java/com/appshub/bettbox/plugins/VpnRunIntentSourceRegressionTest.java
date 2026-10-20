@@ -18,6 +18,7 @@ public final class VpnRunIntentSourceRegressionTest {
             "android/app/src/main/kotlin/com/appshub/bettbox/receivers/PackageReplacedReceiver.kt");
         String vpnService = read(
             "android/app/src/main/kotlin/com/appshub/bettbox/services/BettboxVpnService.kt");
+        String smartAutoStop = read("lib/manager/smart_auto_stop_manager.dart");
 
         require(controller.contains("shouldStartVpnAtStartup("),
             "app startup must consult the persisted run intent");
@@ -49,6 +50,12 @@ public final class VpnRunIntentSourceRegressionTest {
             "boot receiver must not bypass an explicit stop");
         require(packageReceiver.contains("VpnRunIntentStore.allowsAutomaticStart(context)"),
             "package update must not bypass an explicit stop");
+        require(packageReceiver.contains("initServiceEngine(listOf(\"quick-auto\"))"),
+            "package update must use an automatic start entrypoint");
+        require(!packageReceiver.contains("GlobalState.handleStart("),
+            "package update must not masquerade as a user start");
+        require(smartAutoStop.contains("recordRunIntent: false"),
+            "smart auto-stop must not overwrite explicit user intent");
     }
 
     private static String read(String path) throws Exception {

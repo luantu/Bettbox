@@ -19,7 +19,7 @@ class PackageReplacedReceiver : BroadcastReceiver() {
         val pending = goAsync()
         if (Build.VERSION.SDK_INT >= 36 &&
             VpnRunIntentStore.allowsAutomaticStart(context)) {
-            GlobalState.handleStart(skipDebounce = true)
+            GlobalState.initServiceEngine(listOf("quick-auto"))
         } else {
             runCatching {
                 android.net.VpnService.prepare(context)
