@@ -990,12 +990,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     fun handleStop(force: Boolean = false) {
         nativeRecoveryPolicy.cancelIntent()
-        if (controlPlanePaused.getAndSet(false)) {
-            // A control-plane pause is temporary, unlike Smart Auto Stop.
-            // Clear it so a later explicit user start cannot inherit a
-            // suspended core after this stop completes.
-            Core.suspended(false)
-        }
+        controlPlanePaused.set(false)
         nativeRecoveryJob?.cancel()
         nativeRecoveryJob = null
         bindTimeoutJob?.cancel()
@@ -1096,10 +1091,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             suspendModule?.uninstall()
             suspendModule = null
             Core.stopTun()
-            Core.suspended(true)
             if (!nativeRecoveryPolicy.isControlPlaneBypassCurrent(token) ||
                 GlobalState.isSmartStopped || GlobalState.isCurrentlyStopping()) {
-                if (!GlobalState.isSmartStopped) Core.suspended(false)
                 controlPlanePaused.set(false)
                 return@withCoroutineLock null
             }
@@ -1107,7 +1100,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     true,
                     Core.androidTunReady(),
                 )) {
-                Core.suspended(false)
                 nativeRecoveryPolicy.cancelControlPlaneBypass()
                 controlPlanePaused.set(false)
                 android.util.Log.e("VpnPlugin", "CorpLink control-plane bypass could not stop native TUN")
@@ -1125,7 +1117,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val shouldResume = nativeRecoveryPolicy.finishControlPlaneBypass(token)
         if (owned) controlPlanePaused.set(false)
         if (!shouldResume) return false
-        Core.suspended(false)
         val currentOptions = options?.takeIf { it.enable } ?: return false
         android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass finished; resuming VPN")
         if (bettBoxService == null) {
