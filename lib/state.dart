@@ -389,8 +389,9 @@ class GlobalState {
   Future<void> handleStart([
     UpdateTasks? tasks,
     bool includeVpnService = true,
+    bool recordRunIntent = true,
   ]) async {
-    if (includeVpnService) await setVpnRunIntent(true);
+    if (includeVpnService && recordRunIntent) await setVpnRunIntent(true);
     startTime ??= DateTime.now();
     if (system.isAndroid && isService) {
       await clashLibHandler?.startListener();
@@ -399,6 +400,7 @@ class GlobalState {
     }
     if (includeVpnService) {
       await service?.startVpn();
+      await setVpnRuntimeState(true);
     }
     if (system.isAndroid) {
       await service?.setQuickResponse(config.vpnProps.quickResponse);
@@ -429,8 +431,11 @@ class GlobalState {
     }
   }
 
-  Future handleStop([bool includeVpnService = true]) async {
-    if (includeVpnService) await setVpnRunIntent(false);
+  Future handleStop([
+    bool includeVpnService = true,
+    bool recordRunIntent = true,
+  ]) async {
+    if (includeVpnService && recordRunIntent) await setVpnRunIntent(false);
     startTime = null;
     if (system.isAndroid && isService) {
       await clashLibHandler?.stopListener();
@@ -442,6 +447,7 @@ class GlobalState {
       return;
     }
     await service?.stopVpn();
+    await setVpnRuntimeState(false);
     if (system.isDesktop) {
       final prefs = await preferences.sharedPreferencesCompleter.future;
       await prefs?.setBool('is_tun_running', false);
@@ -449,14 +455,36 @@ class GlobalState {
     stopUpdateTasks();
   }
 
-  Future<bool?> getVpnRunIntent() async {
+  Future<bool?> getVpnRunIntent({bool reload = false}) async {
     final prefs = await preferences.sharedPreferencesCompleter.future;
-    return prefs?.getBool(vpnRunIntentPreferenceKey);
+    if (reload) await prefs?.reload();
+    if (prefs == null) return null;
+    final explicitIntent = prefs.getBool(vpnUserRunIntentPreferenceKey);
+    final migrationComplete =
+        prefs.getBool(vpnUserRunIntentMigratedPreferenceKey) ?? false;
+    final resolved = resolveVpnUserRunIntent(
+      explicitIntent: explicitIntent,
+      migrationComplete: migrationComplete,
+      legacyRuntimeState: prefs.getBool(vpnRuntimePreferenceKey),
+    );
+    if (explicitIntent == null && !migrationComplete) {
+      if (resolved != null) {
+        await prefs.setBool(vpnUserRunIntentPreferenceKey, resolved);
+      }
+      await prefs.setBool(vpnUserRunIntentMigratedPreferenceKey, true);
+    }
+    return resolved;
   }
 
   Future<void> setVpnRunIntent(bool wanted) async {
     final prefs = await preferences.sharedPreferencesCompleter.future;
-    await prefs?.setBool(vpnRunIntentPreferenceKey, wanted);
+    await prefs?.setBool(vpnUserRunIntentPreferenceKey, wanted);
+    await prefs?.setBool(vpnUserRunIntentMigratedPreferenceKey, true);
+  }
+
+  Future<void> setVpnRuntimeState(bool running) async {
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    await prefs?.setBool(vpnRuntimePreferenceKey, running);
   }
 
   Future<bool?> showMessage({

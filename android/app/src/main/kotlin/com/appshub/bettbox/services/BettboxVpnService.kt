@@ -343,7 +343,7 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean =
             runCatching {
                 super.onTransact(code, data, reply, flags).also { success ->
-                    if (!success) GlobalState.getCurrentTilePlugin()?.handleStop()
+                    if (!success) VpnPlugin.handleStop(force = true)
                 }
             }.getOrElse { Log.e(TAG, "onTransact failed: ${it.message}"); false }
     }

@@ -155,7 +155,7 @@ class AppController {
 
     final wasRunning = _ref.read(runTimeProvider.notifier).isStart;
     if (wasRunning) {
-      await globalState.handleStop();
+      await globalState.handleStop(true, false);
       _ref.read(runTimeProvider.notifier).value = null;
     }
     if (system.isAndroid) {
@@ -181,19 +181,31 @@ class AppController {
     }
 
     if (wasRunning) {
-      await globalState.handleStart([updateRunTime, updateTraffic]);
+      await globalState.handleStart(
+        [updateRunTime, updateTraffic],
+        true,
+        false,
+      );
       _scheduleCheckIpRefresh();
       _backgroundLoad();
     }
   }
 
-  Future<void> updateStatus(bool isStart) {
-    return _coreLifecycleLock.synchronized(() => _updateStatus(isStart));
+  Future<void> updateStatus(
+    bool isStart, {
+    bool recordRunIntent = true,
+  }) {
+    return _coreLifecycleLock.synchronized(
+      () => _updateStatus(isStart, recordRunIntent: recordRunIntent),
+    );
   }
 
-  Future<void> _updateStatus(bool isStart) async {
+  Future<void> _updateStatus(
+    bool isStart, {
+    required bool recordRunIntent,
+  }) async {
     if (isStart) {
-      await _fastStart();
+      await _fastStart(recordRunIntent: recordRunIntent);
       if (globalState.isStart) _startSgHealthMonitor();
       if (globalState.isStart && !_ref.read(runTimeProvider.notifier).isStart) {
         _ref.read(runTimeProvider.notifier).value = 0;
@@ -201,7 +213,7 @@ class AppController {
     } else {
       _sgHealthTimer?.cancel();
       _sgHealthTimer = null;
-      await globalState.handleStop();
+      await globalState.handleStop(true, recordRunIntent);
       clashCore.resetTraffic();
       _ref.read(trafficsProvider.notifier).clear();
       _ref.read(totalTrafficProvider.notifier).value = Traffic();
@@ -328,7 +340,7 @@ class AppController {
     }
   }
 
-  Future<void> _fastStart() async {
+  Future<void> _fastStart({required bool recordRunIntent}) async {
     await ensureSgBootstrapProfile();
     final currentProfile = _ref.read(currentProfileProvider);
     if (currentProfile == null) {
@@ -349,7 +361,11 @@ class AppController {
             await restartCore();
             return;
           }
-          await globalState.handleStart([updateRunTime, updateTraffic]);
+          await globalState.handleStart(
+            [updateRunTime, updateTraffic],
+            true,
+            recordRunIntent,
+          );
           if (!res.isError) {
             Future.microtask(() async {
               try {
@@ -364,14 +380,22 @@ class AppController {
           }
         } catch (e) {
           commonPrint.log('FastStart macOS auth error: $e');
-          await globalState.handleStart([updateRunTime, updateTraffic]);
+          await globalState.handleStart(
+            [updateRunTime, updateTraffic],
+            true,
+            recordRunIntent,
+          );
           _backgroundLoad();
         }
         _scheduleCheckIpRefresh();
         return;
       }
 
-      await globalState.handleStart([updateRunTime, updateTraffic]);
+      await globalState.handleStart(
+        [updateRunTime, updateTraffic],
+        true,
+        recordRunIntent,
+      );
 
       Future.microtask(() async {
         try {
@@ -402,7 +426,11 @@ class AppController {
       }
     }
 
-    await globalState.handleStart([updateRunTime, updateTraffic]);
+    await globalState.handleStart(
+      [updateRunTime, updateTraffic],
+      true,
+      recordRunIntent,
+    );
 
     _scheduleCheckIpRefresh();
 
@@ -1505,11 +1533,11 @@ class AppController {
     vpn_service.service?.addNativeEventCallback((method, arguments) async {
       if (method == 'vpnStartFailed') {
         globalState.showNotifier('Failed, Please try again later');
-        await updateStatus(false);
+        await updateStatus(false, recordRunIntent: false);
       } else if (method == 'runStateChanged') {
         final state = arguments as String?;
         if (state == 'STOP' && globalState.isStart) {
-          await updateStatus(false);
+          await updateStatus(false, recordRunIntent: false);
         }
       }
     });
@@ -1619,7 +1647,7 @@ class AppController {
 
     if (shouldStart) {
       try {
-        await updateStatus(true);
+        await updateStatus(true, recordRunIntent: false);
       } catch (e) {
         commonPrint.log('Auto start failed: $e');
         await applyProfile();

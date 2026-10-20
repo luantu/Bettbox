@@ -223,6 +223,7 @@ Future<void> _service(List<String> flags) async {
           await app.tip(appLocalizations.stopVpn);
           clashLibHandler.stopListener();
           await vpn?.stop();
+          await globalState.setVpnRuntimeState(false);
         },
         onReconnectIpc: () {
           commonPrint.log(
@@ -250,7 +251,7 @@ Future<void> _service(List<String> flags) async {
       return;
     }
 
-    final lastRunIntent = await globalState.getVpnRunIntent();
+    final lastRunIntent = await globalState.getVpnRunIntent(reload: true);
     if (bootStart &&
         (!globalState.config.appSetting.autoRun ||
             !allowsAutomaticVpnRestart(lastRunIntent))) {
@@ -305,10 +306,25 @@ Future<void> _service(List<String> flags) async {
         if (res.isNotEmpty) {
           commonPrint.log('QuickStart failed with error: $res');
           await vpn?.stop();
+          await globalState.setVpnRuntimeState(false);
+          return;
+        }
+        final latestRunIntent = await globalState.getVpnRunIntent(reload: true);
+        if (!allowsAutomaticVpnRestart(latestRunIntent)) {
+          commonPrint.log('Background VPN start canceled by explicit user stop');
+          await vpn?.stop();
+          await globalState.setVpnRuntimeState(false);
           return;
         }
         await vpn?.start(clashLibHandler.getAndroidVpnOptions());
-        await globalState.setVpnRunIntent(true);
+        final intentAfterStart = await globalState.getVpnRunIntent(reload: true);
+        if (!allowsAutomaticVpnRestart(intentAfterStart)) {
+          commonPrint.log('Background VPN start rolled back after explicit user stop');
+          await vpn?.stop();
+          await globalState.setVpnRuntimeState(false);
+          return;
+        }
+        await globalState.setVpnRuntimeState(true);
         Future.delayed(const Duration(seconds: 2), checkSmartAutoStop);
 
         if (globalState.config.vpnProps.networkSpeedNotification) {
@@ -323,6 +339,7 @@ Future<void> _service(List<String> flags) async {
       } catch (e) {
         commonPrint.log('Fatal error during service background start: $e');
         await vpn?.stop();
+        await globalState.setVpnRuntimeState(false);
       }
     });
   }
