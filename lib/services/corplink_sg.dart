@@ -304,8 +304,13 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   if (!force) {
     final home = await corplinkSgHomePath();
     final current = await loadCorplinkConfig();
-    if (corplinkAuthMatchesSettings(current, settings) &&
-        File(joinPath(home, 'corplink_cookies.json')).existsSync()) {
+    if (hasPersistedCorplinkAuthorization(
+      authMatches: corplinkAuthMatchesSettings(current, settings),
+      rustCookiePresent:
+          File(joinPath(home, 'corplink_cookies.json')).existsSync(),
+      legacyCookiePresent:
+          File(joinPath(home, 'bettbox_cookies.txt')).existsSync(),
+    )) {
       return true;
     }
   }
@@ -337,6 +342,13 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
     settle: () => Future<void>.delayed(const Duration(milliseconds: 200)),
   );
 }
+
+bool hasPersistedCorplinkAuthorization({
+  required bool authMatches,
+  required bool rustCookiePresent,
+  required bool legacyCookiePresent,
+}) =>
+    authMatches && (rustCookiePresent || legacyCookiePresent);
 
 /// Discard renewable CorpLink session material. A server-side auth rejection
 /// also invalidates the device binding: the next login must advertise a new

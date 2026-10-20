@@ -105,4 +105,29 @@ void main() {
     expect(result, isTrue);
     expect(events, ['end']);
   });
+
+  test('retries a transient native resume channel failure', () async {
+    var endAttempts = 0;
+    var readinessChecks = 0;
+    final gate = CorplinkAuthorizationNetworkGate();
+
+    final result = await gate.run<bool>(
+      beginBypass: () async => 13,
+      action: () async => true,
+      endBypass: (_) async {
+        endAttempts++;
+        if (endAttempts == 1) throw StateError('channel detached');
+        return true;
+      },
+      isNativeReady: () async {
+        readinessChecks++;
+        return true;
+      },
+      settle: () async {},
+    );
+
+    expect(result, isTrue);
+    expect(endAttempts, 2);
+    expect(readinessChecks, 1);
+  });
 }
