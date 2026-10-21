@@ -145,6 +145,33 @@ void main() {
     );
   });
 
+  test('persisted authorization keeps automatic recovery enabled', () {
+    expect(
+      canUseCorplinkSession(
+        enabled: true,
+        passwordConfigured: false,
+        persistedAuthorization: true,
+      ),
+      isTrue,
+    );
+    expect(
+      canUseCorplinkSession(
+        enabled: true,
+        passwordConfigured: false,
+        persistedAuthorization: false,
+      ),
+      isFalse,
+    );
+    expect(
+      canUseCorplinkSession(
+        enabled: false,
+        passwordConfigured: true,
+        persistedAuthorization: true,
+      ),
+      isFalse,
+    );
+  });
+
   test('creates a fail-closed SG group before authorization', () {
     final config = <String, dynamic>{
       'proxies': <dynamic>[],
