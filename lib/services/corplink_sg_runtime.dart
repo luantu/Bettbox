@@ -152,7 +152,8 @@ Future<Set<String>> restoreCorplinkNodesAfterNetworkChange(
 }
 
 Future<List<String>> discoverCorplinkVpnNodeNames(CorplinkSgSettings settings) async {
-  if (!settings.isConfigured || !(await ensureCorplinkAuthorization(settings))) {
+  if (!await hasUsableCorplinkSession(settings) ||
+      !(await ensureCorplinkAuthorization(settings))) {
     throw StateError('CORPLINK_AUTH_REQUIRED');
   }
   final auth = await loadCorplinkConfig();

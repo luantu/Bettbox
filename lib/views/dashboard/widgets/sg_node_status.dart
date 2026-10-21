@@ -81,8 +81,9 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   Future<void> _refresh() async {
     if (_busy) return;
     final settings = await CorplinkSgSettings.load();
+    final usableSession = await hasUsableCorplinkSession(settings);
     if (!mounted) return;
-    if (!settings.enabled || !settings.isConfigured) {
+    if (!usableSession) {
       _openSettings();
       return;
     }

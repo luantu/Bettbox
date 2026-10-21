@@ -350,6 +350,37 @@ bool hasPersistedCorplinkAuthorization({
 }) =>
     authMatches && (rustCookiePresent || legacyCookiePresent);
 
+bool canUseCorplinkSession({
+  required bool enabled,
+  required bool passwordConfigured,
+  required bool persistedAuthorization,
+}) =>
+    enabled && (passwordConfigured || persistedAuthorization);
+
+Future<bool> hasUsableCorplinkSession(CorplinkSgSettings settings) async {
+  if (canUseCorplinkSession(
+    enabled: settings.enabled,
+    passwordConfigured: settings.isConfigured,
+    persistedAuthorization: false,
+  )) {
+    return true;
+  }
+  if (!settings.enabled) return false;
+  final home = await corplinkSgHomePath();
+  final auth = await loadCorplinkConfig();
+  return canUseCorplinkSession(
+    enabled: true,
+    passwordConfigured: false,
+    persistedAuthorization: hasPersistedCorplinkAuthorization(
+      authMatches: corplinkAuthMatchesSettings(auth, settings),
+      rustCookiePresent:
+          File(joinPath(home, 'corplink_cookies.json')).existsSync(),
+      legacyCookiePresent:
+          File(joinPath(home, 'bettbox_cookies.txt')).existsSync(),
+    ),
+  );
+}
+
 /// Discard renewable CorpLink session material. A server-side auth rejection
 /// also invalidates the device binding: the next login must advertise a new
 /// Android device identity so one account can keep multiple installations

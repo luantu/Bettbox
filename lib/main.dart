@@ -281,7 +281,7 @@ Future<void> _service(List<String> flags) async {
         )).message;
         if (message.isNotEmpty) {
           final settings = await CorplinkSgSettings.load();
-          if (settings.enabled && settings.isConfigured) {
+          if (await hasUsableCorplinkSession(settings)) {
             final fallback = await globalState.getSetupParams(
               pathConfig: clashConfig,
               suppressCorplinkNode: true,

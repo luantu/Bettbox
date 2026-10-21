@@ -282,7 +282,7 @@ class AppController {
     _sgHealthCheckInFlight = true;
     try {
       final settings = await CorplinkSgSettings.load();
-      if (!settings.enabled || !settings.isConfigured) return;
+      if (!await hasUsableCorplinkSession(settings)) return;
       final activeProfile = _ref.read(currentProfileProvider);
       if (activeProfile != null &&
           lastProfileModified != null &&
@@ -558,8 +558,9 @@ class AppController {
     ).firstMatch(message)?.group(0);
     corplinkSgLastCoreErrorCode.value = safeCoreError;
     final sgSettings = await CorplinkSgSettings.load();
+    final sgSessionUsable = await hasUsableCorplinkSession(sgSettings);
     var authRejected = false;
-    if (message.isNotEmpty && sgSettings.enabled && sgSettings.isConfigured) {
+    if (message.isNotEmpty && sgSessionUsable) {
       // An optional SG outbound must not prevent the rest of the subscription
       // from starting. Retry with the SG group visible but its node withheld.
       authRejected = message.contains('10220001') ||
