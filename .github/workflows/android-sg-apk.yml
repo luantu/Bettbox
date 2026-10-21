@@ -309,9 +309,11 @@ jobs:
           file "$helper_asset" | grep -Eiq 'aarch64|ARM aarch64'
           file "$meta" | grep -Eiq 'aarch64|ARM aarch64'
           readelf_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          "$readelf_bin" -h "$meta" | grep -q 'AArch64'
-          "$readelf_bin" -Ws "$meta" | grep -Eq '[[:space:]]startTUN$'
-          "$readelf_bin" -Ws "$meta" | grep -Eq '[[:space:]]androidTunReady$'
+          "$readelf_bin" -h "$meta" > build/libmeta-elf-header.txt
+          "$readelf_bin" -Ws "$meta" > build/libmeta-elf-symbols.txt
+          grep -q 'AArch64' build/libmeta-elf-header.txt
+          grep -Eq '[[:space:]]startTUN$' build/libmeta-elf-symbols.txt
+          grep -Eq '[[:space:]]androidTunReady$' build/libmeta-elf-symbols.txt
 
       - name: Publish Android build diagnostics
         if: always()
