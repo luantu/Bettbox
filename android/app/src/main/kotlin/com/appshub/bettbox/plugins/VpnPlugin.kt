@@ -28,6 +28,7 @@ import com.appshub.bettbox.services.BaseServiceInterface
 import com.appshub.bettbox.services.BettboxService
 import com.appshub.bettbox.services.BettboxVpnService
 import com.appshub.bettbox.services.CompatibilityAppPolicy
+import com.appshub.bettbox.services.CompatibilityAppManager
 import com.appshub.bettbox.VpnRunIntentStore
 import com.google.gson.Gson
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -270,6 +271,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             "isSmartStopped" -> {
                 result.success(GlobalState.isSmartStopped)
+            }
+
+            "isCompatibilityPaused" -> {
+                result.success(CompatibilityAppManager.isPaused())
             }
 
             "smartStop" -> {

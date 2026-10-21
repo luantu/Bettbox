@@ -6,6 +6,7 @@ import android.util.Log
 import com.appshub.bettbox.GlobalState
 import com.appshub.bettbox.RunState
 import com.appshub.bettbox.models.VpnOptions
+import com.appshub.bettbox.services.CompatibilityAppManager
 import com.google.gson.Gson
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -78,6 +79,9 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
             "isSmartStopped" -> result.success(GlobalState.isSmartStopped)
+            "isCompatibilityPaused" -> result.success(
+                CompatibilityAppManager.isPaused(),
+            )
             "getLocalIpAddresses" -> result.success(VpnPlugin.getLocalIpAddresses())
             "getLocalGateways" -> result.success(VpnPlugin.getLocalGateways())
             "getNetworkInfo" -> result.success(VpnPlugin.getNetworkInfo())

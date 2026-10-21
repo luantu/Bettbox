@@ -174,6 +174,7 @@ Future<void> _service(List<String> flags) async {
         if (networks.isEmpty) return;
 
         await smartAutoStopLock.synchronized(() async {
+          if (await vpn?.isCompatibilityPaused() == true) return;
           final isSmartStopped = await vpn?.isSmartStopped() ?? false;
           final candidateIps =
               await vpn?.getLocalIpAddresses() ?? const <String>[];

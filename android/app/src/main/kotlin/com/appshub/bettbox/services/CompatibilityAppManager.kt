@@ -51,6 +51,8 @@ object CompatibilityAppManager {
     @Volatile private var pausedByCompatibility = false
     @Volatile private var targetPackage: String? = null
 
+    fun isPaused(): Boolean = active.get() && pausedByCompatibility
+
     fun isInstalled(context: Context, packageName: String): Boolean = runCatching {
         context.packageManager.getApplicationInfo(packageName, 0)
         true
@@ -104,6 +106,18 @@ object CompatibilityAppManager {
             .setIcon(IconCompat.createWithBitmap(bitmap))
             .setIntent(intent)
             .build()
+        val legacyIntent = Intent("com.android.launcher.action.INSTALL_SHORTCUT").apply {
+            setPackage("com.miui.home")
+            putExtra(Intent.EXTRA_SHORTCUT_INTENT, intent)
+            putExtra(Intent.EXTRA_SHORTCUT_NAME, label)
+            putExtra(Intent.EXTRA_SHORTCUT_ICON, bitmap)
+            putExtra("duplicate", false)
+        }
+        val supportsMiuiLegacy = pm.queryBroadcastReceivers(legacyIntent, 0).isNotEmpty()
+        if (supportsMiuiLegacy) {
+            context.sendBroadcast(legacyIntent)
+            return true
+        }
         return ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
     }
 

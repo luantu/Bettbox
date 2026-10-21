@@ -7,6 +7,13 @@ public final class SmartStopSourceRegressionTest {
     public static void main(String[] args) throws Exception {
         String source = Files.readString(Path.of(
             "android/app/src/main/kotlin/com/appshub/bettbox/plugins/VpnPlugin.kt"));
+        String smartAutoStop = Files.readString(Path.of(
+            "lib/manager/smart_auto_stop_manager.dart"));
+        String serviceMain = Files.readString(Path.of("lib/main.dart"));
+        String compatibility = Files.readString(Path.of(
+            "android/app/src/main/kotlin/com/appshub/bettbox/services/CompatibilityAppManager.kt"));
+        String manifest = Files.readString(Path.of(
+            "android/app/src/main/AndroidManifest.xml"));
 
         String smartStop = methodBody(source, "fun handleSmartStop()");
         String smartResume = methodBody(
@@ -24,6 +31,15 @@ public final class SmartStopSourceRegressionTest {
             "smart stop must not invoke the unsafe core suspend path");
         require(!smartResume.contains("Core.suspended("),
             "smart resume must not invoke the unsafe core suspend path");
+        require(smartAutoStop.contains("isCompatibilityPaused()"),
+            "foreground smart-stop must not resume a compatibility-owned pause");
+        require(serviceMain.contains("isCompatibilityPaused()"),
+            "service-isolate smart-stop must not resume a compatibility-owned pause");
+        require(compatibility.contains("com.miui.home") &&
+                compatibility.contains("INSTALL_SHORTCUT"),
+            "HyperOS must receive a legacy launcher shortcut fallback");
+        require(manifest.contains("com.android.launcher.permission.INSTALL_SHORTCUT"),
+            "the HyperOS shortcut fallback requires launcher install permission");
     }
 
     private static String methodBody(String source, String signature) {

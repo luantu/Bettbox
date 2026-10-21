@@ -150,6 +150,10 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
 
   Future<void> _checkCurrentNetwork() async {
     await _checkLock.synchronized(() async {
+      if (await service?.isCompatibilityPaused() == true) {
+        commonPrint.debug('Smart Auto Stop: compatibility pause owns TUN');
+        return;
+      }
       final vpnProps = ref.read(vpnSettingProvider);
       if (!vpnProps.smartAutoStop) return;
 
@@ -270,6 +274,7 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
 
   Future<void> _restartVpn() async {
     if (system.isAndroid) {
+      if (await service?.isCompatibilityPaused() == true) return;
       // Android: Resume from smart-stop mode
       await service?.setSmartStopped(false);
       await service?.smartResume();

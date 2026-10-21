@@ -97,6 +97,9 @@ class Vpn {
     return await methodChannel.invokeMethod<bool>('isSmartStopped') ?? false;
   }
 
+  Future<bool> isCompatibilityPaused() async =>
+      await methodChannel.invokeMethod<bool>('isCompatibilityPaused') ?? false;
+
   Future<bool?> smartStop() => methodChannel.invokeMethod<bool>('smartStop');
 
   Future<bool?> smartResume(AndroidVpnOptions options) async {

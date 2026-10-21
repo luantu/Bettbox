@@ -28,6 +28,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -138,7 +139,15 @@ jobs:
         timeout-minutes: 10
         run: flutter test test/common test/providers
 
+      - name: Restore Code Forge host cache
+        id: code-forge-cache
+        uses: actions/cache@v4
+        with:
+          path: plugins/code_forge/rust/target
+          key: code-forge-host-${{ runner.os }}-${{ hashFiles('plugins/code_forge/rust/Cargo.lock', 'plugins/code_forge/rust/src/**', 'plugins/code_forge/rust/build.rs') }}
+
       - name: Build Code Forge host test library
+        if: steps.code-forge-cache.outputs.cache-hit != 'true'
         working-directory: plugins/code_forge/rust
         run: cargo build --release --locked
 
@@ -209,7 +218,17 @@ jobs:
         working-directory: core
         run: go test -p 1 ./...
 
+      - name: Restore corplink-rs Android helper cache
+        id: corplink-helper-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            assets/bin/android-arm64-v8a/corplink-rs-login
+            android/app/src/main/jniLibs/arm64-v8a/libcorplink-rs-login.so
+          key: corplink-helper-android-arm64-e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92-ndk28.2-api35-v1
+
       - name: Build corplink-rs Android login helper
+        if: steps.corplink-helper-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -250,7 +269,15 @@ jobs:
           # with the exact commit that produced the .so.
           echo "Helper built from corplink-rs commit $actual_sha"
 
+      - name: Restore Mihomo-SG Android core cache
+        id: mihomo-sg-cache
+        uses: actions/cache@v4
+        with:
+          path: libclash/android/arm64-v8a
+          key: mihomo-sg-android-arm64-go1.24.6-ndk28.2-${{ hashFiles('core/**', 'setup.dart') }}
+
       - name: Build Mihomo-SG Android library
+        if: steps.mihomo-sg-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
           GOTOOLCHAIN: local
@@ -259,7 +286,7 @@ jobs:
           set -o pipefail
           go version
           go env GOOS GOARCH CGO_ENABLED CC ANDROID_NDK ANDROID_NDK_ROOT
-          timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out app 2>&1 | tee android-core-build.log
+          timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out core 2>&1 | tee android-core-build.log
 
       - name: Publish Android build diagnostics
         if: always()
@@ -268,7 +295,7 @@ jobs:
           {
             echo '## Android core build diagnostics'
             echo '```'
-            if test -f android-core-build.log; then tail -n 240 android-core-build.log; else echo 'log file was not created'; fi
+            if test -f android-core-build.log; then tail -n 240 android-core-build.log; else echo 'Mihomo-SG core restored from cache'; fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

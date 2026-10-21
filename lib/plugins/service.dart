@@ -79,6 +79,9 @@ class Service {
     return await methodChannel.invokeMethod<bool>('isSmartStopped') ?? false;
   }
 
+  Future<bool> isCompatibilityPaused() async =>
+      await methodChannel.invokeMethod<bool>('isCompatibilityPaused') ?? false;
+
   Future<List<String>> getLocalIpAddresses() async {
     return await methodChannel.invokeListMethod<String>(
           'getLocalIpAddresses',
