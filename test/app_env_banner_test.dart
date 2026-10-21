@@ -1,9 +1,15 @@
 import 'package:bett_box/manager/app_manager.dart';
+import 'package:bett_box/common/common.dart';
 import 'package:bett_box/state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('SG release build disables every environment mark', () {
+    expect(showAppEnvironmentMarks, isFalse);
+    expect(shouldShowAppEnvironmentMark(true), isFalse);
+  });
+
   testWidgets('a pre-release SG build can hide the environment ribbon',
       (tester) async {
     globalState.isPre = true;

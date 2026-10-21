@@ -1298,23 +1298,27 @@ class AppEnvManager extends StatelessWidget {
   const AppEnvManager({
     super.key,
     required this.child,
-    this.showEnvironmentBanner = const bool.fromEnvironment(
-      'SHOW_APP_ENV_BANNER',
-      defaultValue: true,
-    ),
+    this.showEnvironmentBanner = showAppEnvironmentMarks,
   });
 
   @override
   Widget build(BuildContext context) {
     if (!showEnvironmentBanner) return child;
-    if (kDebugMode && globalState.isPre) {
+    if (kDebugMode &&
+        shouldShowAppEnvironmentMark(
+          globalState.isPre,
+          enabled: showEnvironmentBanner,
+        )) {
       return Banner(
         message: 'DEBUG',
         location: BannerLocation.topEnd,
         child: child,
       );
     }
-    if (globalState.isPre) {
+    if (shouldShowAppEnvironmentMark(
+      globalState.isPre,
+      enabled: showEnvironmentBanner,
+    )) {
       return Banner(
         message: 'PRE',
         location: BannerLocation.topEnd,

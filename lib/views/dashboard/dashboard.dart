@@ -267,7 +267,7 @@ class _DashboardViewState extends ConsumerState<DashboardView> {
         appLocalizations.dashboard;
     return CommonScaffold(
       title: title,
-      titleWidget: globalState.isPre
+      titleWidget: shouldShowAppEnvironmentMark(globalState.isPre)
           ? Row(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
