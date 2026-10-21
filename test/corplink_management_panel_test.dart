@@ -184,7 +184,7 @@ void main() {
   });
 
   testWidgets('full page sheet uses the active theme surface', (tester) async {
-    const scheme = ColorScheme.dark(
+    const scheme = mui.ColorScheme.dark(
       surface: Color(0xff101214),
       surfaceContainer: Color(0xff202428),
     );
@@ -194,7 +194,7 @@ void main() {
           isMobileViewProvider.overrideWith((ref) => true),
         ],
         child: mui.MaterialApp(
-          theme: ThemeData(colorScheme: scheme),
+          theme: mui.ThemeData(colorScheme: scheme),
           home: const AdaptiveSheetScaffold(
             type: SheetType.page,
             title: '飞连 SG-Node',
@@ -205,7 +205,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).last);
+    final scaffold = tester.widget<mui.Scaffold>(
+      find.byType(mui.Scaffold).last,
+    );
     expect(scaffold.backgroundColor, scheme.surface);
   });
 }
