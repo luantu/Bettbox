@@ -1,13 +1,30 @@
+import 'package:bett_box/common/common.dart';
+import 'package:bett_box/models/models.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/providers/app.dart';
+import 'package:bett_box/state.dart';
 import 'package:bett_box/views/corplink_management_panel.dart';
 import 'package:bett_box/widgets/sheet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  setUp(() {
+    globalState.appState = AppState(
+      brightness: Brightness.dark,
+      version: 0,
+      viewSize: Size.zero,
+      requests: FixedList(maxLength),
+      logs: FixedList(maxLogLength),
+      traffics: FixedList(30),
+      totalTraffic: Traffic(),
+      systemUiOverlayStyle: const SystemUiOverlayStyle(),
+    );
+  });
+
   const nodes = [
     CorplinkNodeSelection(serverName: 'Intl-Test', enabled: true),
     CorplinkNodeSelection(serverName: 'Office-Test', enabled: true),
