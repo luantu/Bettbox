@@ -6,10 +6,11 @@ import 'package:bett_box/providers/app.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/views/corplink_management_panel.dart';
 import 'package:bett_box/widgets/sheet.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:material_ui/material_ui.dart' as mui;
 
 void main() {
   setUp(() {
@@ -192,7 +193,7 @@ void main() {
         overrides: [
           isMobileViewProvider.overrideWith((ref) => true),
         ],
-        child: MaterialApp(
+        child: mui.MaterialApp(
           theme: ThemeData(colorScheme: scheme),
           home: const AdaptiveSheetScaffold(
             type: SheetType.page,
