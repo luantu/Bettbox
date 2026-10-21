@@ -1,5 +1,6 @@
 import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
+import 'package:bett_box/providers/app.dart';
 import 'package:bett_box/views/corplink_management_panel.dart';
 import 'package:bett_box/widgets/sheet.dart';
 import 'package:flutter/material.dart';
@@ -171,6 +172,9 @@ void main() {
     );
     await tester.pumpWidget(
       ProviderScope(
+        overrides: [
+          isMobileViewProvider.overrideWith((ref) => true),
+        ],
         child: MaterialApp(
           theme: ThemeData(colorScheme: scheme),
           home: const AdaptiveSheetScaffold(

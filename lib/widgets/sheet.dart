@@ -117,7 +117,7 @@ class AdaptiveSheetScaffold extends StatelessWidget {
     final sideSheet = type == SheetType.sideSheet;
     final backgroundColor = (bottomSheet || sideSheet)
         ? context.colorScheme.surfaceContainerLow
-        : null;
+        : context.colorScheme.surface;
     final appBar = AppBar(
       forceMaterialTransparency: bottomSheet,
       automaticallyImplyLeading: bottomSheet

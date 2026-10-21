@@ -104,7 +104,9 @@ class _CorplinkManagementPanelState extends State<CorplinkManagementPanel> {
     final fullyReady = enabled && vpnRunning && aggregate.total > 0 && aggregate.ready == aggregate.total;
     final accent = fullyReady ? Colors.green : theme.colorScheme.primary;
     return ListView(padding: const EdgeInsets.all(16), children: [
-      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
+      Card(
+        color: theme.colorScheme.surfaceContainerLow,
+        child: Padding(padding: const EdgeInsets.all(16), child: Column(
         crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Icon(fullyReady ? Icons.verified_user_outlined : Icons.shield_outlined, color: accent),
@@ -152,7 +154,9 @@ class _CorplinkManagementPanelState extends State<CorplinkManagementPanel> {
       ],
       KeyedSubtree(
         key: _configurationAnchor,
-        child: Card(child: ExpansionTile(
+        child: Card(
+          color: theme.colorScheme.surfaceContainerLow,
+          child: ExpansionTile(
           key: const ValueKey('corplink-configuration'),
           controller: _configurationController,
           leading: const Icon(Icons.tune), title: const Text('配置'),
@@ -168,7 +172,9 @@ class _CorplinkManagementPanelState extends State<CorplinkManagementPanel> {
           ],
         )),
       ),
-      Card(child: ExpansionTile(
+      Card(
+        color: theme.colorScheme.surfaceContainerLow,
+        child: ExpansionTile(
         key: const ValueKey('corplink-advanced'),
         leading: const Icon(Icons.warning_amber_outlined), title: const Text('高级操作'),
         subtitle: const Text('强制重连、重新授权'),
@@ -222,9 +228,14 @@ class _CorplinkNodeCard extends StatelessWidget {
     final ready = phase == SgConnectionPhase.ready;
     final color = ready ? Colors.green : theme.colorScheme.error;
     final hasProbe = effectiveCorplinkNodeProbeUrl(node).isNotEmpty;
+    final routePreview = status?.routeSplit.take(8).toList(growable: false) ??
+        const <String>[];
     final probeLabel = !hasProbe ? '未设置网站探针' : probe == null ? '网站尚未检测'
         : '上次 HTTPS：${probe!.success ? '有响应' : '失败'} · ${CorplinkManagementPanel._time(probe!.checkedAt)}';
-    return Card(child: ExpansionTile(
+    return Card(
+      key: ValueKey('corplink-node-${node.serverName}'),
+      color: theme.colorScheme.surfaceContainerLow,
+      child: ExpansionTile(
       title: Row(children: [
         Expanded(child: Text(node.serverName, maxLines: 2, overflow: TextOverflow.ellipsis,
             style: theme.textTheme.titleSmall)),
@@ -244,7 +255,9 @@ class _CorplinkNodeCard extends StatelessWidget {
           Text('本页 IP 变化：$ipChanges 次'),
           if (status?.routesPresent == true) ...[
             Text('下发分流路由：${status!.routeSplit.length} 条'),
-            for (final route in status!.routeSplit) SelectableText(route),
+            if (status!.routeSplit.length > routePreview.length)
+              Text('共 ${status!.routeSplit.length} 条，预览前 ${routePreview.length} 条'),
+            for (final route in routePreview) SelectableText(route),
             Text('全隧道路由：${status!.routeFull.length} 条，不自动加入分流'),
             TextButton.icon(onPressed: () async {
               await Clipboard.setData(ClipboardData(text: status!.routeSplit.join('\n')));
