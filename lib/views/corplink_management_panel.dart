@@ -1,7 +1,7 @@
 import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:material_ui/material_ui.dart';
 
 typedef CorplinkProbeSnapshot = ({bool success, DateTime checkedAt});
 

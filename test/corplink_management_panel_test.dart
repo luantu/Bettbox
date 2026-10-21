@@ -48,15 +48,15 @@ void main() {
   }) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body:
+    await tester.pumpWidget(mui.MaterialApp(home: mui.Scaffold(body:
       CorplinkManagementPanel(
         enabled: true, vpnRunning: true, busy: false,
         nodes: nodes, statuses: current,
         probes: const {}, ipChanges: const {}, updatedAt: null,
         message: '', draftDirty: draftDirty,
-        configuration: const Column(children: [
-          TextField(key: ValueKey('account-input')),
-          Text('选择服务器及设置探针'),
+        configuration: const mui.Column(children: [
+          mui.TextField(key: ValueKey('account-input')),
+          mui.Text('选择服务器及设置探针'),
         ]),
         onRestore: restore ?? () async {},
         onReconnectNode: reconnect ?? (_) async {},
@@ -75,7 +75,10 @@ void main() {
     expect(find.byKey(const ValueKey('account-input')), findsNothing);
     expect(find.text('选择服务器及设置探针'), findsNothing);
     expect(find.text('192.0.2.10:34080'), findsNothing);
-    expect(find.byWidgetPredicate((widget) => widget is FilledButton), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) => widget is mui.FilledButton),
+      findsOneWidget,
+    );
     await tester.tap(find.text('检查并恢复'));
     await tester.pump();
     expect(checks, 1);
