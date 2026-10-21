@@ -217,6 +217,40 @@ void main() {
     expect(raw['rules'], ['RULE-SET,fuzhou-provider,REJECT', 'MATCH,DIRECT']);
   });
 
+  test('persisted authorization survives an unreadable saved password', () {
+    final raw = config()..['rules'] = <dynamic>['MATCH,DIRECT'];
+
+    mergeCorplinkNodeOverlay(
+      raw,
+      settings: const CorplinkSgSettings(
+        enabled: true,
+        username: 'user',
+        password: '',
+        server: 'https://example.invalid',
+      ),
+      selections: const [
+        CorplinkNodeSelection(serverName: 'FZ-INT-Node'),
+      ],
+      keyPairs: const {
+        'FZ-INT-Node': CorplinkNodeKeyPair(
+          publicKey: 'intl-public',
+          privateKey: 'intl-private',
+        ),
+      },
+      auth: auth,
+      cookiePath: '/private/cookies.json',
+    );
+
+    expect(
+      (raw['proxies'] as List).map((proxy) => proxy['name']),
+      ['Airport-A', 'FZ-INT-Node-WG'],
+    );
+    expect(
+      (raw['proxy-groups'] as List).map((group) => group['name']),
+      ['OpenAI', 'FZ-INT-Node'],
+    );
+  });
+
   test('disabled authorized node is absent without affecting sibling', () {
     final raw = config();
     apply(raw, nodes: const [
