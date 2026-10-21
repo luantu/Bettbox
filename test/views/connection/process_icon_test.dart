@@ -70,7 +70,8 @@ void main() {
       ),
     );
     for (var attempt = 0;
-        attempt < 60 && find.byIcon(Icons.terminal).evaluate().isEmpty;
+        attempt < 60 &&
+            find.byIcon(Icons.settings_suggest_outlined).evaluate().isEmpty;
         attempt++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 25)),
@@ -78,6 +79,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 25));
     }
 
-    expect(find.byIcon(Icons.terminal), findsOneWidget);
+    expect(find.byIcon(Icons.settings_suggest_outlined), findsOneWidget);
   }, skip: !system.isDesktop);
 }
