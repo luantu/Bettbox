@@ -118,7 +118,11 @@ class _CorplinkManagementPanelState extends State<CorplinkManagementPanel> {
           const SizedBox(height: 4),
           Text(vpnRunning ? 'Android VPN 已启动' : 'Android VPN 未启动', style: theme.textTheme.bodySmall),
           if (updatedAt != null)
-            Text('更新于 ${_time(updatedAt!)} · 状态每 3 秒刷新', style: theme.textTheme.bodySmall),
+            Text(
+              '更新于 ${CorplinkManagementPanel._time(updatedAt!)} '
+              '· 状态每 3 秒刷新',
+              style: theme.textTheme.bodySmall,
+            ),
           if (enabled && selected.isEmpty)
             const Text('请在下方配置中发现并选择服务器节点。'),
         ],
