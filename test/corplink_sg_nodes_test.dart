@@ -233,8 +233,11 @@ void main() {
     );
   });
 
-  test('health URL persists in secure storage, not ordinary preferences', () async {
+  test('health URL survives a missing secure-storage record for the same account', () async {
     final secrets = _MemoryNodeSecrets();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(corplinkSgUsernameKey, 'test-user');
+    await prefs.setString(corplinkSgServerKey, 'https://example.invalid');
     await saveCorplinkNodeSelections(
       const [CorplinkNodeSelection(
         serverName: 'FUZHOU-NODE-1',
@@ -246,10 +249,30 @@ void main() {
     final loaded = await loadCorplinkNodeSelections(secrets: secrets);
     expect(loaded?.single.healthUrl, 'https://health.example.invalid/ready');
 
-    final prefs = await SharedPreferences.getInstance();
-    for (final key in prefs.getKeys()) {
-      expect(prefs.get(key).toString(), isNot(contains('health.example.invalid')));
-    }
+    final afterSecureLoss = await loadCorplinkNodeSelections(
+      secrets: _MemoryNodeSecrets(),
+    );
+    expect(
+      afterSecureLoss?.single.healthUrl,
+      'https://health.example.invalid/ready',
+    );
+  });
+
+  test('editing one probe preserves every node selection flag', () {
+    final updated = replaceCorplinkNodeProbe(
+      const [
+        CorplinkNodeSelection(serverName: 'FZ-INT-Node', enabled: true),
+        CorplinkNodeSelection(serverName: 'Fuzhou-Node-1', enabled: true),
+        CorplinkNodeSelection(serverName: 'Beijing-Node', enabled: false),
+      ],
+      serverName: 'Fuzhou-Node-1',
+      healthUrl: 'https://inside.example.invalid/ready',
+    );
+
+    expect(updated.map((node) => node.enabled), [true, true, false]);
+    expect(updated[0].healthUrl, isEmpty);
+    expect(updated[1].healthUrl, 'https://inside.example.invalid/ready');
+    expect(updated[2].healthUrl, isEmpty);
   });
 
   test('probe URL does not carry into another account on the same node', () async {

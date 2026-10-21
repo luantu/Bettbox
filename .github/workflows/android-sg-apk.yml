@@ -193,6 +193,14 @@ jobs:
             android/app/src/test/java/com/appshub/bettbox/services/LanRouteExclusionPolicyTest.java
           java -cp build/lan-route-tests com.appshub.bettbox.services.LanRouteExclusionPolicyTest
 
+      - name: Run compatibility app policy tests
+        run: |
+          mkdir -p build/compatibility-app-tests
+          javac -d build/compatibility-app-tests \
+            android/app/src/main/java/com/appshub/bettbox/services/CompatibilityAppPolicy.java \
+            android/app/src/test/java/com/appshub/bettbox/services/CompatibilityAppPolicyTest.java
+          java -cp build/compatibility-app-tests com.appshub.bettbox.services.CompatibilityAppPolicyTest
+
       - name: Run Go outbound tests
         working-directory: core/Clash.Meta
         run: go test -p 1 ./adapter/outbound/... ./config ./dns ./hub/executor
