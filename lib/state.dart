@@ -875,7 +875,7 @@ class GlobalState {
             scriptContent: content ?? await currentScript!.readContent(),
             inputPath: exported.path,
             outputPath: file.path,
-            customOptions: currentScript.customOptions,
+            customOptions: currentScript!.customOptions,
           );
           prepared = Map<String, dynamic>.from(
             json.decode(await file.readAsString()) as Map,
