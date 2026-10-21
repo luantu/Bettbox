@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 typedef CorplinkProbeSnapshot = ({bool success, DateTime checkedAt});
 
 /// Presentation of applied state. Configuration below is an independent draft.
-class CorplinkManagementPanel extends StatelessWidget {
+class CorplinkManagementPanel extends StatefulWidget {
   const CorplinkManagementPanel({
     super.key,
     required this.enabled,
@@ -41,6 +41,28 @@ class CorplinkManagementPanel extends StatelessWidget {
       '${time.minute.toString().padLeft(2, '0')}:'
       '${time.second.toString().padLeft(2, '0')}';
 
+  @override
+  State<CorplinkManagementPanel> createState() =>
+      _CorplinkManagementPanelState();
+}
+
+class _CorplinkManagementPanelState extends State<CorplinkManagementPanel> {
+  final _configurationController = ExpansionTileController();
+  final _configurationAnchor = GlobalKey();
+
+  Future<void> _openConfiguration() async {
+    _configurationController.expand();
+    await WidgetsBinding.instance.endOfFrame;
+    final target = _configurationAnchor.currentContext;
+    if (!mounted || target == null) return;
+    await Scrollable.ensureVisible(
+      target,
+      alignment: 0.08,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   Future<void> _confirmed(BuildContext context, {
     required String title,
     required String message,
@@ -60,6 +82,20 @@ class CorplinkManagementPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+    final vpnRunning = widget.vpnRunning;
+    final busy = widget.busy;
+    final draftDirty = widget.draftDirty;
+    final nodes = widget.nodes;
+    final statuses = widget.statuses;
+    final probes = widget.probes;
+    final ipChanges = widget.ipChanges;
+    final updatedAt = widget.updatedAt;
+    final message = widget.message;
+    final configuration = widget.configuration;
+    final onRestore = widget.onRestore;
+    final onReconnectNode = widget.onReconnectNode;
+    final onReauthorize = widget.onReauthorize;
     final theme = Theme.of(context);
     final selected = enabled ? nodes.where((node) => node.enabled).toList()
         : <CorplinkNodeSelection>[];
@@ -92,6 +128,12 @@ class CorplinkManagementPanel extends StatelessWidget {
         onPressed: busy || !enabled || selected.isEmpty ? null : onRestore,
         icon: const Icon(Icons.refresh), label: const Text('检查并恢复'),
       ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: busy ? null : _openConfiguration,
+        icon: const Icon(Icons.tune),
+        label: const Text('编辑完整配置'),
+      ),
       if (message.isNotEmpty) Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text(message, style: theme.textTheme.bodySmall),
@@ -104,13 +146,24 @@ class CorplinkManagementPanel extends StatelessWidget {
         ),
         const SizedBox(height: 8),
       ],
-      Card(child: ExpansionTile(
-        key: const ValueKey('corplink-configuration'),
-        leading: const Icon(Icons.tune), title: const Text('配置'),
-        subtitle: Text(draftDirty ? '未保存的修改' : '账号、节点选择与健康探针'),
-        childrenPadding: const EdgeInsets.all(16),
-        children: [configuration],
-      )),
+      KeyedSubtree(
+        key: _configurationAnchor,
+        child: Card(child: ExpansionTile(
+          key: const ValueKey('corplink-configuration'),
+          controller: _configurationController,
+          leading: const Icon(Icons.tune), title: const Text('配置'),
+          subtitle: Text(draftDirty ? '未保存的修改' : '账号、节点选择与健康探针'),
+          childrenPadding: const EdgeInsets.all(16),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('飞连完整配置', style: theme.textTheme.titleMedium),
+            ),
+            const SizedBox(height: 12),
+            configuration,
+          ],
+        )),
+      ),
       Card(child: ExpansionTile(
         key: const ValueKey('corplink-advanced'),
         leading: const Icon(Icons.warning_amber_outlined), title: const Text('高级操作'),
