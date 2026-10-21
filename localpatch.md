@@ -104,3 +104,17 @@ APK 已下载到本地 `outputs/android-sg-arm64-2026-09-29-upstream-merge/app-r
 用户于 2026-09-30 接受已知限制及未测项，明确授权将当前多节点版本和验证记录合入 fork 的 main。合入范围包括上述源码、自动化测试、构建流程和说明，不包含手机授权材料、企业私有覆写脚本或本地诊断原件。现有 Release、手机数据和保存账号保持不变；未测项目不改标为通过。
 
 同日浏览器访问内网 HTTPS 出现 `ERR_CONNECTION_ABORTED`，而 HTTP 代理对照请求成功。系统 VPN 路由未接管检查的私网地址；用户关闭 Bettbox“绕过私有网络”后确认页面恢复，按配置问题闭环。部署说明已补充内网访问需关闭该项，不改程序默认值、节点代码或私有分流脚本。关闭后的浏览器 DNS 答案和 WG 双向链未补读，不据此将完整浏览器验收改标为通过。
+
+## 2026-10-21 合并上游 1.19.7
+
+本轮以真机已验证基线 `10832ae1` 为本地历史，将 `upstream/main@7006a026` 通过双亲 merge commit `0ebf7230` 合入。计划初始按“上游 1.19.6”命名，但该上游提交的实际版本已是 `1.19.7+2026101601`；分支名不再重写，以免破坏已有追溯链。`10832ae1` 和 `7006a026` 都是当前候选的祖先，没有 rebase、squash 或丢弃旧提交。
+
+合并后的通用代码以上游 1.19.7 架构为主：Flutter 工具链对齐 3.47.7，Freezed、Riverpod、JSON 和多语言生成物全部重新生成，并在 CI 中增加“重生成后 Git 必须无差异”门禁。`flutter_secure_storage` 升到 11.2.0 以兼容上游 `win32` 6 依赖，锁文件来自 Flutter 3.47.7 实际解析结果，没有手工修改校验和。Linux 不支持 Downloads 目录 API 时回退到应用数据目录，避免脚本和 Profile 文件测试被未处理的异步错误中断。
+
+SG 配置没有恢复已被上游替换的整段 Dart 补丁，而是接入新的 `ProfilePath + ScriptedConfig + Patch` 管线。当 SG 或覆写脚本启用时，应用把已解析 Profile 导出到临时 JSON：先注入已勾选的同名 CorpLink 节点，再运行用户脚本，随后执行来源校验、失效引用阻断和二次注入，最后交给上游 Go patch 处理 TUN、DNS 和通用设置。这保留了空 Profile、机场订阅、`rule-provider`、INTL/Fuzhou 独立节点和脚本 fail-closed 语义；未勾选节点仍不生成代理、组或占位对象。
+
+Android 侧同时保留上游前台服务和本地三态运行意图、底层网络路径指纹、授权临时 TUN bypass、手动停止抑制自启、应用双开和局域网排除网段。Mihomo 侧恢复了上游 `SetupParams`/export 结构，同时保留 CorpLink TCP Bind、节点独立 DNS、状态动作和定向重建。WireGuard 设备按上游 1.19.7 延迟初始化，对应重建测试先创建真实 device 再验证旧资源只关闭一次。本地 `core go test -p 1 ./...`、Mihomo outbound/config/dns/executor 以及 CorpLink `-race` 专项全部通过。
+
+SG 发布包的独立 applicationId、橙红图标、测试签名与 arm64 原生库保持不变。上游新增的首页 `PRE` 小徽标和旧环境角标现在共用 `SHOW_APP_ENV_BANNER`，SG release 构建两处都不显示。Code Forge 的 Rust host 库在 Flutter 测试前编译，完整工作流包含生成物、所有 Flutter 分片、Android 恢复策略、Go 内核、Rust 登录 helper、Mihomo-SG Android 原生库和 APK 打包。
+
+候选 HEAD `535b3464` 的 [Actions run 39561559970](https://github.com/luantu/Bettbox/actions/runs/39561559970) 已全链成功。APK 保存于 `outputs/android-sg-upstream-1.19.7-2026-10-21/app-release.apk`，SHA-256 为 `b9e5a7eb4fed62998ef10422b1c476bf489901d7fc323252193ed28d719d5e9c`；静态检查为包名 `com.appshub.bettbox.sg`、版本 `1.19.7 (2026101601)`，包含 arm64 `libmeta.so`、`libcorplink-rs-login.so` 和 `libcode_forge.so`。本节落盘时手机 ADB 已断开，因此不把覆盖安装、保留数据、真实授权、双节点、切网恢复或业务分流标为本候选已通过。
