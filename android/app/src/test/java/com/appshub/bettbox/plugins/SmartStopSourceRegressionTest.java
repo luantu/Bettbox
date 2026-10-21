@@ -48,6 +48,15 @@ public final class SmartStopSourceRegressionTest {
         require(launchActivity.contains("EXTRA_SHORTCUT_TOKEN") &&
                 launchActivity.contains("launchFromShortcut"),
             "the exported compatibility Activity must reject calls without its private token");
+        require(compatibility.contains("VpnPlugin.setSmartStopped(false)") &&
+                compatibility.contains("VpnRunIntentStore.write"),
+            "keep-stopped must clear SmartStop ownership and persist explicit user intent");
+        require(compatibility.contains("IMPORTANCE_NONE"),
+            "manual notification fallback must reject a disabled compatibility channel");
+        require(smartAutoStop.contains("getVpnRunIntent(reload: true)"),
+            "foreground SmartAutoStop resume must honor explicit user stop");
+        require(serviceMain.contains("getVpnRunIntent(reload: true)"),
+            "service-isolate SmartAutoStop resume must honor explicit user stop");
     }
 
     private static String methodBody(String source, String signature) {

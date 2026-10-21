@@ -64,8 +64,16 @@ object CompatibilityAppManager {
         val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
-        return permissionGranted && NotificationManagerCompat.from(context)
-            .areNotificationsEnabled()
+        if (!permissionGranted ||
+            !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = context.getSystemService(NotificationManager::class.java)
+                ?.getNotificationChannel(CHANNEL_ID)
+            if (channel?.importance == NotificationManager.IMPORTANCE_NONE) return false
+        }
+        return true
     }
 
     fun isInstalled(context: Context, packageName: String): Boolean = runCatching {
@@ -123,11 +131,12 @@ object CompatibilityAppManager {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         drawable.setBounds(0, 0, size, size)
         drawable.draw(Canvas(bitmap))
-        val token = UUID.randomUUID().toString()
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(SHORTCUT_TOKEN_KEY, token)
-            .commit()
+        val shortcutPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val token = shortcutPrefs.getString(SHORTCUT_TOKEN_KEY, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: UUID.randomUUID().toString().also {
+                shortcutPrefs.edit().putString(SHORTCUT_TOKEN_KEY, it).commit()
+            }
         val intent = Intent(context, CompatibilityLaunchActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             putExtra(EXTRA_TARGET_PACKAGE, packageName)
@@ -209,6 +218,7 @@ object CompatibilityAppManager {
     fun keepStopped(context: Context): Boolean {
         if (!active.get()) return false
         VpnRunIntentStore.write(context.applicationContext, false)
+        VpnPlugin.setSmartStopped(false)
         VpnPlugin.handleStop(force = true)
         clearSession(context.applicationContext)
         return true
@@ -354,4 +364,3 @@ object CompatibilityAppManager {
             ?.cancel(NOTIFICATION_ID)
     }
 }
-import android.Manifest

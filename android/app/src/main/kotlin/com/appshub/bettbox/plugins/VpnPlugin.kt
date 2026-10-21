@@ -1243,6 +1243,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleSmartResume(options: VpnOptions): Boolean {
+        if (VpnRunIntentStore.read(BettboxApplication.getAppContext()) == false) {
+            setSmartStopped(false)
+            return false
+        }
         nativeRecoveryPolicy.setWanted(options.enable)
         if (options.enable) startNativeRecoveryWatchdog()
         scope.launch {

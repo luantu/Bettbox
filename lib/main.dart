@@ -195,6 +195,10 @@ Future<void> _service(List<String> flags) async {
               await vpn?.smartStop();
             }
           } else if (!shouldStop && isSmartStopped) {
+            if (await globalState.getVpnRunIntent(reload: true) == false) {
+              await vpn?.setSmartStopped(false);
+              return;
+            }
             await vpn?.setSmartStopped(false);
             await vpn?.smartResume(clashLibHandler.getAndroidVpnOptions());
           }

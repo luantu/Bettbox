@@ -275,6 +275,7 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
   Future<void> _restartVpn() async {
     if (system.isAndroid) {
       if (await service?.isCompatibilityPaused() == true) return;
+      if (await globalState.getVpnRunIntent(reload: true) == false) return;
       // Android: Resume from smart-stop mode
       await service?.setSmartStopped(false);
       await service?.smartResume();

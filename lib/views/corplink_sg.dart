@@ -283,7 +283,8 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     final draft = _settings();
     return applied == null ||
         applied.username.trim() != draft.username.trim() ||
-        applied.server.trim() != draft.server.trim();
+        applied.server.trim().replaceFirst(RegExp(r'/$'), '') !=
+            draft.server.trim().replaceFirst(RegExp(r'/$'), '');
   }
 
   bool get _hasUnsavedChanges {

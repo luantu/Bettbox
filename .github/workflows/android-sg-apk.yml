@@ -62,6 +62,11 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Read Rust cache version
+        id: rust-cache-version
+        shell: bash
+        run: echo "version=$(rustc -Vv | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Android SDK and NDK
         uses: android-actions/setup-android@v4
         with:
@@ -149,7 +154,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: plugins/code_forge/rust/target
-          key: code-forge-host-${{ runner.os }}-rust-stable-v2-${{ hashFiles('plugins/code_forge/rust/Cargo.toml', 'plugins/code_forge/rust/Cargo.lock', 'plugins/code_forge/rust/src/**', 'plugins/code_forge/rust/build.rs', 'plugins/code_forge/rust/rust-toolchain*') }}
+          key: code-forge-host-${{ runner.os }}-rust-${{ steps.rust-cache-version.outputs.version }}-${{ hashFiles('plugins/code_forge/rust/Cargo.toml', 'plugins/code_forge/rust/Cargo.lock', 'plugins/code_forge/rust/src/**', 'plugins/code_forge/rust/build.rs', 'plugins/code_forge/rust/rust-toolchain*') }}
 
       - name: Build Code Forge host test library
         if: steps.code-forge-cache.outputs.cache-hit != 'true'
@@ -344,10 +349,11 @@ jobs:
           set -euo pipefail
           apk=build/app/outputs/flutter-apk/app-release.apk
           test -s "$apk"
-          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmeta.so'
-          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libcore.so'
-          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libcorplink-rs-login.so'
-          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libcode_forge.so'
+          unzip -Z1 "$apk" > build/apk-file-list.txt
+          grep -q '^lib/arm64-v8a/libmeta.so$' build/apk-file-list.txt
+          grep -q '^lib/arm64-v8a/libcore.so$' build/apk-file-list.txt
+          grep -q '^lib/arm64-v8a/libcorplink-rs-login.so$' build/apk-file-list.txt
+          grep -q '^lib/arm64-v8a/libcode_forge.so$' build/apk-file-list.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
