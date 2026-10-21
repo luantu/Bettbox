@@ -89,9 +89,35 @@ jobs:
           path: pubspec.lock
           if-no-files-found: error
 
-      - name: Run Flutter root, clash and model tests
-        timeout-minutes: 10
-        run: flutter test test/*.dart test/clash test/models
+      - name: Run SG Flutter logic tests
+        timeout-minutes: 6
+        run: |
+          flutter test \
+            test/android_vpn_ready_action_test.dart \
+            test/corplink_authorization_network_gate_test.dart \
+            test/corplink_multi_handoff_test.dart \
+            test/corplink_multi_status_test.dart \
+            test/corplink_node_delay_url_test.dart \
+            test/corplink_route_status_test.dart \
+            test/corplink_sg_nodes_test.dart \
+            test/corplink_sg_overlay_test.dart \
+            test/corplink_sg_settings_test.dart \
+            test/corplink_vpn_start_gate_test.dart \
+            test/sg_network_handoff_test.dart \
+            test/vpn_run_intent_policy_test.dart
+
+      - name: Run SG Flutter UI tests
+        timeout-minutes: 6
+        run: |
+          flutter test \
+            test/app_env_banner_test.dart \
+            test/corplink_management_panel_test.dart \
+            test/sg_dashboard_alignment_test.dart \
+            test/sg_dashboard_tile_test.dart
+
+      - name: Run Flutter clash and model tests
+        timeout-minutes: 6
+        run: flutter test test/clash test/models
 
       - name: Run Flutter common and provider tests
         timeout-minutes: 10
