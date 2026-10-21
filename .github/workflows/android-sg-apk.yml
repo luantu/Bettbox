@@ -137,6 +137,10 @@ jobs:
         timeout-minutes: 10
         run: flutter test test/common test/providers
 
+      - name: Build Code Forge host test library
+        working-directory: plugins/code_forge/rust
+        run: cargo build --release --locked
+
       - name: Run Flutter plugin and view tests
         timeout-minutes: 10
         run: flutter test test/plugins test/views
