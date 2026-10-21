@@ -302,8 +302,7 @@ Set<String> mergeCorplinkNodeOverlay(
     }
   }
 
-  final authorized = settings.isConfigured &&
-      corplinkAuthMatchesSettings(auth, settings) &&
+  final authorized = corplinkAuthMatchesSettings(auth, settings) &&
       cookiePath != null &&
       cookiePath.isNotEmpty;
   final scriptSuppressedNames = <String>{
