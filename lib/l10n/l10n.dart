@@ -75,10 +75,10 @@ class AppLocalizations {
     return Intl.message('Home', name: 'dashboard', desc: '', args: []);
   }
 
-  /// `Custom Title`
+  /// `Custom Dashboard Title`
   String get customDashboardTitle {
     return Intl.message(
-      'Custom Title',
+      'Custom Dashboard Title',
       name: 'customDashboardTitle',
       desc: '',
       args: [],
@@ -805,10 +805,10 @@ class AppLocalizations {
     return Intl.message('Theme', name: 'theme', desc: '', args: []);
   }
 
-  /// `Set theme color options`
+  /// `Set theme color and icon`
   String get themeDesc {
     return Intl.message(
-      'Set theme color options',
+      'Set theme color and icon',
       name: 'themeDesc',
       desc: '',
       args: [],
@@ -1820,10 +1820,10 @@ class AppLocalizations {
     return Intl.message('Slow', name: 'slow', desc: '', args: []);
   }
 
-  /// `Bettbox is deeply crafted on the powerful and flexible Mihomo kernel, dedicated to a superior client experience. Our vision: Connecting Open Source and AI, Accelerating Innovation`
+  /// `Bettbox is based on the powerful and flexible Mihomo (Clash.Meta) proxy kernel, dedicated to a superior user experience. Forked from FlClash: Better Experience, Out of the box`
   String get desc {
     return Intl.message(
-      'Bettbox is deeply crafted on the powerful and flexible Mihomo kernel, dedicated to a superior client experience. Our vision: Connecting Open Source and AI, Accelerating Innovation',
+      'Bettbox is based on the powerful and flexible Mihomo (Clash.Meta) proxy kernel, dedicated to a superior user experience. Forked from FlClash: Better Experience, Out of the box',
       name: 'desc',
       desc: '',
       args: [],
@@ -4655,6 +4655,26 @@ class AppLocalizations {
     );
   }
 
+  /// `Local Network Direct Routes`
+  String get lanDirectRoutes {
+    return Intl.message(
+      'Local Network Direct Routes',
+      name: 'lanDirectRoutes',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `These CIDRs and local discovery traffic bypass the Android TUN`
+  String get lanDirectRoutesDesc {
+    return Intl.message(
+      'These CIDRs and local discovery traffic bypass the Android TUN',
+      name: 'lanDirectRoutesDesc',
+      desc: '',
+      args: [],
+    );
+  }
+
   /// `Please enter the admin password`
   String get pleaseInputAdminPassword {
     return Intl.message(
@@ -6295,20 +6315,20 @@ class AppLocalizations {
     );
   }
 
-  /// `Select up to 3 items to pin on the widget`
+  /// `Select up to 4 items to pin on the widget`
   String get mediaUnlockPinnedSettingsDesc {
     return Intl.message(
-      'Select up to 3 items to pin on the widget',
+      'Select up to 4 items to pin on the widget',
       name: 'mediaUnlockPinnedSettingsDesc',
       desc: '',
       args: [],
     );
   }
 
-  /// `You can select up to 3 items`
+  /// `You can select up to 4 items`
   String get mediaUnlockSelectLimit {
     return Intl.message(
-      'You can select up to 3 items',
+      'You can select up to 4 items',
       name: 'mediaUnlockSelectLimit',
       desc: '',
       args: [],
@@ -6765,6 +6785,26 @@ class AppLocalizations {
     return Intl.message(
       'Core authorization did not take effect: the running core lacks CAP_NET_ADMIN, TUN may fail',
       name: 'coreCapabilityNotEffective',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `HTTP proxy is generally not recommended on non-desktop platforms. Only enable this feature when necessary and you fully understand the implications.`
+  String get vpnSystemProxyConfirmDesc {
+    return Intl.message(
+      'HTTP proxy is generally not recommended on non-desktop platforms. Only enable this feature when necessary and you fully understand the implications.',
+      name: 'vpnSystemProxyConfirmDesc',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `Inactive in script mode`
+  String get overrideInvalidTip {
+    return Intl.message(
+      'Inactive in script mode',
+      name: 'overrideInvalidTip',
       desc: '',
       args: [],
     );

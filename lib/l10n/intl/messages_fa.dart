@@ -385,7 +385,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "deleteTip": m3,
     "deleteTunnel": MessageLookupByLibrary.simpleMessage("حذف هدایت"),
     "desc": MessageLookupByLibrary.simpleMessage(
-      "Bettbox به‌صورت عمیق بر پایه هسته قدرتمند و انعطاف‌پذیر Mihomo ساخته شده و بر ارائه تجربه کلاینت بهتر متمرکز است. چشم‌انداز ما: Connecting Open Source and AI, Accelerating Innovation",
+      "Bettbox یک کلاینت پروکسی بر پایه هسته قدرتمند Mihomo (Clash.Meta) است. (برگرفته از FlClash)",
     ),
     "destination": MessageLookupByLibrary.simpleMessage("آدرس مقصد"),
     "destinationGeoIP": MessageLookupByLibrary.simpleMessage(
@@ -764,7 +764,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "موارد بیشتر آنلاک استریم",
     ),
     "mediaUnlockPinnedSettingsDesc": MessageLookupByLibrary.simpleMessage(
-      "امکان انتخاب حداکثر ۳ مورد برای پین کردن در ویجت",
+      "امکان انتخاب حداکثر ۴ مورد برای پین کردن در ویجت",
     ),
     "mediaUnlockRefreshByCategory": MessageLookupByLibrary.simpleMessage(
       "تازه‌سازی جزئی بر اساس دسته‌بندی فعلی",
@@ -773,7 +773,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "به‌روزرسانی خودکار هنگام تغییر گره",
     ),
     "mediaUnlockSelectLimit": MessageLookupByLibrary.simpleMessage(
-      "حداکثر می‌توانید ۳ مورد را انتخاب کنید",
+      "حداکثر می‌توانید ۴ مورد را انتخاب کنید",
     ),
     "mediaUnlocked": MessageLookupByLibrary.simpleMessage("قفل‌گشایی شده"),
     "memoryAndRuntime": MessageLookupByLibrary.simpleMessage(
@@ -958,6 +958,9 @@ class MessageLookup extends MessageLookupByLibrary {
     ),
     "overrideExperimentalDesc": MessageLookupByLibrary.simpleMessage(
       "جایگزینی تنظیمات آزمایشی پروفایل",
+    ),
+    "overrideInvalidTip": MessageLookupByLibrary.simpleMessage(
+      "در حالت اسکریپت اعمال نمی‌شود",
     ),
     "overrideNtp": MessageLookupByLibrary.simpleMessage("اورراید NTP"),
     "overrideNtpDesc": MessageLookupByLibrary.simpleMessage(
@@ -1380,7 +1383,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "theme": MessageLookupByLibrary.simpleMessage("پوسته"),
     "themeColor": MessageLookupByLibrary.simpleMessage("رنگ پوسته"),
     "themeDesc": MessageLookupByLibrary.simpleMessage(
-      "تنظیمات مربوط به رنگ و پوسته",
+      "تنظیمات رنگ و آیکون پوسته",
     ),
     "themeMode": MessageLookupByLibrary.simpleMessage("حالت پوسته"),
     "threeBounce": MessageLookupByLibrary.simpleMessage("جهش سه گانه"),
@@ -1520,6 +1523,9 @@ class MessageLookup extends MessageLookupByLibrary {
     "vpnDesc": MessageLookupByLibrary.simpleMessage("تنظیمات مربوط به VPN"),
     "vpnEnableDesc": MessageLookupByLibrary.simpleMessage(
       "هدایت ترافیک سیستم از طریق VpnService",
+    ),
+    "vpnSystemProxyConfirmDesc": MessageLookupByLibrary.simpleMessage(
+      "استفاده از پروکسی HTTP در موبایل پیشنهاد نمی‌شود مگر در صورت نیاز",
     ),
     "vpnSystemProxyDesc": MessageLookupByLibrary.simpleMessage(
       "افزودن پروکسی HTTP به VpnService",

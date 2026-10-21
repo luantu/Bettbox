@@ -317,7 +317,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "deleteTip": m3,
     "deleteTunnel": MessageLookupByLibrary.simpleMessage("포워딩 삭제"),
     "desc": MessageLookupByLibrary.simpleMessage(
-      "Bettbox는 강력하고 유연한 Mihomo 코어를 기반으로 깊이 있게 제작되어, 더 나은 클라이언트 경험을 제공하는 데 전념합니다. 우리의 비전: Connecting Open Source and AI, Accelerating Innovation",
+      "Bettbox는 강력하고 유연한 Mihomo(Clash.Meta) 코어를 기반으로 개발된 사용자 친화적 프록시 클라이언트입니다. (FlClash 기반)",
     ),
     "destination": MessageLookupByLibrary.simpleMessage("목적지 주소"),
     "destinationGeoIP": MessageLookupByLibrary.simpleMessage("목적지 GeoIP"),
@@ -614,7 +614,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "더 많은 스트리밍 잠금 해제 항목",
     ),
     "mediaUnlockPinnedSettingsDesc": MessageLookupByLibrary.simpleMessage(
-      "위젯에 고정 표시할 항목을 최대 3개 선택할 수 있습니다",
+      "위젯에 고정 표시할 항목을 최대 4개 선택할 수 있습니다",
     ),
     "mediaUnlockRefreshByCategory": MessageLookupByLibrary.simpleMessage(
       "현재 카테고리를 기반으로 부분 새로고침",
@@ -623,7 +623,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "노드 변경 시 자동 새로고침",
     ),
     "mediaUnlockSelectLimit": MessageLookupByLibrary.simpleMessage(
-      "최대 3개 항목까지 선택할 수 있습니다",
+      "최대 4개 항목까지 선택할 수 있습니다",
     ),
     "mediaUnlocked": MessageLookupByLibrary.simpleMessage("잠금 해제됨"),
     "memoryAndRuntime": MessageLookupByLibrary.simpleMessage("메모리 및 런타임"),
@@ -768,6 +768,9 @@ class MessageLookup extends MessageLookupByLibrary {
     ),
     "overrideExperimentalDesc": MessageLookupByLibrary.simpleMessage(
       "프로필의 실험적 설정을 덮어씁니다",
+    ),
+    "overrideInvalidTip": MessageLookupByLibrary.simpleMessage(
+      "스크립트 모드에서는 적용되지 않습니다",
     ),
     "overrideNtp": MessageLookupByLibrary.simpleMessage("NTP 오버라이드"),
     "overrideNtpDesc": MessageLookupByLibrary.simpleMessage(
@@ -1087,7 +1090,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "textScale": MessageLookupByLibrary.simpleMessage("텍스트 배율"),
     "theme": MessageLookupByLibrary.simpleMessage("테마"),
     "themeColor": MessageLookupByLibrary.simpleMessage("테마 색상"),
-    "themeDesc": MessageLookupByLibrary.simpleMessage("테마 색상 관련 설정"),
+    "themeDesc": MessageLookupByLibrary.simpleMessage("테마 색상 및 아이콘 설정"),
     "themeMode": MessageLookupByLibrary.simpleMessage("테마 모드"),
     "threeBounce": MessageLookupByLibrary.simpleMessage("트리플 바운스"),
     "threeColumns": MessageLookupByLibrary.simpleMessage("3열"),
@@ -1204,6 +1207,9 @@ class MessageLookup extends MessageLookupByLibrary {
     "vpnDesc": MessageLookupByLibrary.simpleMessage("VPN 관련 설정 변경"),
     "vpnEnableDesc": MessageLookupByLibrary.simpleMessage(
       "VpnService를 통해 시스템 트래픽 라우팅",
+    ),
+    "vpnSystemProxyConfirmDesc": MessageLookupByLibrary.simpleMessage(
+      "모바일 환경에서는 HTTP 프록시 병용을 권장하지 않습니다. 필요한 경우에만 켜세요",
     ),
     "vpnSystemProxyDesc": MessageLookupByLibrary.simpleMessage(
       "VpnService에 HTTP 프록시 연결",

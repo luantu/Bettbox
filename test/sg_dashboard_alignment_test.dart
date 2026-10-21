@@ -29,7 +29,7 @@ void main() {
                       const SizedBox(height: 16),
                       SizedBox(
                         width: 240,
-                        height: getWidgetHeight(1),
+                        height: getWidgetHeight(context, 1),
                         child: CommonCard(
                           key: const ValueKey('reference-card'),
                           onPressed: () {},

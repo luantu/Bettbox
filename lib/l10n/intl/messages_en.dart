@@ -350,7 +350,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "cubeGrid": MessageLookupByLibrary.simpleMessage("Cube Grid"),
     "custom": MessageLookupByLibrary.simpleMessage("Custom"),
     "customDashboardTitle": MessageLookupByLibrary.simpleMessage(
-      "Custom Title",
+      "Custom Dashboard Title",
     ),
     "customScriptOptions": MessageLookupByLibrary.simpleMessage(
       "Custom Rule Switch",
@@ -385,7 +385,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "deleteTip": m3,
     "deleteTunnel": MessageLookupByLibrary.simpleMessage("Delete Forwarding"),
     "desc": MessageLookupByLibrary.simpleMessage(
-      "Bettbox is deeply crafted on the powerful and flexible Mihomo kernel, dedicated to a superior client experience. Our vision: Connecting Open Source and AI, Accelerating Innovation",
+      "Bettbox is based on the powerful and flexible Mihomo (Clash.Meta) proxy kernel, dedicated to a superior user experience. Forked from FlClash: Better Experience, Out of the box",
     ),
     "destination": MessageLookupByLibrary.simpleMessage("Destination"),
     "destinationGeoIP": MessageLookupByLibrary.simpleMessage(
@@ -695,6 +695,12 @@ class MessageLookup extends MessageLookupByLibrary {
       "Keep the app icon in the Dock",
     ),
     "key": MessageLookupByLibrary.simpleMessage("Key"),
+    "lanDirectRoutes": MessageLookupByLibrary.simpleMessage(
+      "Local Network Direct Routes",
+    ),
+    "lanDirectRoutesDesc": MessageLookupByLibrary.simpleMessage(
+      "These CIDRs and local discovery traffic bypass the Android TUN",
+    ),
     "lanSharing": MessageLookupByLibrary.simpleMessage("LAN Sharing"),
     "language": MessageLookupByLibrary.simpleMessage("Language"),
     "lastEdit": MessageLookupByLibrary.simpleMessage("Last edited"),
@@ -758,7 +764,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "More Streaming Unlock Items",
     ),
     "mediaUnlockPinnedSettingsDesc": MessageLookupByLibrary.simpleMessage(
-      "Select up to 3 items to pin on the widget",
+      "Select up to 4 items to pin on the widget",
     ),
     "mediaUnlockRefreshByCategory": MessageLookupByLibrary.simpleMessage(
       "Partially refresh based on current category",
@@ -767,7 +773,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Auto refresh on node change",
     ),
     "mediaUnlockSelectLimit": MessageLookupByLibrary.simpleMessage(
-      "You can select up to 3 items",
+      "You can select up to 4 items",
     ),
     "mediaUnlocked": MessageLookupByLibrary.simpleMessage("Unlocked"),
     "memoryAndRuntime": MessageLookupByLibrary.simpleMessage(
@@ -944,6 +950,9 @@ class MessageLookup extends MessageLookupByLibrary {
     ),
     "overrideExperimentalDesc": MessageLookupByLibrary.simpleMessage(
       "Override profile\'s Experimental settings",
+    ),
+    "overrideInvalidTip": MessageLookupByLibrary.simpleMessage(
+      "Inactive in script mode",
     ),
     "overrideNtp": MessageLookupByLibrary.simpleMessage("Override NTP"),
     "overrideNtpDesc": MessageLookupByLibrary.simpleMessage(
@@ -1348,7 +1357,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "theme": MessageLookupByLibrary.simpleMessage("Theme"),
     "themeColor": MessageLookupByLibrary.simpleMessage("Theme Color"),
     "themeDesc": MessageLookupByLibrary.simpleMessage(
-      "Set theme color options",
+      "Set theme color and icon",
     ),
     "themeMode": MessageLookupByLibrary.simpleMessage("Theme Mode"),
     "threeBounce": MessageLookupByLibrary.simpleMessage("Three Bounce"),
@@ -1478,6 +1487,9 @@ class MessageLookup extends MessageLookupByLibrary {
     "vpnDesc": MessageLookupByLibrary.simpleMessage("VPN-related settings"),
     "vpnEnableDesc": MessageLookupByLibrary.simpleMessage(
       "Route system traffic via VpnService",
+    ),
+    "vpnSystemProxyConfirmDesc": MessageLookupByLibrary.simpleMessage(
+      "HTTP proxy is generally not recommended on non-desktop platforms. Only enable this feature when necessary and you fully understand the implications.",
     ),
     "vpnSystemProxyDesc": MessageLookupByLibrary.simpleMessage(
       "Attach HTTP proxy to VpnService",

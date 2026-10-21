@@ -307,7 +307,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "deleteTip": m3,
     "deleteTunnel": MessageLookupByLibrary.simpleMessage("転送削除"),
     "desc": MessageLookupByLibrary.simpleMessage(
-      "Bettboxは強力で柔軟なMihomoカーネルをベースに深く作り込まれ、より優れたクライアント体験を追求しています。私たちのビジョン：Connecting Open Source and AI, Accelerating Innovation",
+      "Bettboxは柔軟で強力なMihomo(Clash.Meta)カーネルを搭載した、快適性を追求したプロキシクライアントです。（FlClashベース）",
     ),
     "destination": MessageLookupByLibrary.simpleMessage("宛先アドレス"),
     "destinationGeoIP": MessageLookupByLibrary.simpleMessage("宛先GeoIP"),
@@ -604,7 +604,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "その他のストリーミング解除項目",
     ),
     "mediaUnlockPinnedSettingsDesc": MessageLookupByLibrary.simpleMessage(
-      "ウィジェットに常駐表示する最大3項目を選択できます",
+      "ウィジェットに常駐表示する最大4項目を選択できます",
     ),
     "mediaUnlockRefreshByCategory": MessageLookupByLibrary.simpleMessage(
       "現在のカテゴリに基づいて部分更新",
@@ -613,7 +613,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "ノード変更時に自動更新",
     ),
     "mediaUnlockSelectLimit": MessageLookupByLibrary.simpleMessage(
-      "最大3項目まで選択できます",
+      "最大4項目まで選択できます",
     ),
     "mediaUnlocked": MessageLookupByLibrary.simpleMessage("ロック解除済み"),
     "memoryAndRuntime": MessageLookupByLibrary.simpleMessage("メモリとランタイム"),
@@ -758,6 +758,9 @@ class MessageLookup extends MessageLookupByLibrary {
     ),
     "overrideExperimentalDesc": MessageLookupByLibrary.simpleMessage(
       "プロファイル内の実験的設定を上書き",
+    ),
+    "overrideInvalidTip": MessageLookupByLibrary.simpleMessage(
+      "スクリプトモードでは無効です",
     ),
     "overrideNtp": MessageLookupByLibrary.simpleMessage("NTPオーバーライド"),
     "overrideNtpDesc": MessageLookupByLibrary.simpleMessage(
@@ -1087,7 +1090,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "textScale": MessageLookupByLibrary.simpleMessage("テキスト倍率"),
     "theme": MessageLookupByLibrary.simpleMessage("テーマ"),
     "themeColor": MessageLookupByLibrary.simpleMessage("テーマカラー"),
-    "themeDesc": MessageLookupByLibrary.simpleMessage("テーマカラー関連の設定"),
+    "themeDesc": MessageLookupByLibrary.simpleMessage("テーマカラーとアイコンの設定"),
     "themeMode": MessageLookupByLibrary.simpleMessage("テーマモード"),
     "threeBounce": MessageLookupByLibrary.simpleMessage("トリプルバウンス"),
     "threeColumns": MessageLookupByLibrary.simpleMessage("3列"),
@@ -1202,6 +1205,9 @@ class MessageLookup extends MessageLookupByLibrary {
     "vpnDesc": MessageLookupByLibrary.simpleMessage("VPN関連の設定を変更"),
     "vpnEnableDesc": MessageLookupByLibrary.simpleMessage(
       "VpnServiceでシステム通信をルーティング",
+    ),
+    "vpnSystemProxyConfirmDesc": MessageLookupByLibrary.simpleMessage(
+      "モバイル端末ではHTTPプロキシ併用は非推奨です。必要な場合のみ設定してください",
     ),
     "vpnSystemProxyDesc": MessageLookupByLibrary.simpleMessage(
       "VpnServiceにHTTPプロキシを添付",

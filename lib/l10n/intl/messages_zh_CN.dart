@@ -255,7 +255,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "creationTime": MessageLookupByLibrary.simpleMessage("创建时间"),
     "cubeGrid": MessageLookupByLibrary.simpleMessage("九宫烁影"),
     "custom": MessageLookupByLibrary.simpleMessage("自定义"),
-    "customDashboardTitle": MessageLookupByLibrary.simpleMessage("个性标题"),
+    "customDashboardTitle": MessageLookupByLibrary.simpleMessage("个性化标题"),
     "customScriptOptions": MessageLookupByLibrary.simpleMessage("自定义规则开关"),
     "customUrl": MessageLookupByLibrary.simpleMessage("自定义URL"),
     "cut": MessageLookupByLibrary.simpleMessage("剪切"),
@@ -281,7 +281,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "deleteTip": m3,
     "deleteTunnel": MessageLookupByLibrary.simpleMessage("删除转发"),
     "desc": MessageLookupByLibrary.simpleMessage(
-      "Bettbox 基于强大灵活的 Mihomo 内核深度打造，致力于更好的客户端体验，我们的愿景: Connecting Open Source and AI，Accelerating Innovation",
+      "Bettbox 基于强大灵活的 Mihomo (Clash.Meta) 代理内核，致力于更好的体验，Forked from FlClash, Better Experience, Out of the Box",
     ),
     "destination": MessageLookupByLibrary.simpleMessage("目标地址"),
     "destinationGeoIP": MessageLookupByLibrary.simpleMessage("目标地理定位"),
@@ -501,6 +501,10 @@ class MessageLookup extends MessageLookupByLibrary {
     "keepDockIcon": MessageLookupByLibrary.simpleMessage("常驻DOCK"),
     "keepDockIconDesc": MessageLookupByLibrary.simpleMessage("在 Dock 栏保留应用图标"),
     "key": MessageLookupByLibrary.simpleMessage("键"),
+    "lanDirectRoutes": MessageLookupByLibrary.simpleMessage("局域网直连网段"),
+    "lanDirectRoutesDesc": MessageLookupByLibrary.simpleMessage(
+      "这些网段及局域网发现流量不进入 Android TUN",
+    ),
     "lanSharing": MessageLookupByLibrary.simpleMessage("局域网共享"),
     "language": MessageLookupByLibrary.simpleMessage("语言"),
     "lastEdit": MessageLookupByLibrary.simpleMessage("上次编辑"),
@@ -548,7 +552,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "更多流媒体解锁项目",
     ),
     "mediaUnlockPinnedSettingsDesc": MessageLookupByLibrary.simpleMessage(
-      "可选 3 个在小部件常驻展示的项目",
+      "可选 4 个在小部件常驻展示的项目",
     ),
     "mediaUnlockRefreshByCategory": MessageLookupByLibrary.simpleMessage(
       "根据当前分组状态局部刷新",
@@ -557,7 +561,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "节点变化时自动刷新检测",
     ),
     "mediaUnlockSelectLimit": MessageLookupByLibrary.simpleMessage(
-      "最多只能选择 3 个项目",
+      "最多只能选择 4 个项目",
     ),
     "mediaUnlocked": MessageLookupByLibrary.simpleMessage("已解锁"),
     "memoryAndRuntime": MessageLookupByLibrary.simpleMessage("内存与运行时"),
@@ -687,6 +691,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "overrideExperimentalDesc": MessageLookupByLibrary.simpleMessage(
       "开启后将覆盖配置中的实验性配置",
     ),
+    "overrideInvalidTip": MessageLookupByLibrary.simpleMessage("在脚本模式下不生效"),
     "overrideNtp": MessageLookupByLibrary.simpleMessage("覆写 NTP"),
     "overrideNtpDesc": MessageLookupByLibrary.simpleMessage(
       "开启后将覆盖配置中的 NTP 选项",
@@ -971,7 +976,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "textScale": MessageLookupByLibrary.simpleMessage("文本缩放"),
     "theme": MessageLookupByLibrary.simpleMessage("主题"),
     "themeColor": MessageLookupByLibrary.simpleMessage("主题色彩"),
-    "themeDesc": MessageLookupByLibrary.simpleMessage("设置主题色彩相关"),
+    "themeDesc": MessageLookupByLibrary.simpleMessage("设置主题色彩及图标"),
     "themeMode": MessageLookupByLibrary.simpleMessage("主题模式"),
     "threeBounce": MessageLookupByLibrary.simpleMessage("灵珠跃动"),
     "threeColumns": MessageLookupByLibrary.simpleMessage("三列"),
@@ -1066,6 +1071,9 @@ class MessageLookup extends MessageLookupByLibrary {
     "vpnDesc": MessageLookupByLibrary.simpleMessage("修改VPN相关设置"),
     "vpnEnableDesc": MessageLookupByLibrary.simpleMessage(
       "通过 VpnService 自动路由系统流量",
+    ),
+    "vpnSystemProxyConfirmDesc": MessageLookupByLibrary.simpleMessage(
+      "非桌面端通常不推荐使用 HTTP 代理，此功能仅建议您在必要且熟悉的情况下开启",
     ),
     "vpnSystemProxyDesc": MessageLookupByLibrary.simpleMessage(
       "为 VpnService 附加 HTTP 代理",

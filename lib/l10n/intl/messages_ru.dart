@@ -394,7 +394,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Удалить перенаправление",
     ),
     "desc": MessageLookupByLibrary.simpleMessage(
-      "Bettbox глубоко проработан на базе мощного и гибкого ядра Mihomo и ориентирован на лучший клиентский опыт. Наше видение: Connecting Open Source and AI, Accelerating Innovation",
+      "Bettbox основан на мощном и гибком прокси-ядре Mihomo (Clash.Meta) и стремится к созданию лучшего пользовательского опыта. Форк от FlClash: Улучшенный опыт, готов к работе «из коробки»",
     ),
     "destination": MessageLookupByLibrary.simpleMessage("Адрес назначения"),
     "destinationGeoIP": MessageLookupByLibrary.simpleMessage(
@@ -781,7 +781,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Больше платформ стриминга",
     ),
     "mediaUnlockPinnedSettingsDesc": MessageLookupByLibrary.simpleMessage(
-      "Можно выбрать до 3 элементов для закрепления в виджете",
+      "Можно выбрать до 4 элементов для закрепления в виджете",
     ),
     "mediaUnlockRefreshByCategory": MessageLookupByLibrary.simpleMessage(
       "Частичное обновление по текущей категории",
@@ -790,7 +790,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Автообновление при смене узла",
     ),
     "mediaUnlockSelectLimit": MessageLookupByLibrary.simpleMessage(
-      "Можно выбрать максимум 3 элемента",
+      "Можно выбрать максимум 4 элемента",
     ),
     "mediaUnlocked": MessageLookupByLibrary.simpleMessage("Разблокировано"),
     "memoryAndRuntime": MessageLookupByLibrary.simpleMessage(
@@ -975,6 +975,9 @@ class MessageLookup extends MessageLookupByLibrary {
     ),
     "overrideExperimentalDesc": MessageLookupByLibrary.simpleMessage(
       "Включить переопределение экспериментальных настроек в конфигурации",
+    ),
+    "overrideInvalidTip": MessageLookupByLibrary.simpleMessage(
+      "Не действует в режиме скрипта",
     ),
     "overrideNtp": MessageLookupByLibrary.simpleMessage("Переопределить NTP"),
     "overrideNtpDesc": MessageLookupByLibrary.simpleMessage(
@@ -1403,7 +1406,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "theme": MessageLookupByLibrary.simpleMessage("Тема"),
     "themeColor": MessageLookupByLibrary.simpleMessage("Цвет темы"),
     "themeDesc": MessageLookupByLibrary.simpleMessage(
-      "Настройка темы и цветов",
+      "Настройка темы и иконок",
     ),
     "themeMode": MessageLookupByLibrary.simpleMessage("Режим темы"),
     "threeBounce": MessageLookupByLibrary.simpleMessage("Прыгающие точки"),
@@ -1551,6 +1554,9 @@ class MessageLookup extends MessageLookupByLibrary {
     "vpnDesc": MessageLookupByLibrary.simpleMessage("Настройки VPN"),
     "vpnEnableDesc": MessageLookupByLibrary.simpleMessage(
       "Автоматическая маршрутизация всего трафика через VpnService",
+    ),
+    "vpnSystemProxyConfirmDesc": MessageLookupByLibrary.simpleMessage(
+      "HTTP-прокси обычно не рекомендуется на мобильных платформах. Включайте эту функцию только при необходимости и если вы осознаёте возможные последствия.",
     ),
     "vpnSystemProxyDesc": MessageLookupByLibrary.simpleMessage(
       "Добавить HTTP-прокси к VPN",
