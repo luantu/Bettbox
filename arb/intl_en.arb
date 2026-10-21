@@ -563,6 +563,8 @@
   "system": "System",
   "bypassPrivateRoute": "Bypass Private Network",
   "bypassPrivateRouteDesc": "Automatically bypass private network IP addresses",
+  "lanDirectRoutes": "Local Network Direct Routes",
+  "lanDirectRoutesDesc": "These CIDRs and local discovery traffic bypass the Android TUN",
   "pleaseInputAdminPassword": "Please enter the admin password",
   "copyEnvVar": "Copy Environment Variable",
   "memoryInfo": "Memory",

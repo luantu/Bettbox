@@ -82,6 +82,18 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
+      - name: Regenerate Dart models and localizations
+        run: |
+          dart run build_runner build --delete-conflicting-outputs
+          dart run intl_utils:generate
+
+      - name: Upload regenerated Dart sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-dart-sources
+          path: lib
+          if-no-files-found: error
+
       - name: Upload resolved dependency lock
         uses: actions/upload-artifact@v4
         with:

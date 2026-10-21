@@ -563,6 +563,8 @@
   "system": "系統",
   "bypassPrivateRoute": "繞過私有網路",
   "bypassPrivateRouteDesc": "自動繞過私有網路 IP 位址",
+  "lanDirectRoutes": "區域網路直連網段",
+  "lanDirectRoutesDesc": "這些網段及區域網路探索流量不進入 Android TUN",
   "pleaseInputAdminPassword": "請輸入管理員密碼",
   "copyEnvVar": "複製環境變數",
   "memoryInfo": "記憶體資訊",

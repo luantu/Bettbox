@@ -160,7 +160,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: getWidgetHeight(1),
+      height: getWidgetHeight(context, 1),
       child: Stack(
         children: [
           Positioned.fill(

@@ -277,9 +277,8 @@ class ClashCore {
 
     try {
       final decoded = json.decode(proxiesRaw);
-      final privateGroup = decoded is Map
-          ? (decoded['groups'] as Map?)?['Fuzhou-Node-1']
-          : null;
+      final groups = decoded is Map ? decoded['groups'] as Map? : null;
+      final privateGroup = groups?['Fuzhou-Node-1'];
       if (privateGroup is Map) {
         // Diagnostic only: never print the private HTTPS URL itself.
         commonPrint.log(
