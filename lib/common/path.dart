@@ -43,9 +43,22 @@ class AppPath {
         tempDir.complete(value);
       });
     }
-    getDownloadsDirectory().then((value) {
-      downloadDir.complete(value);
-    });
+    unawaited(_resolveDownloadsDirectory());
+  }
+
+  Future<void> _resolveDownloadsDirectory() async {
+    try {
+      final directory = await getDownloadsDirectory();
+      if (directory != null) {
+        downloadDir.complete(directory);
+        return;
+      }
+    } catch (_) {
+      // Some supported test/desktop platforms do not expose a downloads
+      // directory. Falling back to the app data directory keeps file-backed
+      // configuration available without leaking an unhandled async error.
+    }
+    downloadDir.complete(await dataDir.future);
   }
 
   bool get isPortable =>
