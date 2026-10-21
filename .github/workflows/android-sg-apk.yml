@@ -89,8 +89,21 @@ jobs:
           path: pubspec.lock
           if-no-files-found: error
 
-      - name: Run Flutter unit tests
-        run: flutter test
+      - name: Run Flutter root, clash and model tests
+        timeout-minutes: 10
+        run: flutter test test/*.dart test/clash test/models
+
+      - name: Run Flutter common and provider tests
+        timeout-minutes: 10
+        run: flutter test test/common test/providers
+
+      - name: Run Flutter plugin and view tests
+        timeout-minutes: 10
+        run: flutter test test/plugins test/views
+
+      - name: Run Flutter widget tests
+        timeout-minutes: 10
+        run: flutter test test/widgets
 
       - name: Run native recovery policy tests
         run: |
