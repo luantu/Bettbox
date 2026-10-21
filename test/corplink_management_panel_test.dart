@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/models/models.dart';
 import 'package:bett_box/services/corplink_sg_nodes.dart';
@@ -212,5 +214,16 @@ void main() {
       find.byType(mui.Scaffold).last,
     );
     expect(scaffold.backgroundColor, scheme.surface);
+  });
+
+  test('CorpLink pages use the application material component family', () {
+    for (final path in [
+      'lib/views/corplink_sg.dart',
+      'lib/views/corplink_management_panel.dart',
+    ]) {
+      final source = File(path).readAsStringSync();
+      expect(source, contains("package:material_ui/material_ui.dart"));
+      expect(source, isNot(contains("package:flutter/material.dart")));
+    }
   });
 }

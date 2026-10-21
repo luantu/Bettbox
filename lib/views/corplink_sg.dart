@@ -6,7 +6,7 @@ import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/state.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'corplink_management_panel.dart';
 
 class CorplinkSgView extends StatefulWidget {
