@@ -128,6 +128,8 @@ const (
 	crashMethod                          Method = "crash"
 	setupConfigMethod                    Method = "setupConfig"
 	getConfigMethod                      Method = "getConfig"
+	getRuntimeConfigMethod               Method = "getRuntimeConfig"
+	exportConfigMethod                   Method = "exportConfig"
 	flushFakeIPMethod                    Method = "flushFakeIP"
 	flushDnsCacheMethod                  Method = "flushDnsCache"
 	reconnectTunnelsMethod               Method = "reconnectTunnels"

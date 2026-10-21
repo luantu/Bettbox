@@ -73,6 +73,9 @@ type WireGuard struct {
 	resolver            resolver.Resolver
 	corplinkDNSMatchers []C.DomainMatcher
 
+	runCtx        context.Context
+	runCancel     context.CancelFunc
+	deviceMutex   sync.Mutex
 	initOk        atomic.Bool
 	initMutex     sync.Mutex
 	initErr       error
@@ -707,6 +710,7 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 			outbound.connectAddr = option.Addr()
 		}
 	}
+	outbound.runCtx, outbound.runCancel = context.WithCancel(context.Background())
 	if option.TCP {
 		// TCP transport：直接连服务器（不依赖 sing dialer），兼容 corplink-rs 的 TCP 封装
 		log.Infoln("[WG](%s) using TCP transport, target=%s", option.Name, outbound.connectAddr)
@@ -715,9 +719,9 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 		} else {
 			log.Infoln("[WG](%s) corplink auth NOT enabled", option.Name)
 		}
-		outbound.bind = newTCPWireGuardBind(context.Background(), outbound.dialTCPTransport)
+		outbound.bind = newTCPWireGuardBind(outbound.runCtx, outbound.dialTCPTransport)
 	} else {
-		outbound.bind = wireguard.NewClientBind(context.Background(), wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
+		outbound.bind = wireguard.NewClientBind(outbound.runCtx, wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
 	}
 
 	if outbound.bind == nil {
@@ -788,7 +792,6 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 		}
 		option.AmneziaWGOption.HeaderProtectionKey = hex.EncodeToString(bytes)
 	}
-
 	// corplink 认证：在创建 wireguard 栈设备前调用 corplink /vpn/conn API
 	// 获取当前会话分配的隧道 IP 与服务器公钥，覆盖节点配置。
 	// 此时 option.PublicKey 已统一为 hex 格式，fetch 返回的 hex 直接可用。
@@ -818,9 +821,8 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 	}
 	outbound.option = option
 
-	mtu := option.MTU
-	if mtu == 0 {
-		mtu = 1408
+	if option.MTU == 0 {
+		option.MTU = 1408
 	}
 	option.IPStack.normalize()
 	if err = option.IPStack.validate(); err != nil {
@@ -829,70 +831,9 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 	if len(outbound.localPrefixes) == 0 {
 		return nil, E.New("missing local address")
 	}
-	stack, err := newIPStack(option.IPStack, outbound.localPrefixes, uint32(mtu))
-	if err != nil {
-		return nil, E.Cause(err, "create WireGuard stack")
-	}
-	outbound.tunDevice, err = newWireguardDevice(stack)
-	if err != nil {
-		_ = stack.Close()
-		return nil, E.Cause(err, "create WireGuard device")
-	}
-	logger := &device.Logger{
-		Verbosef: func(format string, args ...interface{}) {
-			log.SingLogger.Debug(fmt.Sprintf("[WG](%s) %s", option.Name, fmt.Sprintf(format, args...)))
-		},
-		Errorf: func(format string, args ...interface{}) {
-			log.SingLogger.Error(fmt.Sprintf("[WG](%s) %s", option.Name, fmt.Sprintf(format, args...)))
-		},
-	}
+	outbound.option = option
 	if option.AmneziaWGOption != nil {
 		outbound.bind.SetParseReserved(false) // AmneziaWG don't need parse reserved
-		if option.AmneziaWGOption.Version == 3 {
-			outbound.device = amneziav3.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		} else {
-			outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		}
-	} else {
-		if option.Corplink.APIServer != "" {
-			// CorpLink (feilian) peers run a modified WireGuard whose Noise
-			// construction identifier is "CorpLink v1 vpn@feilian-----------"
-			// instead of the standard WireGuard one. The identifier is mixed
-			// into the precomputed InitialHash/InitialChainKey, so the server
-			// decrypts the initiation only when the client uses the same
-			// identifier. Without this the handshake is silently dropped and
-			// the node delay test times out while the TCP connection itself
-			// stays established.
-			outbound.device = device.NewDeviceWithIdentifier(
-				outbound.tunDevice, outbound.bind, logger, option.Workers,
-				corplinkWGIdentifier,
-			)
-		} else {
-			outbound.device = device.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		}
-		// 握手监听：握手永久失败时主动失效底层 TCP 连接（仅 wg-fork device 支持）。
-		// 解决"TCP 连接仍在但 WireGuard 数据面无响应"导致的静默断链。
-		if option.TCP {
-			if wd, ok := outbound.device.(interface {
-				SetHandshakeListener(func(string))
-				SetHandshakeCompleteListener(func(string))
-			}); ok {
-				if tcpBind, ok := outbound.bind.(interface {
-					InvalidateEndpoint(string)
-					MarkConnReady(string)
-				}); ok {
-					wd.SetHandshakeListener(func(endpoint string) {
-						log.Warnln("[WG](%s) handshake failed for %s, invalidating TCP connection", option.Name, endpoint)
-						tcpBind.InvalidateEndpoint(endpoint)
-					})
-					// 握手完成：标记隧道 ready。TCP connected 不等于隧道可用，
-					// 业务只有在握手完成后才允许放行。
-					wd.SetHandshakeCompleteListener(func(endpoint string) {
-						tcpBind.MarkConnReady(endpoint)
-					})
-				}
-			}
-		}
 	}
 
 	var has6 bool
@@ -1007,7 +948,7 @@ func (w *WireGuard) init(ctx context.Context) error {
 	return nil
 }
 
-func (w *WireGuard) init0(ctx context.Context) error {
+func (w *WireGuard) init0(ctx context.Context) (err error) {
 	if w.initOk.Load() {
 		return nil
 	}
@@ -1030,11 +971,77 @@ func (w *WireGuard) init0(ctx context.Context) error {
 		// let us can retry domain resolve in next time
 		return err
 	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+
+	stack, err := newIPStack(w.option.IPStack, w.localPrefixes, uint32(w.option.MTU))
+	if err != nil {
+		w.initErr = E.Cause(err, "create WireGuard stack")
+		return w.initErr
+	}
+	tunDevice, err := newWireguardDevice(stack)
+	if err != nil {
+		_ = stack.Close()
+		w.initErr = E.Cause(err, "create WireGuard device")
+		return w.initErr
+	}
+
+	logger := &device.Logger{
+		Verbosef: func(format string, args ...interface{}) {
+			log.SingLogger.Debug(fmt.Sprintf("[WG](%s) %s", w.option.Name, fmt.Sprintf(format, args...)))
+		},
+		Errorf: func(format string, args ...interface{}) {
+			log.SingLogger.Error(fmt.Sprintf("[WG](%s) %s", w.option.Name, fmt.Sprintf(format, args...)))
+		},
+	}
+	var wgDevice wireguardGoDevice
+	if w.option.AmneziaWGOption != nil {
+		if w.option.AmneziaWGOption.Version == 3 {
+			wgDevice = amneziav3.NewDevice(tunDevice, w.bind, logger, w.option.Workers)
+		} else {
+			wgDevice = amnezia.NewDevice(tunDevice, w.bind, logger, w.option.Workers)
+		}
+	} else if w.IsCorplink() {
+		wgDevice = device.NewDeviceWithIdentifier(
+			tunDevice,
+			w.bind,
+			logger,
+			w.option.Workers,
+			corplinkWGIdentifier,
+		)
+	} else {
+		wgDevice = device.NewDevice(tunDevice, w.bind, logger, w.option.Workers)
+	}
+	if w.option.TCP {
+		if observed, ok := wgDevice.(interface {
+			SetHandshakeListener(func(string))
+			SetHandshakeCompleteListener(func(string))
+		}); ok {
+			if tcpBind, ok := w.bind.(interface {
+				InvalidateEndpoint(string)
+				MarkConnReady(string)
+			}); ok {
+				observed.SetHandshakeListener(func(endpoint string) {
+					log.Warnln("[WG](%s) handshake failed for %s, invalidating TCP connection", w.option.Name, endpoint)
+					tcpBind.InvalidateEndpoint(endpoint)
+				})
+				observed.SetHandshakeCompleteListener(func(endpoint string) {
+					tcpBind.MarkConnReady(endpoint)
+				})
+			}
+		}
+	}
+	defer func() {
+		if err != nil {
+			wgDevice.Close()
+		}
+	}()
 
 	if debug.Enabled {
 		log.SingLogger.Trace(fmt.Sprintf("[WG](%s) created wireguard ipc configuration", w.option.Name))
 	}
-	err = w.device.IpcSet(ipcConf)
+	err = wgDevice.IpcSet(ipcConf)
 	if err != nil {
 		log.Warnln("[WG](%s) IpcSet error: %v", w.option.Name, err)
 		w.initErr = E.Cause(err, "setup wireguard")
@@ -1042,7 +1049,7 @@ func (w *WireGuard) init0(ctx context.Context) error {
 	}
 	w.serverAddrTime.Store(time.Now())
 
-	err = w.tunDevice.Start()
+	err = tunDevice.Start()
 	if err != nil {
 		log.Warnln("[WG](%s) tunDevice.Start error: %v", w.option.Name, err)
 		w.initErr = err
@@ -1050,6 +1057,13 @@ func (w *WireGuard) init0(ctx context.Context) error {
 	}
 	log.Infoln("[WG](%s) tunDevice started", w.option.Name)
 
+	w.deviceMutex.Lock()
+	defer w.deviceMutex.Unlock()
+	err = w.runCtx.Err()
+	if err != nil {
+		return err
+	}
+	w.device, w.tunDevice = wgDevice, tunDevice
 	w.initOk.Store(true)
 	return nil
 }
@@ -1311,8 +1325,14 @@ func (w *WireGuard) Close() error {
 		return nil
 	}
 	w.closed.Store(true)
-	if w.device != nil {
-		w.device.Close()
+	if w.runCancel != nil {
+		w.runCancel()
+	}
+	w.deviceMutex.Lock()
+	wgDevice := w.device
+	w.deviceMutex.Unlock()
+	if wgDevice != nil {
+		wgDevice.Close()
 	} else if w.bind != nil {
 		_ = w.bind.Close()
 	}
@@ -1365,6 +1385,10 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 	if err != nil {
 		return err
 	}
+	if err := replacement.init(ctx); err != nil {
+		_ = replacement.Close()
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		_ = replacement.Close()
 		return err
@@ -1398,16 +1422,22 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 	}
 	oldDevice := w.device
 	oldBind := w.bind
+	oldRunCancel := w.runCancel
+	w.deviceMutex.Lock()
 	w.device = replacement.device
 	w.tunDevice = replacement.tunDevice
+	w.deviceMutex.Unlock()
 	w.bind = replacement.bind
+	w.runCtx = replacement.runCtx
+	w.runCancel = replacement.runCancel
 	w.resolver = nextResolver
 	w.option = replacement.option
 	w.localPrefixes = replacement.localPrefixes
 	w.connectAddr = replacement.connectAddr
-	w.serverAddrMap = nil
+	w.serverAddrMap = replacement.serverAddrMap
+	w.serverAddrTime.Store(replacement.serverAddrTime.Load())
 	w.initErr = nil
-	w.initOk.Store(false)
+	w.initOk.Store(true)
 	w.requiresRebuild.Store(false)
 	w.busyFail.Store(0)
 	w.dohTunnelSeen.Store(false)
@@ -1423,6 +1453,9 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 		oldDevice.Close()
 	} else if oldBind != nil {
 		_ = oldBind.Close()
+	}
+	if oldRunCancel != nil {
+		oldRunCancel()
 	}
 	return nil
 }

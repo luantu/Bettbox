@@ -6,7 +6,7 @@ import 'package:bett_box/state.dart';
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/views/config/user_auth.dart';
 import 'package:bett_box/widgets/widgets.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -22,7 +22,7 @@ class LogLevelItem extends ConsumerWidget {
     return ListItem<LogLevel>.options(
       leading: const Icon(Icons.info_outline),
       title: Text(appLocalizations.logLevel),
-      subtitle: Text(logLevel.name),
+      subtitle: Text(logLevel.label),
       delegate: OptionsDelegate<LogLevel>(
         title: appLocalizations.logLevel,
         options: LogLevel.values,
@@ -34,7 +34,7 @@ class LogLevelItem extends ConsumerWidget {
               .read(patchClashConfigProvider.notifier)
               .updateState((state) => state.copyWith(logLevel: value));
         },
-        textBuilder: (logLevel) => logLevel.name,
+        textBuilder: (logLevel) => logLevel.label,
         value: logLevel,
       ),
     );
@@ -394,7 +394,9 @@ class _TestUrlDialog extends ConsumerWidget {
                         );
                       }
                       if (!inputValue.isHttpUrl) {
-                        return appLocalizations.urlTip(appLocalizations.testUrl);
+                        return appLocalizations.urlTip(
+                          appLocalizations.testUrl,
+                        );
                       }
                       return null;
                     },
@@ -547,7 +549,6 @@ class AllowLanItem extends ConsumerWidget {
     );
   }
 }
-
 
 class UnifiedDelayItem extends ConsumerWidget {
   const UnifiedDelayItem({super.key});

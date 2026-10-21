@@ -8,6 +8,7 @@ analyzer:
     - "**/*.freezed.dart"
     - "plugins/**"
     - build/**
+    - dist/**
     - android/**
     - ios/**
     - web/**
