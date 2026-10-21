@@ -109,6 +109,12 @@ func TestCorplinkRebuildChangesOnlyNamedIPStack(t *testing.T) {
 	if address, err := b.CorplinkDNSAddress(); err != nil || address != "10.22.0.53:53" {
 		t.Fatal("node B did not use its own DNS address")
 	}
+	// Upstream 1.19.6 creates the WireGuard device lazily on first use. Start
+	// node A before wrapping its device so this test tracks a real resource,
+	// not a typed interface containing nil.
+	if err := a.init(context.Background()); err != nil || a.device == nil {
+		t.Fatalf("initialize node A before rebuild: device=%v err=%v", a.device, err)
+	}
 	oldA := &trackingLifecycleDevice{wireguardGoDevice: a.device}
 	a.device = oldA
 	oldB := b.device
