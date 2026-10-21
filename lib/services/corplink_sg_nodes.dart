@@ -149,6 +149,28 @@ String _probeSecretKey(String username, String upstream, String serverName) =>
       serverName,
     ])))}';
 
+String _probeFallbackScope(String username, String upstream) =>
+    sha256.convert(utf8.encode(jsonEncode([
+      username.trim(),
+      upstream.trim().replaceFirst(RegExp(r'/$'), ''),
+    ]))).toString();
+
+List<CorplinkNodeSelection> replaceCorplinkNodeProbe(
+  Iterable<CorplinkNodeSelection> selections, {
+  required String serverName,
+  required String healthUrl,
+}) => [
+  for (final selection in selections)
+    if (selection.serverName == serverName)
+      CorplinkNodeSelection(
+        serverName: selection.serverName,
+        enabled: selection.enabled,
+        healthUrl: healthUrl,
+      )
+    else
+      selection,
+];
+
 Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({
   CorplinkNodeSecretStore? secrets,
 }) async {
@@ -157,6 +179,7 @@ Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({
   if (raw == null) return null;
   final username = prefs.getString(corplinkSgUsernameKey) ?? '';
   final upstream = prefs.getString(corplinkSgServerKey) ?? '';
+  final fallbackScope = _probeFallbackScope(username, upstream);
   final store = secrets ?? const _PlatformNodeSecrets();
   try {
     final decoded = jsonDecode(raw);
@@ -165,10 +188,17 @@ Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({
     for (final item in decoded) {
       if (item is! Map || item['serverName'] is! String) continue;
       final name = item['serverName'] as String;
+      final secureProbe = await store.read(
+        _probeSecretKey(username, upstream, name),
+      );
+      final fallbackProbe = item['probeScope'] == fallbackScope &&
+              item['healthUrl'] is String
+          ? item['healthUrl'] as String
+          : '';
       final selection = CorplinkNodeSelection(
         serverName: name,
         enabled: item['enabled'] != false,
-        healthUrl: await store.read(_probeSecretKey(username, upstream, name)) ?? '',
+        healthUrl: secureProbe ?? fallbackProbe,
       );
       if (selection.validationError == null) selections.add(selection);
     }
@@ -213,6 +243,7 @@ Future<void> saveCorplinkNodeSelections(
   final prefs = await SharedPreferences.getInstance();
   final username = prefs.getString(corplinkSgUsernameKey) ?? '';
   final upstream = prefs.getString(corplinkSgServerKey) ?? '';
+  final fallbackScope = _probeFallbackScope(username, upstream);
   for (final selection in retained) {
     await store.write(
       _probeSecretKey(username, upstream, selection.serverName),
@@ -221,7 +252,12 @@ Future<void> saveCorplinkNodeSelections(
   }
   await prefs.setString(_selectionPreferenceKey, jsonEncode([
     for (final selection in retained)
-      {'serverName': selection.serverName, 'enabled': selection.enabled},
+      {
+        'serverName': selection.serverName,
+        'enabled': selection.enabled,
+        'healthUrl': selection.healthUrl,
+        'probeScope': fallbackScope,
+      },
   ]));
 }
 

@@ -335,11 +335,49 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
         FilledButton(onPressed: () {
           if (form.currentState?.validate() == true) Navigator.pop(context, value.trim());
-        }, child: const Text('保存到草稿')),
+        }, child: const Text('保存并应用')),
       ],
     ));
-    if (saved != null && mounted) _replaceNode(CorplinkNodeSelection(
-        serverName: node.serverName, enabled: node.enabled, healthUrl: saved));
+    if (saved != null && mounted) await _saveProbe(node.serverName, saved);
+  }
+
+  Future<void> _saveProbe(String serverName, String healthUrl) async {
+    if (_busy) return;
+    final applied = replaceCorplinkNodeProbe(
+      _appliedNodes,
+      serverName: serverName,
+      healthUrl: healthUrl,
+    );
+    if (!applied.any((node) => node.serverName == serverName)) {
+      setState(() => _status = '请先保存新发现的节点，再设置探针。');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _status = '正在保存 $serverName 探针…';
+    });
+    try {
+      await saveCorplinkNodeSelections(applied);
+      await globalState.appController.applyProfile(silence: true);
+      if (!mounted) return;
+      setState(() {
+        _appliedNodes = List.unmodifiable(applied);
+        _nodes = replaceCorplinkNodeProbe(
+          _nodes,
+          serverName: serverName,
+          healthUrl: healthUrl,
+        );
+        _nodeSelectionSaved = true;
+        _status = healthUrl.isEmpty
+            ? '$serverName 已改为仅检查握手'
+            : '$serverName 探针已保存并应用';
+      });
+      await _refreshLiveStatus();
+    } catch (error) {
+      if (mounted) setState(() => _status = '探针保存失败：${error.runtimeType}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _replaceNode(CorplinkNodeSelection next) {

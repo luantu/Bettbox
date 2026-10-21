@@ -27,6 +27,7 @@ import com.appshub.bettbox.extensions.awaitResult
 import com.appshub.bettbox.extensions.getActionIntent
 import com.appshub.bettbox.models.Package
 import com.appshub.bettbox.RunState
+import com.appshub.bettbox.services.CompatibilityAppManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -277,6 +278,37 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
             }
             "openFcmDiagnostics" -> {
                 result.success(openFcmDiagnostics())
+            }
+            "getCompatibilityAppStatus" -> {
+                val packageName = call.argument<String>("packageName")
+                    ?: CompatibilityAppManager.YADEA_PACKAGE
+                val context = BettboxApplication.getAppContext()
+                result.success(mapOf(
+                    "installed" to CompatibilityAppManager.isInstalled(context, packageName),
+                    "usageAccessGranted" to CompatibilityAppManager.hasUsageAccess(context),
+                    "shortcutSupported" to CompatibilityAppManager.isShortcutSupported(context),
+                ))
+            }
+            "openUsageAccessSettings" -> {
+                result.success(CompatibilityAppManager.openUsageAccessSettings(
+                    BettboxApplication.getAppContext(),
+                ))
+            }
+            "createCompatibilityShortcut" -> {
+                val packageName = call.argument<String>("packageName")
+                    ?: CompatibilityAppManager.YADEA_PACKAGE
+                result.success(CompatibilityAppManager.createPinnedShortcut(
+                    BettboxApplication.getAppContext(),
+                    packageName,
+                ))
+            }
+            "launchCompatibleApp" -> {
+                val packageName = call.argument<String>("packageName")
+                    ?: CompatibilityAppManager.YADEA_PACKAGE
+                result.success(CompatibilityAppManager.launchCompatible(
+                    BettboxApplication.getAppContext(),
+                    packageName,
+                ))
             }
             else -> result.notImplemented()
         }

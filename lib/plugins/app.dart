@@ -80,6 +80,29 @@ class App {
         false;
   }
 
+  Future<Map<String, dynamic>> getCompatibilityAppStatus(
+    String packageName,
+  ) async {
+    final result = await methodChannel.invokeMapMethod<String, dynamic>(
+      'getCompatibilityAppStatus',
+      {'packageName': packageName},
+    );
+    return result ?? const {};
+  }
+
+  Future<bool> openUsageAccessSettings() async =>
+      await methodChannel.invokeMethod<bool>('openUsageAccessSettings') ?? false;
+
+  Future<bool> createCompatibilityShortcut(String packageName) async =>
+      await methodChannel.invokeMethod<bool>('createCompatibilityShortcut', {
+        'packageName': packageName,
+      }) ?? false;
+
+  Future<bool> launchCompatibleApp(String packageName) async =>
+      await methodChannel.invokeMethod<bool>('launchCompatibleApp', {
+        'packageName': packageName,
+      }) ?? false;
+
   Future<List<String>> getChinaPackageNames() async {
     final packageNamesRaw =
         await methodChannel.invokeListMethod<String>('getChinaPackageNames') ??

@@ -9,6 +9,7 @@ import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/views/about.dart';
 import 'package:bett_box/views/corplink_sg.dart';
+import 'package:bett_box/views/compatibility_apps.dart';
 import 'package:bett_box/views/access.dart';
 import 'package:bett_box/views/application_setting.dart';
 import 'package:bett_box/views/config/config.dart';
@@ -324,6 +325,18 @@ class _ToolViewState extends ConsumerState<ToolsView> {
           const CorplinkSgView(),
         ),
       ),
+      if (system.isAndroid)
+        _SearchItem(
+          title: '兼容应用',
+          subtitle: '雅迪智行无 VPN 启动与自动恢复',
+          category: settingsCategory,
+          leading: const Icon(Icons.electric_moped_outlined),
+          onTap: (context, _) => _pushPage(
+            context,
+            '兼容应用',
+            const CompatibilityAppsView(),
+          ),
+        ),
       _SearchItem(
         title: appLocalizations.language,
         subtitle: appLocalizations.language,
@@ -1521,6 +1534,12 @@ class _ToolViewState extends ConsumerState<ToolsView> {
         title: '飞连',
         items: [const _CorplinkToolsItem()],
       ),
+      if (system.isAndroid)
+        _buildModernSection(
+          context,
+          title: '兼容应用',
+          items: [const _CompatibilityAppsItem()],
+        ),
       Consumer(
         builder: (_, ref, _) {
           final state = ref.watch(moreToolsSelectorStateProvider);
@@ -1763,6 +1782,23 @@ class _CorplinkToolsItem extends StatelessWidget {
       delegate: NextDelegate(
         title: '飞连 SG-Node',
         builder: (_) => const CorplinkSgView(),
+      ),
+    );
+  }
+}
+
+class _CompatibilityAppsItem extends StatelessWidget {
+  const _CompatibilityAppsItem();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListItem.next(
+      leading: const Icon(Icons.electric_moped_outlined),
+      title: const Text('雅迪智行兼容模式'),
+      subtitle: const Text('暂停 VPN 打开，离开后自动恢复'),
+      delegate: NextDelegate(
+        title: '兼容应用',
+        builder: (_) => const CompatibilityAppsView(),
       ),
     );
   }

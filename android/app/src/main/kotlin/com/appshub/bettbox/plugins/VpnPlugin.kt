@@ -27,6 +27,8 @@ import com.appshub.bettbox.modules.SuspendModule
 import com.appshub.bettbox.services.BaseServiceInterface
 import com.appshub.bettbox.services.BettboxService
 import com.appshub.bettbox.services.BettboxVpnService
+import com.appshub.bettbox.services.CompatibilityAppPolicy
+import com.appshub.bettbox.VpnRunIntentStore
 import com.google.gson.Gson
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.BinaryMessenger
@@ -1264,6 +1266,24 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             ServicePlugin.notifyNetworkChanged()
         }
         return true
+    }
+
+    fun handleCompatibilityPause(): Boolean {
+        val context = BettboxApplication.getAppContext()
+        val userWantsVpn = VpnRunIntentStore.read(context) != false
+        val canResume = options?.enable == true
+        if (!canResume || !CompatibilityAppPolicy.shouldPause(getStatus(), userWantsVpn)) {
+            return false
+        }
+        handleSmartStop()
+        return true
+    }
+
+    fun handleCompatibilityResume(): Boolean {
+        val context = BettboxApplication.getAppContext()
+        if (VpnRunIntentStore.read(context) == false) return false
+        val currentOptions = options?.takeIf { it.enable } ?: return false
+        return handleSmartResume(currentOptions)
     }
 
     private fun bindService(
