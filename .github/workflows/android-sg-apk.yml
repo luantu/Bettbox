@@ -114,6 +114,7 @@ jobs:
             test/corplink_route_status_test.dart \
             test/corplink_sg_nodes_test.dart \
             test/corplink_sg_overlay_test.dart \
+            test/corplink_setup_pipeline_wiring_test.dart \
             test/corplink_sg_settings_test.dart \
             test/corplink_vpn_start_gate_test.dart \
             test/sg_network_handoff_test.dart \

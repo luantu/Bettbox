@@ -754,7 +754,10 @@ class GlobalState {
     return params.copyWith(
       profilePath: await appPath.getProfilePath(targetProfile.id),
       ageSecretKey: targetProfile.ageSecretKey ?? '',
-      scriptedConfig: await _writeScriptedConfig(targetProfile),
+      scriptedConfig: await _writePreparedConfig(
+        targetProfile,
+        suppressCorplinkNode: suppressCorplinkNode,
+      ),
       patch: await buildPatchParams(
         patchConfig: patchConfig,
         profile: targetProfile,
@@ -798,9 +801,14 @@ class GlobalState {
     );
   }
 
-  Future<String> _writeScriptedConfig(Profile profile) async {
-    if (config.scriptProps.currentScript == null ||
-        !profile.useScriptOverride) {
+  Future<String> _writePreparedConfig(
+    Profile profile, {
+    bool suppressCorplinkNode = false,
+  }) async {
+    final settings = await CorplinkSgSettings.load();
+    final scriptActive =
+        config.scriptProps.currentScript != null && profile.useScriptOverride;
+    if (!scriptActive && !settings.enabled) {
       return '';
     }
     final stamp = DateTime.now().microsecondsSinceEpoch;
@@ -809,21 +817,21 @@ class GlobalState {
     final file = File('$relayPath${separator}scripted-$stamp.json');
     return _scriptEvaluateLock.synchronized(() async {
       final currentScript = config.scriptProps.currentScript;
-      if (currentScript == null) return '';
+      if (scriptActive && currentScript == null) return '';
       unawaited(_sweepRelay(relayPath));
       final cache = File('$relayPath${separator}cache-${profile.id}.json');
       final cacheKey = File('$relayPath${separator}cache-${profile.id}.key');
       String? content;
-      var digest = currentScript.digest;
-      var volatile = currentScript.volatile;
-      if (digest == null || volatile == null) {
-        content = await currentScript.readContent();
+      var digest = currentScript?.digest;
+      var volatile = currentScript?.volatile;
+      if (scriptActive && (digest == null || volatile == null)) {
+        content = await currentScript!.readContent();
         digest = content.toMd5();
         volatile = volatileScriptPattern.hasMatch(content);
       }
-      final key = volatile
+      final key = settings.enabled || !scriptActive || volatile!
           ? null
-          : await _scriptedCacheKey(profile, currentScript, digest);
+          : await _scriptedCacheKey(profile, currentScript!, digest!);
       final exported = File('$relayPath${separator}profile-$stamp.json');
       try {
         if (key != null &&
@@ -834,12 +842,93 @@ class GlobalState {
           return file.path;
         }
         await _exportProfileConfig(profile, exported.path);
-        await JavaScriptRuntimeManager.evaluateScriptFile(
-          scriptContent: content ?? await currentScript.readContent(),
-          inputPath: exported.path,
-          outputPath: file.path,
-          customOptions: currentScript.customOptions,
+        final source = Map<String, dynamic>.from(
+          json.decode(await exported.readAsString()) as Map,
         );
+        final trustedCorplinkNames = await applyCorplinkSgNode(
+          source,
+          suppressNode: suppressCorplinkNode,
+        );
+        final managedCorplinkNames = captureCorplinkManagedNames(
+          source,
+          trustedCorplinkNames,
+        );
+        final expectedCorplinkObjects = <String, dynamic>{
+          for (final item in [
+            ...?(source['proxies'] as List?),
+            ...?(source['proxy-groups'] as List?),
+          ])
+            if (item is Map && trustedCorplinkNames.contains(item['name']))
+              item['name'] as String: jsonDecode(jsonEncode(item)),
+        };
+        final preScriptConfig = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(source)) as Map,
+        );
+
+        Map<String, dynamic> prepared = source;
+        var effectiveSuppressCorplinkNode = suppressCorplinkNode;
+        var scriptSafetyFallback = false;
+        corplinkSgLastScriptErrorCode.value = null;
+        if (scriptActive) {
+          await exported.writeAsString(jsonEncode(source), flush: true);
+          await JavaScriptRuntimeManager.evaluateScriptFile(
+            scriptContent: content ?? await currentScript!.readContent(),
+            inputPath: exported.path,
+            outputPath: file.path,
+            customOptions: currentScript.customOptions,
+          );
+          prepared = Map<String, dynamic>.from(
+            json.decode(await file.readAsString()) as Map,
+          );
+          if (requiresCorplinkScriptSafetyFallback(
+            prepared,
+            trustedManagedProxyNames: managedCorplinkNames.proxies,
+            originalProxyNames: managedCorplinkNames.allProxyNames,
+            expectedManagedObjects: expectedCorplinkObjects,
+          )) {
+            prepared = failClosedCorplinkScriptResult(preScriptConfig);
+            effectiveSuppressCorplinkNode = true;
+            scriptSafetyFallback = true;
+            corplinkSgLastScriptErrorCode.value =
+                'SCRIPT_PROXY_PROVENANCE_AMBIGUOUS';
+            commonPrint.log(
+              '[CorpLinkSG] unsafe script proxy provenance; '
+              'all rule traffic is fail-closed',
+            );
+            showNotifier('覆写脚本无法确认飞连代理来源；本次配置已阻断全部规则流量，请修正脚本');
+          }
+        }
+
+        await applyCorplinkSgNode(
+          prepared,
+          suppressNode: effectiveSuppressCorplinkNode,
+          trustedManagedGroupNames: managedCorplinkNames.groups,
+          trustedManagedProxyNames: managedCorplinkNames.proxies,
+          originalProxyNames: managedCorplinkNames.allProxyNames,
+          expectedManagedObjects: expectedCorplinkObjects,
+          onScriptConflict: (names) {
+            corplinkSgLastScriptErrorCode.value =
+                'SCRIPT_MANAGED_ROUTE_CONFLICT';
+            commonPrint.log(
+              '[CorpLinkSG] script changed ${names.length} managed entries; '
+              'affected route(s) are fail-closed',
+            );
+            showNotifier('覆写脚本修改了飞连托管节点或组；相关路由已阻断，请检查脚本');
+          },
+          onUnavailableReferences: (names) {
+            corplinkSgLastScriptErrorCode.value =
+                'UNSELECTED_NODE_REFERENCES_BLOCKED';
+            commonPrint.log(
+              '[CorpLinkSG] blocked ${names.length} references '
+              'to unavailable managed nodes',
+            );
+            showNotifier('指向未勾选飞连节点的规则已阻断，请检查覆写脚本');
+          },
+        );
+        if (scriptSafetyFallback) {
+          prepared['mode'] = Mode.rule.name;
+        }
+        await file.writeAsString(jsonEncode(prepared), flush: true);
         if (key != null) {
           if (await cacheKey.exists()) {
             await cacheKey.delete();
@@ -851,6 +940,7 @@ class GlobalState {
       } catch (e) {
         commonPrint.error('Script execution failed: $e');
         showNotifier('${appLocalizations.profileParseErrorDesc}: $e');
+        if (settings.enabled) rethrow;
         return '';
       } finally {
         if (await exported.exists()) {
@@ -1054,7 +1144,7 @@ class GlobalState {
   }
 
   Future<Map<String, dynamic>?> _readScriptedConfig(Profile profile) async {
-    final path = await _writeScriptedConfig(profile);
+    final path = await _writePreparedConfig(profile);
     if (path.isEmpty) return null;
     final file = File(path);
     try {
