@@ -103,6 +103,13 @@ class App {
         'packageName': packageName,
       }) ?? false;
 
+  Future<bool> resumeCompatibilityApp() async =>
+      await methodChannel.invokeMethod<bool>('resumeCompatibilityApp') ?? false;
+
+  Future<bool> keepCompatibilityAppStopped() async =>
+      await methodChannel.invokeMethod<bool>('keepCompatibilityAppStopped') ??
+      false;
+
   Future<List<String>> getChinaPackageNames() async {
     final packageNamesRaw =
         await methodChannel.invokeListMethod<String>('getChinaPackageNames') ??

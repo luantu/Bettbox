@@ -278,6 +278,14 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         applied.password != draft.password || applied.server.trim() != draft.server;
   }
 
+  bool get _hasNodeScopeChanges {
+    final applied = _appliedSettings;
+    final draft = _settings();
+    return applied == null ||
+        applied.username.trim() != draft.username.trim() ||
+        applied.server.trim() != draft.server.trim();
+  }
+
   bool get _hasUnsavedChanges {
     final applied = _appliedSettings;
     if (applied == null) return false;
@@ -356,9 +364,10 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       _busy = true;
       _status = '正在保存 $serverName 探针…';
     });
+    var persisted = false;
     try {
       await saveCorplinkNodeSelections(applied);
-      await globalState.appController.applyProfile(silence: true);
+      persisted = true;
       if (!mounted) return;
       setState(() {
         _appliedNodes = List.unmodifiable(applied);
@@ -368,13 +377,18 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           healthUrl: healthUrl,
         );
         _nodeSelectionSaved = true;
-        _status = healthUrl.isEmpty
-            ? '$serverName 已改为仅检查握手'
-            : '$serverName 探针已保存并应用';
+        _status = '$serverName 探针已保存，正在应用…';
       });
+      await globalState.appController.applyProfile(silence: true);
       await _refreshLiveStatus();
+      if (!mounted) return;
+      setState(() => _status = healthUrl.isEmpty
+          ? '$serverName 已改为仅检查握手'
+          : '$serverName 探针已保存并应用');
     } catch (error) {
-      if (mounted) setState(() => _status = '探针保存失败：${error.runtimeType}');
+      if (mounted) setState(() => _status = persisted
+          ? '探针已保存，但配置重载失败：${error.runtimeType}'
+          : '探针保存失败：${error.runtimeType}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -477,10 +491,14 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       _status = settings.enabled ? '正在保存并授权…' : '正在停用飞连…';
     });
     try {
+      final nodesToSave = _hasNodeScopeChanges
+          ? clearCorplinkNodeProbes(_nodes)
+          : _nodes;
       await settings.save();
-      await saveCorplinkNodeSelections(_nodes);
+      await saveCorplinkNodeSelections(nodesToSave);
       _appliedSettings = settings;
-      _appliedNodes = List.unmodifiable(_nodes);
+      _nodes = List.of(nodesToSave);
+      _appliedNodes = List.unmodifiable(nodesToSave);
       _nodeProbeResults.clear();
       _nodeSelectionSaved = true;
       await globalState.appController.ensureSgBootstrapProfile();

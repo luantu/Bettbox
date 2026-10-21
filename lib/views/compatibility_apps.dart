@@ -62,13 +62,20 @@ class _CompatibilityAppsViewState extends State<CompatibilityAppsView>
       _busy = true;
       _message = '';
     });
-    final ok = await action();
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _message = ok ? success : failure;
-    });
-    await _load();
+    var ok = false;
+    try {
+      ok = await action();
+    } catch (_) {
+      ok = false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = ok ? success : failure;
+        });
+      }
+    }
+    if (mounted) await _load();
   }
 
   @override
@@ -116,6 +123,8 @@ class _CompatibilityAppsViewState extends State<CompatibilityAppsView>
                 const SizedBox(height: 12),
                 Text(status == null
                     ? '正在检查…'
+                    : status.active
+                        ? '雅迪兼容模式正在暂停 VPN'
                     : !status.installed
                         ? '未安装雅迪智行'
                         : status.usageAccessGranted
@@ -130,6 +139,28 @@ class _CompatibilityAppsViewState extends State<CompatibilityAppsView>
           ),
         ),
         const SizedBox(height: 12),
+        if (status?.active == true) ...[
+          FilledButton.icon(
+            onPressed: _busy ? null : () => _run(
+              widget.platform.resume,
+              'Bettbox 已恢复',
+              '当前无可恢复的兼容会话',
+            ),
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('立即恢复 Bettbox'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _run(
+              widget.platform.keepStopped,
+              'Bettbox 将保持停止，不再自动恢复',
+              '当前无兼容会话',
+            ),
+            icon: const Icon(Icons.stop_circle_outlined),
+            label: const Text('保持停止'),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (status?.usageAccessGranted != true)
           OutlinedButton.icon(
             onPressed: _busy ? null : () => _run(
@@ -155,7 +186,10 @@ class _CompatibilityAppsViewState extends State<CompatibilityAppsView>
         ),
         const SizedBox(height: 8),
         FilledButton.icon(
-          onPressed: _busy || status?.installed != true
+          onPressed: _busy || status?.installed != true ||
+                  status?.active == true ||
+                  (status?.usageAccessGranted != true &&
+                      status?.notificationsEnabled != true)
               ? null
               : () => _run(
                     () => widget.platform.launchCompatible(yadeaSmartMotoPackage),
@@ -172,6 +206,14 @@ class _CompatibilityAppsViewState extends State<CompatibilityAppsView>
             '用完后请通过通知栏“立即恢复 Bettbox”手动恢复。',
             style: TextStyle(fontSize: 13),
           ),
+          if (status?.notificationsEnabled != true)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                '请先开启自动恢复权限或 Bettbox 通知，'
+                '否则不会启动兼容模式。',
+              ),
+            ),
         ],
       ],
     );

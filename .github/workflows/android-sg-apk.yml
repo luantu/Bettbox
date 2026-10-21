@@ -7,7 +7,12 @@ on:
       - feat/corplink-sg-node
       - codex/feilian-android
       - codex/corplink-native-auto-recovery
+      - codex/corplink-upstream-1.19.6
       - main
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.superpowers/**'
 
 concurrency:
   group: android-sg-apk-${{ github.ref }}
@@ -144,7 +149,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: plugins/code_forge/rust/target
-          key: code-forge-host-${{ runner.os }}-${{ hashFiles('plugins/code_forge/rust/Cargo.lock', 'plugins/code_forge/rust/src/**', 'plugins/code_forge/rust/build.rs') }}
+          key: code-forge-host-${{ runner.os }}-rust-stable-v2-${{ hashFiles('plugins/code_forge/rust/Cargo.toml', 'plugins/code_forge/rust/Cargo.lock', 'plugins/code_forge/rust/src/**', 'plugins/code_forge/rust/build.rs', 'plugins/code_forge/rust/rust-toolchain*') }}
 
       - name: Build Code Forge host test library
         if: steps.code-forge-cache.outputs.cache-hit != 'true'
@@ -288,6 +293,26 @@ jobs:
           go env GOOS GOARCH CGO_ENABLED CC ANDROID_NDK ANDROID_NDK_ROOT
           timeout --signal=TERM --kill-after=30s 25m dart setup.dart android --arch arm64 --out core 2>&1 | tee android-core-build.log
 
+      - name: Verify Android native build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=android/app/src/main/jniLibs/arm64-v8a/libcorplink-rs-login.so
+          helper_asset=assets/bin/android-arm64-v8a/corplink-rs-login
+          meta=libclash/android/arm64-v8a/libmeta.so
+          header=libclash/android/arm64-v8a/libmeta.h
+          test -s "$helper"
+          test -s "$helper_asset"
+          test -s "$meta"
+          test -s "$header"
+          file "$helper" | grep -Eiq 'aarch64|ARM aarch64'
+          file "$helper_asset" | grep -Eiq 'aarch64|ARM aarch64'
+          file "$meta" | grep -Eiq 'aarch64|ARM aarch64'
+          readelf_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          "$readelf_bin" -h "$meta" | grep -q 'AArch64'
+          "$readelf_bin" -Ws "$meta" | grep -Eq '[[:space:]]startTUN$'
+          "$readelf_bin" -Ws "$meta" | grep -Eq '[[:space:]]androidTunReady$'
+
       - name: Publish Android build diagnostics
         if: always()
         shell: bash
@@ -310,6 +335,17 @@ jobs:
       - name: Build APK
         # Keep the test-signed pre-release identity; hide only its UI ribbon.
         run: flutter build apk --release --target-platform android-arm64 --dart-define=SHOW_APP_ENV_BANNER=false
+
+      - name: Verify APK native payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$apk"
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmeta.so'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libcore.so'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libcorplink-rs-login.so'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libcode_forge.so'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

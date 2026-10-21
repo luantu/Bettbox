@@ -165,6 +165,13 @@ void main() {
     expect(
       const CorplinkNodeSelection(
         serverName: 'FUZHOU-NODE-1',
+        healthUrl: 'https://health.example.invalid/ready?token=secret',
+      ).validationError,
+      isNotNull,
+    );
+    expect(
+      const CorplinkNodeSelection(
+        serverName: 'FUZHOU-NODE-1',
         healthUrl: 'https://health.example.invalid/ready',
       ).validationError,
       isNull,
@@ -273,6 +280,24 @@ void main() {
     expect(updated[0].healthUrl, isEmpty);
     expect(updated[1].healthUrl, 'https://inside.example.invalid/ready');
     expect(updated[2].healthUrl, isEmpty);
+  });
+
+  test('changing account scope clears probes but preserves selections', () {
+    final cleared = clearCorplinkNodeProbes(const [
+      CorplinkNodeSelection(
+        serverName: 'FZ-INT-Node',
+        enabled: true,
+        healthUrl: 'https://chatgpt.example.invalid/ready',
+      ),
+      CorplinkNodeSelection(
+        serverName: 'Fuzhou-Node-1',
+        enabled: false,
+        healthUrl: 'https://inside.example.invalid/ready',
+      ),
+    ]);
+
+    expect(cleared.map((node) => node.enabled), [true, false]);
+    expect(cleared.every((node) => node.healthUrl.isEmpty), isTrue);
   });
 
   test('probe URL does not carry into another account on the same node', () async {

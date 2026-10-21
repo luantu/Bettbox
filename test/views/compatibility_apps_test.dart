@@ -6,16 +6,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 class _FakeCompatibilityPlatform implements CompatibilityAppsPlatform {
+  _FakeCompatibilityPlatform({this.active = false});
+
+  final bool active;
   var permissionRequests = 0;
   var shortcutRequests = 0;
   var launchRequests = 0;
+  var resumeRequests = 0;
+  var keepStoppedRequests = 0;
 
   @override
   Future<CompatibilityAppStatus> readStatus(String packageName) async =>
-      const CompatibilityAppStatus(
+      CompatibilityAppStatus(
         installed: true,
         usageAccessGranted: false,
         shortcutSupported: true,
+        notificationsEnabled: true,
+        active: active,
       );
 
   @override
@@ -36,6 +43,18 @@ class _FakeCompatibilityPlatform implements CompatibilityAppsPlatform {
   @override
   Future<bool> launchCompatible(String packageName) async {
     launchRequests++;
+    return true;
+  }
+
+  @override
+  Future<bool> resume() async {
+    resumeRequests++;
+    return true;
+  }
+
+  @override
+  Future<bool> keepStopped() async {
+    keepStoppedRequests++;
     return true;
   }
 }
@@ -64,5 +83,23 @@ void main() {
     expect(platform.permissionRequests, 1);
     expect(platform.shortcutRequests, 1);
     expect(platform.launchRequests, 1);
+  });
+
+  testWidgets('active compatibility session always exposes both exits',
+      (tester) async {
+    final platform = _FakeCompatibilityPlatform(active: true);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: CompatibilityAppsView(platform: platform)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('立即恢复 Bettbox'), findsOneWidget);
+    expect(find.text('保持停止'), findsOneWidget);
+    await tester.tap(find.text('立即恢复 Bettbox'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保持停止'));
+    await tester.pumpAndSettle();
+    expect(platform.resumeRequests, 1);
+    expect(platform.keepStoppedRequests, 1);
   });
 }

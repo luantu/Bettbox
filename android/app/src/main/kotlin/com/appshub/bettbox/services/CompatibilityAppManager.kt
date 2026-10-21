@@ -1,5 +1,6 @@
 package com.appshub.bettbox.services
 
+import android.Manifest
 import android.app.AppOpsManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,7 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.ConnectivityManager
@@ -19,6 +21,8 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -35,23 +39,34 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.NetworkInterface
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.UUID
 
 object CompatibilityAppManager {
     const val YADEA_PACKAGE = "com.yadea.smartmoto"
     const val EXTRA_TARGET_PACKAGE = "targetPackage"
+    const val EXTRA_SHORTCUT_TOKEN = "shortcutToken"
     const val ACTION_RESUME = "com.appshub.bettbox.action.COMPATIBILITY_RESUME"
+    const val ACTION_KEEP_STOPPED = "com.appshub.bettbox.action.COMPATIBILITY_KEEP_STOPPED"
 
     private const val TAG = "CompatibilityApp"
     private const val CHANNEL_ID = "compatibility_app"
     private const val NOTIFICATION_ID = 17041
+    private const val PREFS_NAME = "compatibility_apps"
+    private const val SHORTCUT_TOKEN_KEY = "yadea_shortcut_token"
     private const val AWAY_GRACE_MILLIS = 10_000L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val active = AtomicBoolean(false)
 
     @Volatile private var pausedByCompatibility = false
-    @Volatile private var targetPackage: String? = null
-
     fun isPaused(): Boolean = active.get() && pausedByCompatibility
+
+    fun canPostNotifications(context: Context): Boolean {
+        val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        return permissionGranted && NotificationManagerCompat.from(context)
+            .areNotificationsEnabled()
+    }
 
     fun isInstalled(context: Context, packageName: String): Boolean = runCatching {
         context.packageManager.getApplicationInfo(packageName, 0)
@@ -81,8 +96,20 @@ object CompatibilityAppManager {
         true
     }.getOrDefault(false)
 
+    private fun miuiLegacyShortcutIntent(context: Context): Intent =
+        Intent("com.android.launcher.action.INSTALL_SHORTCUT").apply {
+            setPackage("com.miui.home")
+        }
+
+    private fun supportsMiuiLegacyShortcut(context: Context): Boolean =
+        context.packageManager.queryBroadcastReceivers(
+            miuiLegacyShortcutIntent(context),
+            0,
+        ).isNotEmpty()
+
     fun isShortcutSupported(context: Context): Boolean =
-        ShortcutManagerCompat.isRequestPinShortcutSupported(context)
+        ShortcutManagerCompat.isRequestPinShortcutSupported(context) ||
+            supportsMiuiLegacyShortcut(context)
 
     fun createPinnedShortcut(context: Context, packageName: String): Boolean {
         if (packageName != YADEA_PACKAGE || !isInstalled(context, packageName)) return false
@@ -96,9 +123,15 @@ object CompatibilityAppManager {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         drawable.setBounds(0, 0, size, size)
         drawable.draw(Canvas(bitmap))
+        val token = UUID.randomUUID().toString()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(SHORTCUT_TOKEN_KEY, token)
+            .commit()
         val intent = Intent(context, CompatibilityLaunchActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             putExtra(EXTRA_TARGET_PACKAGE, packageName)
+            putExtra(EXTRA_SHORTCUT_TOKEN, token)
         }
         val shortcut = ShortcutInfoCompat.Builder(context, "compat-$packageName")
             .setShortLabel(label)
@@ -106,8 +139,7 @@ object CompatibilityAppManager {
             .setIcon(IconCompat.createWithBitmap(bitmap))
             .setIntent(intent)
             .build()
-        val legacyIntent = Intent("com.android.launcher.action.INSTALL_SHORTCUT").apply {
-            setPackage("com.miui.home")
+        val legacyIntent = miuiLegacyShortcutIntent(context).apply {
             putExtra(Intent.EXTRA_SHORTCUT_INTENT, intent)
             putExtra(Intent.EXTRA_SHORTCUT_NAME, label)
             putExtra(Intent.EXTRA_SHORTCUT_ICON, bitmap)
@@ -115,19 +147,32 @@ object CompatibilityAppManager {
         }
         val supportsMiuiLegacy = pm.queryBroadcastReceivers(legacyIntent, 0).isNotEmpty()
         if (supportsMiuiLegacy) {
-            context.sendBroadcast(legacyIntent)
-            return true
+            return runCatching {
+                context.sendBroadcast(legacyIntent)
+                true
+            }.getOrDefault(false)
         }
         return ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
     }
 
+    fun launchFromShortcut(
+        context: Context,
+        packageName: String,
+        token: String?,
+    ): Boolean {
+        val expected = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(SHORTCUT_TOKEN_KEY, null)
+        if (expected.isNullOrBlank() || token != expected) return false
+        return launchCompatible(context, packageName)
+    }
+
     fun launchCompatible(context: Context, packageName: String): Boolean {
         if (packageName != YADEA_PACKAGE || !isInstalled(context, packageName)) return false
+        if (!hasUsageAccess(context) && !canPostNotifications(context)) return false
         val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
             ?: return false
         if (!active.compareAndSet(false, true)) return false
-        targetPackage = packageName
         scope.launch {
             val paused = VpnPlugin.handleCompatibilityPause()
             pausedByCompatibility = paused
@@ -159,6 +204,14 @@ object CompatibilityAppManager {
         val resumed = shouldResume && VpnPlugin.handleCompatibilityResume()
         clearSession(context.applicationContext)
         return resumed
+    }
+
+    fun keepStopped(context: Context): Boolean {
+        if (!active.get()) return false
+        VpnRunIntentStore.write(context.applicationContext, false)
+        VpnPlugin.handleStop(force = true)
+        clearSession(context.applicationContext)
+        return true
     }
 
     private suspend fun waitForVpnGone(context: Context) {
@@ -263,10 +316,19 @@ object CompatibilityAppManager {
         val resumeIntent = Intent(context, CompatibilityResumeReceiver::class.java).apply {
             action = ACTION_RESUME
         }
+        val stopIntent = Intent(context, CompatibilityResumeReceiver::class.java).apply {
+            action = ACTION_KEEP_STOPPED
+        }
         val pending = PendingIntent.getBroadcast(
             context,
             0,
             resumeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stopPending = PendingIntent.getBroadcast(
+            context,
+            1,
+            stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val auto = hasUsageAccess(context)
@@ -280,6 +342,7 @@ object CompatibilityAppManager {
             .setOngoing(true)
             .setAutoCancel(false)
             .addAction(0, "立即恢复 Bettbox", pending)
+            .addAction(0, "保持停止", stopPending)
             .build()
         manager.notify(NOTIFICATION_ID, notification)
     }
@@ -287,8 +350,8 @@ object CompatibilityAppManager {
     private fun clearSession(context: Context) {
         active.set(false)
         pausedByCompatibility = false
-        targetPackage = null
         context.getSystemService(NotificationManager::class.java)
             ?.cancel(NOTIFICATION_ID)
     }
 }
+import android.Manifest

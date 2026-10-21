@@ -69,6 +69,7 @@ class CorplinkNodeSelection {
         uri.scheme != 'https' ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
         uri.hasFragment) {
       return '健康探测地址必须是不含账号和片段的 HTTPS 地址';
     }
@@ -169,6 +170,16 @@ List<CorplinkNodeSelection> replaceCorplinkNodeProbe(
       )
     else
       selection,
+];
+
+List<CorplinkNodeSelection> clearCorplinkNodeProbes(
+  Iterable<CorplinkNodeSelection> selections,
+) => [
+  for (final selection in selections)
+    CorplinkNodeSelection(
+      serverName: selection.serverName,
+      enabled: selection.enabled,
+    ),
 ];
 
 Future<List<CorplinkNodeSelection>?> loadCorplinkNodeSelections({

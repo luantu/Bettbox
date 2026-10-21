@@ -14,6 +14,8 @@ public final class SmartStopSourceRegressionTest {
             "android/app/src/main/kotlin/com/appshub/bettbox/services/CompatibilityAppManager.kt"));
         String manifest = Files.readString(Path.of(
             "android/app/src/main/AndroidManifest.xml"));
+        String launchActivity = Files.readString(Path.of(
+            "android/app/src/main/kotlin/com/appshub/bettbox/CompatibilityLaunchActivity.kt"));
 
         String smartStop = methodBody(source, "fun handleSmartStop()");
         String smartResume = methodBody(
@@ -40,6 +42,12 @@ public final class SmartStopSourceRegressionTest {
             "HyperOS must receive a legacy launcher shortcut fallback");
         require(manifest.contains("com.android.launcher.permission.INSTALL_SHORTCUT"),
             "the HyperOS shortcut fallback requires launcher install permission");
+        require(compatibility.contains("UUID.randomUUID()") &&
+                compatibility.contains("launchFromShortcut"),
+            "exported compatibility shortcuts must carry an unpredictable private token");
+        require(launchActivity.contains("EXTRA_SHORTCUT_TOKEN") &&
+                launchActivity.contains("launchFromShortcut"),
+            "the exported compatibility Activity must reject calls without its private token");
     }
 
     private static String methodBody(String source, String signature) {

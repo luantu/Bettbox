@@ -287,6 +287,8 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
                     "installed" to CompatibilityAppManager.isInstalled(context, packageName),
                     "usageAccessGranted" to CompatibilityAppManager.hasUsageAccess(context),
                     "shortcutSupported" to CompatibilityAppManager.isShortcutSupported(context),
+                    "notificationsEnabled" to CompatibilityAppManager.canPostNotifications(context),
+                    "active" to CompatibilityAppManager.isPaused(),
                 ))
             }
             "openUsageAccessSettings" -> {
@@ -308,6 +310,16 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
                 result.success(CompatibilityAppManager.launchCompatible(
                     BettboxApplication.getAppContext(),
                     packageName,
+                ))
+            }
+            "resumeCompatibilityApp" -> {
+                result.success(CompatibilityAppManager.resumeNow(
+                    BettboxApplication.getAppContext(),
+                ))
+            }
+            "keepCompatibilityAppStopped" -> {
+                result.success(CompatibilityAppManager.keepStopped(
+                    BettboxApplication.getAppContext(),
                 ))
             }
             else -> result.notImplemented()

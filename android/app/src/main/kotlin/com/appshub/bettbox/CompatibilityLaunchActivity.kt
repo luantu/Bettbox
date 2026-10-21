@@ -9,8 +9,9 @@ class CompatibilityLaunchActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val target = intent.getStringExtra(CompatibilityAppManager.EXTRA_TARGET_PACKAGE)
+        val token = intent.getStringExtra(CompatibilityAppManager.EXTRA_SHORTCUT_TOKEN)
         val accepted = target != null &&
-            CompatibilityAppManager.launchCompatible(this, target)
+            CompatibilityAppManager.launchFromShortcut(this, target, token)
         if (!accepted) {
             Toast.makeText(this, "无法启动雅迪兼容模式", Toast.LENGTH_SHORT).show()
             finishAndRemoveTask()
