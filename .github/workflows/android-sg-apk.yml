@@ -82,6 +82,13 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
+      - name: Upload resolved dependency lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-pubspec-lock
+          path: pubspec.lock
+          if-no-files-found: error
+
       - name: Run Flutter unit tests
         run: flutter test
 
