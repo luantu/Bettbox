@@ -112,6 +112,7 @@ jobs:
             test/corplink_multi_status_test.dart \
             test/corplink_node_delay_url_test.dart \
             test/corplink_route_status_test.dart \
+            test/corplink_secure_storage_upgrade_test.dart \
             test/corplink_sg_nodes_test.dart \
             test/corplink_sg_overlay_test.dart \
             test/corplink_setup_pipeline_wiring_test.dart \

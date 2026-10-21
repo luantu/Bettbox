@@ -14,7 +14,10 @@ dependencies:
   path_provider: ^2.1.6
   path: ^1.9.0
   shared_preferences: ^2.5.5
-  flutter_secure_storage: ^11.2.0
+  # Android users upgrade from the SG 1.19.4 build, which stored CorpLink
+  # credentials with flutter_secure_storage 9.x. Version 10 is the mandatory
+  # migration bridge before 11 removes those legacy cipher implementations.
+  flutter_secure_storage: ^10.3.3
   window_manager: ^0.5.2
   dynamic_color: ^2.1.0
   material_color_utilities: ^0.13.0
