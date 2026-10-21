@@ -72,6 +72,19 @@ void main() {
     expect(find.text('1/2 已连接'), findsOneWidget);
   });
 
+  testWidgets('complete configuration is reachable without scrolling',
+      (tester) async {
+    await showPanel(tester);
+
+    expect(find.text('编辑完整配置'), findsOneWidget);
+    await tester.tap(find.text('编辑完整配置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('飞连完整配置'), findsOneWidget);
+    expect(find.byKey(const ValueKey('account-input')), findsOneWidget);
+    expect(find.text('选择服务器及设置探针'), findsOneWidget);
+  });
+
   testWidgets('advanced reconnect requires confirmation and targets exactly one node', (tester) async {
     final targets = <String>[];
     await showPanel(tester, reconnect: (name) async { targets.add(name); });
