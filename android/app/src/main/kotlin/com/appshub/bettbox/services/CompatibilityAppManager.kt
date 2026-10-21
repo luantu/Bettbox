@@ -180,7 +180,7 @@ object CompatibilityAppManager {
                 targetSeen = true
                 awaySince = null
             } else if (targetSeen && !transient && !foreground.isNullOrBlank()) {
-                awaySince ??= SystemClock.elapsedRealtime()
+                if (awaySince == null) awaySince = SystemClock.elapsedRealtime()
             } else if (transient) {
                 awaySince = null
             }
