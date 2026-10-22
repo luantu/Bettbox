@@ -4,7 +4,7 @@
 
 ## 产品行为
 
-- Android 测试包使用独立的 `com.appshub.bettbox.sg` applicationId，与原版 `com.appshub.bettbox` 并存。它使用固定的公开测试签名，支持同包名保留数据覆盖升级；这个签名不能用于生产发布。启动图标的三条前景形状改为青绿渐进色，右上角 `PRE` 视觉角标只在 SG 构建中隐藏，应用仍按预发布包处理。相关文件：`android/app/build.gradle.kts`、`android/app/sg-test.keystore`、`android/app/src/main/res/drawable/ic_launcher_foreground_*.xml`、`lib/manager/app_manager.dart`。
+- Android 测试包使用独立的 `com.appshub.bettbox.sg` applicationId，与原版 `com.appshub.bettbox` 并存。它使用固定的公开测试签名，支持同包名保留数据覆盖升级；这个签名不能用于生产发布。启动图标保留三条前景形状，配色改为鲜橙到橙红渐变；右上角 `PRE` 视觉角标在 SG 构建中隐藏。相关文件：`android/app/build.gradle.kts`、`android/app/sg-test.keystore`、`android/app/src/main/res/drawable/ic_launcher_foreground_*.xml`、`lib/manager/app_manager.dart`。
 - “更多 → 飞连 SG-Node”提供独立设置和状态页。用户只输入飞连用户名、密码、上游 HTTPS 地址；应用管理 Cookie、设备身份、WireGuard 密钥与 OTP 所需材料。密码放在平台安全存储，不写入普通 Profile。页面显示 Android VPN、握手阶段、隧道地址及连接检查，并提供保存连接、检查、刷新恢复、重连操作。相关文件：`lib/views/corplink_sg.dart`、`lib/services/corplink_sg.dart`、`lib/views/tools.dart`、`lib/views/config/general.dart`。
 - 没有机场订阅时可创建最小 SG Profile；有订阅时继续使用原有配置、节点和脚本。配置合并按名称幂等注入 `SG-Node` 和 `SG-OpenAI`，OpenAI/ChatGPT 规则指向该组；没有有效授权时，SG 组以 `REJECT` 收束，避免意外直连。脚本添加的 `rule-providers` 和 `RULE-SET` 予以保留，不再因二次合并被误删。若 SG 节点使核心配置失败，应用会暂时不注入该节点，尝试保住普通代理。相关文件：`lib/controller.dart`、`lib/state.dart`、`lib/services/corplink_sg.dart`、`lib/services/corplink_sg_bootstrap.dart`。
 - 首页首次升级默认添加可删除、可重排的 SG 半宽磁贴。它复用普通磁贴的标题和底部状态布局，实时读取隧道状态；刷新按钮按状态恢复连接，卡片主体进入飞连页面。相关文件：`lib/enum/enum.dart`、`lib/models/config.dart`、`lib/views/dashboard/widgets/sg_node_status.dart`。
@@ -118,3 +118,29 @@ Android 侧同时保留上游前台服务和本地三态运行意图、底层网
 SG 发布包的独立 applicationId、橙红图标、测试签名与 arm64 原生库保持不变。上游新增的首页 `PRE` 小徽标和旧环境角标现在共用 `SHOW_APP_ENV_BANNER`，SG release 构建两处都不显示。Code Forge 的 Rust host 库在 Flutter 测试前编译，完整工作流包含生成物、所有 Flutter 分片、Android 恢复策略、Go 内核、Rust 登录 helper、Mihomo-SG Android 原生库和 APK 打包。
 
 候选 HEAD `535b3464` 的 [Actions run 39561559970](https://github.com/luantu/Bettbox/actions/runs/39561559970) 已全链成功。APK 保存于 `outputs/android-sg-upstream-1.19.7-2026-10-21/app-release.apk`，SHA-256 为 `b9e5a7eb4fed62998ef10422b1c476bf489901d7fc323252193ed28d719d5e9c`；静态检查为包名 `com.appshub.bettbox.sg`、版本 `1.19.7 (2026101601)`，包含 arm64 `libmeta.so`、`libcorplink-rs-login.so` 和 `libcode_forge.so`。本节落盘时手机 ADB 已断开，因此不把覆盖安装、保留数据、真实授权、双节点、切网恢复或业务分流标为本候选已通过。
+
+## 2026-10-21 上游合并最终闭环
+
+真机覆盖安装暴露了两个合并后问题。首先，`flutter_secure_storage` 从 9.2.4 直接跨到 11.x 不支持旧 Android 数据的直接迁移。最终固定在 10.3.x 迁移桥，实际锁定版本为 10.3.4，同时兼容上游 `win32` 6。既有文件授权和 Cookie 也可在密码不可读时继续生成节点；首页和后台恢复不再仅以密码是否存在判断会话可用性。
+
+其次，飞连页面误用 Flutter 原生 Material 的折叠卡和表单，而 Bettbox 1.19.7 主应用使用 `material_ui`。两套组件的本地化上下文不兼容，发布包会把构建异常渲染成大块灰白 ErrorWidget，看起来就像“下半页空白”。`corplink_management_panel.dart` 和 `corplink_sg.dart` 现已统一使用应用组件库，全屏背景恢复为当前主题 `surface`。节点详情只渲染前 8 条下发路由预览，完整列表仍可一键复制，避免大路由集在收起状态也参与整体测量。测试门禁要求两个飞连页面不得再引入 `package:flutter/material.dart`。
+
+最终代码候选为 `e2d5a465`，[Actions run 39591979191](https://github.com/luantu/Bettbox/actions/runs/39591979191) 全链成功。本地 APK 位于 `outputs/android-sg-upstream-1.19.7-material-e2d5a465/app-release.apk`，SHA-256 为 `0dd4a8334361d01f431d9686e194fb436f03242b14cb9b8b8e9480451332a563`。外置盘 AVD 从 1.19.4 保留数据升级到 1.19.7，`firstInstallTime` 不变，安全存储成功迁移 10 项旧数据。节点卡、完整配置、双开关、三个输入框、发现节点、手动节点和操作区都可见，浅色主题下无灰白异常占位。
+
+同一 APK 已保留数据覆盖安装到原真机，`firstInstallTime` 不变。深色主题下节点卡、配置和高级操作均正常显示；完整配置中的开关、账号、密码、上游服务器、五个发现节点和两个已选节点均可见。安装启动后无手动操作，状态在约 8 秒内从 1/2 收敛到 2/2。通过手机本地混合代理端口访问 ChatGPT 公开检查页和福州内网 HTTPS 域名均返回 HTTP 200；本轮日志未出现 `CorpLink native transport not ready` 或握手发送失败。本轮未重做 Wi-Fi／蜂窝双向切换和长时间稳态，这些边界仍沿用前一候选的验证记录，不在本次补充验收中扩大结论。
+
+功能分支可以在最终真机验收后 fast-forward 到 fork `main`：`origin/main` 当前仍是该分支祖先，`10832ae1`、上游双亲合并 `0ebf7230` 及后续修复的完整历史均可保留，不需要 rebase 或 squash。此处只记录可合入拓扑，不把尚未执行的 main 推送写成既成事实。
+
+## 2026-10-21 雅迪兼容、探针直存与构建提速
+
+“更多 → 兼容应用”新增雅迪智行兼容入口。它读取雅迪安装包的真实图标创建桌面快捷方式，打开前先暂停 Bettbox VPN/TUN；UsageStats 监测雅迪是否仍在前台，离开宽限期后仅在原先有运行意图时恢复。兼容暂停拥有独立状态，智能启停、native recovery 和 SG 恢复都不能中途夺回 VPN。用户点“保持停止”会清除 SmartStop 状态并写入明确停止意图，应用重启或网络变化也不自动恢复。无 UsageStats 且兼容通知频道不可用时，入口拒绝启动，避免暂停后没有恢复通道。
+
+飞连节点的健康探针可在节点弹窗中直接“保存并应用”，不再依赖页面底部按钮、密码可读性或再次登录。地址禁止携带 userinfo、query 或 fragment；安全存储之外的恢复记录按账号与上游作用域隔离，账号／上游变化会清除旧探针。保存成功但 Profile 重载失败时，页面会明确区分两种结果。
+
+Android SG 工作流增加 Flutter／Gradle、Go、Code Forge、登录 helper 和 Mihomo-SG 原生库缓存。命中原生缓存后仍检查文件非空、AArch64 架构及 `startTUN`、`androidTunReady` 等关键符号，最终 APK 还会核对四个 arm64 原生库。原先 setup 脚本中的中间 APK 打包已取消，只在最后执行一次 `flutter build apk`。冷缓存 run `39602651169` 第一次耗时 17分28秒，热缓存重跑 10分12秒；后续热缓存候选为 9分04秒至 10分19秒。最终 `01efca2a` 的 [run 39707246212](https://github.com/luantu/Bettbox/actions/runs/39707246212) 全链成功。
+
+最终候选 APK 位于 `outputs/android-sg-yadea-compat-2026-10-22/01efca2a/app-release.apk`，SHA-256 为 `fd6fcfa3185d4cdfbd40810d57975d0ed854491f92d344b61eb4c3be12766bef`。包名 `com.appshub.bettbox.sg`，版本 `1.19.7 (2026101601)`，v2 测试签名，包含 `libmeta.so`、`libcore.so`、`libcorplink-rs-login.so` 与 `libcode_forge.so`。外置盘单核 AVD 保留数据覆盖安装后，雅迪未安装状态正确禁用两个操作；福州探针弹窗直接保存并关闭，“取消修改”保持禁用，核心日志确认最终代理配置含探针，fatal/panic 为 0。
+
+真机先暴露 HyperOS 旧广播假支持和旧 shortcut token 缺失；测试提交 `3907bd3a` 的 run `39703638716` 精确红灯，`835253da` 改为现代 pin 优先并刷新已有 shortcut。新包中 shortcut 含 targetPackage 与 UUID token，使用雅迪 icon bitmap。雅迪前台 20 秒内 VPN/TUN 始终关闭，离开第 10 秒恢复；“保持停止”跨 18 秒、网络切换、重开应用和覆盖安装均不自启。随后手动启动恢复 SG 2/2 与双业务 200，最后恢复 Wi-Fi 智能暂停和原设备设置。
+
+最终 `01efca2a` 再加入 token commit 失败回滚与纯行为策略测试；测试先在 run `39706506560` 红灯，最终 run 转绿，独立复核无剩余问题。exact APK 真机安装后 base.apk 哈希一致，firstInstallTime 与 shortcut token/bitmap 保留；兼容打开和 Home 恢复冒烟通过，双业务 200，设备设置及 ADB 转发清理完成。该候选具备 fast-forward fork `main` 的设备证据，main 推送状态见后续提交记录。

@@ -1,18 +1,18 @@
 # Bettbox 飞连多节点验证用例与结果
 
-本记录对应 `codex/corplink-multi-node-impl` 分支。各用例按实际安装的提交分别记录；源码测试和 APK 编译成功不代替设备验收。用户在模拟器异常后明确允许转真机，新包的真机结果不冒充模拟器结果。记录不包含账号、Cookie、OTP、设备标识或私钥。
+本记录覆盖多节点开发历史及当前 `codex/corplink-upstream-1.19.6` 收口分支。各用例按实际安装的提交分别记录；源码测试和 APK 编译成功不代替设备验收。模拟器结果不冒充真机结果。记录不包含账号、Cookie、OTP、设备标识或私钥。
 
 ## 构建与环境
 
 | 项目 | 本次记录 |
 | --- | --- |
-| Git 提交 | 当前真机 `375afb5`；模拟器此前实测 `f098a58`。旧包启动失败仍保留记录，不将新包阶段通过写成全部验收完成 |
-| GitHub Actions | 最新 `375afb5` 的 [run 36706602280](https://github.com/luantu/Bettbox/actions/runs/36706602280) 已完整成功并核对 headSha；旧阶段的构建与测试记录保留在后文 |
-| APK SHA-256 | 真机 `375afb5`：`1e905285d0663c10d0d8c161ef6cae5a388bf68e7a1bacbdc9b6ae304a3fcc2e`；安装后 base.apk 哈希一致。本地产物位于 `outputs/android-sg-multi-2026-09-30/build-375afb5/app-release.apk` |
+| Git 提交 | 最终真机候选 `01efca2a67922fe908086dbb1330df19c254d85a`；模拟器预检使用 `d30a2818`，完整雅迪状态机实测使用 `835253da`，最终 exact APK 再做保留数据安装与兼容冒烟 |
+| GitHub Actions | [run 39707246212](https://github.com/luantu/Bettbox/actions/runs/39707246212) 已完整成功并核对 headSha；总耗时 10分19秒，登录 helper 与 Mihomo-SG Android 内核缓存命中，缓存产物仍通过架构、符号和 APK payload 检查 |
+| APK SHA-256 | `01efca2a`：`fd6fcfa3185d4cdfbd40810d57975d0ed854491f92d344b61eb4c3be12766bef`；本地产物位于 `outputs/android-sg-yadea-compat-2026-10-22/01efca2a/app-release.apk` |
 | 包名与签名 | `com.appshub.bettbox.sg`；仓库测试签名，非生产签名 |
 | 诊断预览 APK | `bafd362` 已在模拟器复现 URL 丢失；`c46d5a3` 已构建成功。两者用于定位，设备验收使用 `7c8a76b` |
-| 模拟器 | Android API 35、arm64、单核；SDK 与 AVD 位于 `/Volumes/ExtArchive/Android/`。真实账号用 `BettboxSGApi35Fresh`，空配置用 `BettboxSGApi35Empty20260929`，未同时运行 |
-| 真机 | Android 17，`375afb5` 同签名保留数据安装；保存的账号、节点、探针与 `CorpLinkCorporateRoutes` 沿用。本轮网络和亮屏设置已恢复，测试转发已删除，VPN 保持运行 |
+| 模拟器 | Android API 35、arm64、单核；SDK 与 AVD 位于 `/Volumes/ExtArchive/Android/`。`BettboxSGApi35Fresh` 已保留数据安装 `d30a2818`，验证后正常关闭 |
+| 真机 | Android 17，`01efca2a` 同签名保留数据安装，base.apk 哈希与 artifact 一致；雅迪兼容前后台、真实快捷方式、福州探针直存和代理页测速已补测。网络、运行意图、亮屏和 ADB 转发均已恢复 |
 
 ## 验证用例
 
@@ -30,12 +30,29 @@
 | M10 | 保留数据覆盖安装及冷启动 | 与原版 Bettbox 共存；原飞连设置、两节点选择、探针和密钥持续有效，账号不因普通启动反复登录 | `7c8a76b` 保留数据安装成功，前后目录标识均为 `344795`，保存的授权和探针可用，无需重输密码；首页刷新为 `2/2`。长期后台保活仍未测 | `adb install -r` 成功，保存的账号无需重输，两个选中节点仍可用；独立冷启动及长期后台保活待测 |
 | M11 | 代理页逐节点测速 | 全局测速覆写开启时，飞连 WG 使用各节点保存的 HTTPS 探针；机场仍使用全局地址 | `7c8a76b` 核心接口与卡片均有专属 URL，福州连续五次为 32、24、94、53、35 ms，INTL 手动测试有响应。普通机场业务可用；逐个机场测速未遍历 | `7c8a76b` 福州连续五次 27、44、46、28、47 ms，日志均为专属组探针及 responsive。INTL 页面也有正常延迟；本轮 Profile 无机场节点，机场测速尚未在真机覆盖 |
 | M12 | 从上游刷新订阅，再核对节点和流量 | 下载的新配置中仍自动加入已选 SG 组和 WG；原订阅与普通业务有效 | `7c8a76b` 源 Profile 的更新时间改变，最终配置仍有两个 SG 组；机场公共 HTTPS 和 ChatGPT 均 HTTP 200。通过本轮更新 | 待验证 |
+| M13 | 从桌面兼容快捷方式打开雅迪，再离开或选择“保持停止” | 快捷方式使用雅迪原图标；雅迪前台期间 VPN/TUN 始终暂停；离开宽限后只恢复原先运行的 VPN。“保持停止”后网络切换、重开 Bettbox 和覆盖安装都不自动启动 | `d30a2818` 能正确识别雅迪未安装并禁用快捷方式及“兼容打开”；模拟器没有雅迪，不能执行前后台状态机 | `835253da` 完整实测：t=1–20 秒雅迪持续前台且 VPN/TUN 全程 down；离开后 t=0–9 秒 down、t=10 秒恢复；“保持停止”跨 18 秒、网络切换、重开与覆盖安装均未自启。`01efca2a` exact APK 保留数据安装后 shortcut token/bitmap 保留，兼容打开时 VPN/TUN down，Home 12 秒后恢复。通过 |
 
 ## 取证规则与边界
 
 设备实测至少保留构建 run/SHA、脱敏后的状态截图、最终配置中的节点与组名、请求路由链及网络切换时间线。不得保存或上传授权文件、完整日志、Cookie、OTP、设备 ID、密码和私钥。当前 Wi‑Fi 本身可访问 ChatGPT，也可访问福州内网探针站点；两个站点的 HTTP 200、页面打开或飞连页“有响应”均不是隧道证据。必须对应到同一次请求的 WG 路由链与双向流量，或在隔离本地内网的网络上做可复现对照。
 
-当前状态：上表 `7c8a76b` 的逐项结果是既有验证记录，不自动转为新包通过。`375afb5` 已完成真机连续测速、两类代理请求的 WG 路径及首页刷新停启恢复；后文另列该提交实测。真机独立故障隔离、浏览器对应双向请求链、机场回归、DNS 失败关闭和长期后台仍待验收。用户已接受这些限制，授权将当前版本合入 fork 的 main；现有 Release 保留。
+当前状态：上表 `7c8a76b`、`375afb5` 及后续提交的逐项结果是各阶段证据。最终 `01efca2a` 已完成 CI、模拟器预检、原手机保留数据安装和兼容冒烟；完整 M13、探针直存、逐节点测速和双节点业务回归由与最终正常路径相同的 `835253da` 实测，并由最终包再次确认。此前明确列出的长期后台、每项历史故障反例等边界不因本轮收口自动扩大。
+
+## 2026-10-21 至 22 日当前候选收口（`d30a2818` → `01efca2a`）
+
+该候选合入上游 1.19.7 后新增雅迪兼容入口、福州探针直接保存，并缩短 Android SG 工作流。独立复核未发现 Critical 或 Important；保留两个非阻断项：无凭据探针回退会在普通偏好中保存内部域名和路径，首次生成快捷方式令牌时没有检查 SharedPreferences 同步提交结果。
+
+Actions run `39611479671` 的 Flutter 全部分片、Android native recovery／网络路径／运行意图／双开／局域网排除／雅迪兼容策略、Go outbound/core、缓存原生库验证、APK 打包和 payload 检查全部成功。工作流只打包一次 APK。Code Forge 在本次 Rust 版本缓存变化后重建；登录 helper 与 Mihomo-SG 原生库命中缓存并跳过重编译。总耗时 10分03秒，冷缓存对照为 17分28秒，旧流程约 25 分钟。
+
+`BettboxSGApi35Fresh` 以同签名保留数据安装，设备端 base.apk 哈希与 artifact 一致，`firstInstallTime` 未变化。兼容应用页显示“未安装雅迪智行”，创建快捷方式和兼容打开均为 disabled。福州节点弹窗读回原有 HTTPS 探针；点“保存并应用”后弹窗关闭，“取消修改”仍为 disabled，日志确认 `coreProxyProbePresent=true`。本轮 fatal/panic 计数为 0。模拟器已关闭，当前没有虚拟机 CPU 占用。
+
+原手机首次使用 `d30a2818` 时发现两个同名图标：原雅迪应用直接启动时仍因 VPN 退出；昨日兼容 shortcut 缺少当前私有 token，只闪回 Bettbox。删除旧 shortcut 后，HyperOS 又暴露出旧 `INSTALL_SHORTCUT` receiver 虽可查询、实际已停止投递的问题。测试提交 `3907bd3a` 的 run `39703638716` 在 Android smart-stop regression 精确失败；`835253da` 改为已有 shortcut 先更新 token、新建时优先现代 pinned API，旧广播仅作最后回退，同时检查 token 同步落盘结果。
+
+run `39704347518` 对 `835253da` 全链成功，耗时 9分04秒。手机重新创建的 shortcut 同时含 targetPackage 与 UUID token，图标 bitmap 由雅迪安装包加载；覆盖安装同一 APK 后 shortcut 和 token 保留。点击该 shortcut 时，t=0 已撤销 TUN/VPN，t=1–20 秒雅迪主界面持续前台、PID 稳定、VPN/TUN 全程关闭。按 Home 后 t=0–9 秒维持关闭，t=10 秒恢复；ChatGPT 与福州 HTTPS 均返回 200。
+
+“保持停止”反例也完成：选择后连续 18 秒无 VPN/TUN；切换 Wi-Fi／蜂窝、强制重开 Bettbox及同包覆盖安装后仍不自启，日志明确记录显式停止抑制自动启动。最后在蜂窝下手动启动，TUN 2 秒恢复、SG 收敛 2/2、两类业务请求 200；再恢复 Wi-Fi 智能暂停。设备最终为 Wi-Fi 开、蜂窝数据关、保持亮屏 7、超时 30 分钟，ADB 转发为空，用户运行意图恢复为 true。
+
+最终复核又补了 token commit 失败后的内存回滚和纯 Java shortcut action policy。测试提交 `8005cc9d` 的 run `39706506560` 因生产策略类不存在按预期红灯；`01efca2a` 的 run `39707246212` 全链转绿，独立复核为 Critical／Important／Minor 均 0。最终 APK 保留数据安装后设备 base.apk 哈希与 artifact 一致，firstInstallTime 不变，pinned shortcut 的 targetPackage、私有 token 与 icon bitmap 保留。通过持久化 shortcut Intent 启动雅迪时 VPN/TUN 均 down，回到 Home 12 秒后均恢复；两类业务请求分别 HTTP 200。测试结束恢复 Wi-Fi 开、蜂窝数据关、stay_on=7、screen timeout=1800000，ADB forward 为空，fatal/panic 计数为 0。
 
 ## 原生启动保护与真机复测（`375afb5`）
 
