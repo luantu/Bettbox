@@ -136,14 +136,21 @@ object CompatibilityAppManager {
         val savedToken = shortcutPrefs.getString(SHORTCUT_TOKEN_KEY, null)
             ?.takeIf { it.isNotBlank() }
         val token = savedToken ?: UUID.randomUUID().toString().also {
-            if (!shortcutPrefs.edit().putString(SHORTCUT_TOKEN_KEY, it).commit()) return false
+            if (!shortcutPrefs.edit().putString(SHORTCUT_TOKEN_KEY, it).commit()) {
+                // commit() updates this process' SharedPreferences memory even
+                // when persistence fails. Remove that transient value so a
+                // retry cannot create a shortcut that breaks after restart.
+                shortcutPrefs.edit().remove(SHORTCUT_TOKEN_KEY).commit()
+                return false
+            }
         }
         val intent = Intent(context, CompatibilityLaunchActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             putExtra(EXTRA_TARGET_PACKAGE, packageName)
             putExtra(EXTRA_SHORTCUT_TOKEN, token)
         }
-        val shortcut = ShortcutInfoCompat.Builder(context, "compat-$packageName")
+        val shortcutId = "compat-$packageName"
+        val shortcut = ShortcutInfoCompat.Builder(context, shortcutId)
             .setShortLabel(label)
             .setLongLabel("无 VPN 打开 $label")
             .setIcon(IconCompat.createWithBitmap(bitmap))
@@ -159,35 +166,40 @@ object CompatibilityAppManager {
         // A pinned shortcut from an older SG build may carry no token, or a
         // token that predates the stable-token migration. Refresh it in place
         // before requesting another desktop icon.
-        val shortcutId = "compat-$packageName"
         val alreadyPinned = runCatching {
             context.getSystemService(ShortcutManager::class.java)
                 ?.pinnedShortcuts
                 ?.any { it.id == shortcutId } == true
         }.getOrDefault(false)
-        if (alreadyPinned && runCatching {
-                ShortcutManagerCompat.updateShortcuts(context, listOf(shortcut))
-            }.getOrDefault(false)) {
-            return true
-        }
+        val refreshSucceeded = alreadyPinned && runCatching {
+            ShortcutManagerCompat.updateShortcuts(context, listOf(shortcut))
+        }.getOrDefault(false)
+        val modernSupported = ShortcutManagerCompat.isRequestPinShortcutSupported(context)
+        val supportsMiuiLegacy = pm.queryBroadcastReceivers(legacyIntent, 0).isNotEmpty()
+        var action = CompatibilityShortcutPolicy.afterRefresh(
+            alreadyPinned,
+            refreshSucceeded,
+            modernSupported,
+            supportsMiuiLegacy,
+        )
 
         // HyperOS still advertises the legacy INSTALL_SHORTCUT receiver even
         // when the platform drops that broadcast. Prefer the supported modern
         // API, and keep the old broadcast only as a last-resort fallback.
-        if (ShortcutManagerCompat.isRequestPinShortcutSupported(context) &&
-            runCatching {
+        if (action == CompatibilityShortcutPolicy.Action.REQUEST_MODERN) {
+            val accepted = runCatching {
                 ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
-            }.getOrDefault(false)) {
-            return true
+            }.getOrDefault(false)
+            action = CompatibilityShortcutPolicy.afterModern(accepted, supportsMiuiLegacy)
         }
-        val supportsMiuiLegacy = pm.queryBroadcastReceivers(legacyIntent, 0).isNotEmpty()
-        if (supportsMiuiLegacy) {
-            return runCatching {
+        return when (action) {
+            CompatibilityShortcutPolicy.Action.COMPLETE -> true
+            CompatibilityShortcutPolicy.Action.TRY_LEGACY -> runCatching {
                 context.sendBroadcast(legacyIntent)
                 true
             }.getOrDefault(false)
+            else -> false
         }
-        return false
     }
 
     fun launchFromShortcut(

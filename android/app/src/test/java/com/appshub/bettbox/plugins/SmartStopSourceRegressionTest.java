@@ -54,6 +54,8 @@ public final class SmartStopSourceRegressionTest {
         require(compatibility.contains("UUID.randomUUID()") &&
                 compatibility.contains("launchFromShortcut"),
             "exported compatibility shortcuts must carry an unpredictable private token");
+        require(compatibility.contains("remove(SHORTCUT_TOKEN_KEY).commit()"),
+            "a failed token commit must remove the unpersisted in-memory token before retry");
         require(launchActivity.contains("EXTRA_SHORTCUT_TOKEN") &&
                 launchActivity.contains("launchFromShortcut"),
             "the exported compatibility Activity must reject calls without its private token");
