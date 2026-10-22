@@ -10,6 +10,7 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.ConnectivityManager
@@ -132,11 +133,11 @@ object CompatibilityAppManager {
         drawable.setBounds(0, 0, size, size)
         drawable.draw(Canvas(bitmap))
         val shortcutPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val token = shortcutPrefs.getString(SHORTCUT_TOKEN_KEY, null)
+        val savedToken = shortcutPrefs.getString(SHORTCUT_TOKEN_KEY, null)
             ?.takeIf { it.isNotBlank() }
-            ?: UUID.randomUUID().toString().also {
-                shortcutPrefs.edit().putString(SHORTCUT_TOKEN_KEY, it).commit()
-            }
+        val token = savedToken ?: UUID.randomUUID().toString().also {
+            if (!shortcutPrefs.edit().putString(SHORTCUT_TOKEN_KEY, it).commit()) return false
+        }
         val intent = Intent(context, CompatibilityLaunchActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             putExtra(EXTRA_TARGET_PACKAGE, packageName)
@@ -154,6 +155,31 @@ object CompatibilityAppManager {
             putExtra(Intent.EXTRA_SHORTCUT_ICON, bitmap)
             putExtra("duplicate", false)
         }
+
+        // A pinned shortcut from an older SG build may carry no token, or a
+        // token that predates the stable-token migration. Refresh it in place
+        // before requesting another desktop icon.
+        val shortcutId = "compat-$packageName"
+        val alreadyPinned = runCatching {
+            context.getSystemService(ShortcutManager::class.java)
+                ?.pinnedShortcuts
+                ?.any { it.id == shortcutId } == true
+        }.getOrDefault(false)
+        if (alreadyPinned && runCatching {
+                ShortcutManagerCompat.updateShortcuts(context, listOf(shortcut))
+            }.getOrDefault(false)) {
+            return true
+        }
+
+        // HyperOS still advertises the legacy INSTALL_SHORTCUT receiver even
+        // when the platform drops that broadcast. Prefer the supported modern
+        // API, and keep the old broadcast only as a last-resort fallback.
+        if (ShortcutManagerCompat.isRequestPinShortcutSupported(context) &&
+            runCatching {
+                ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
+            }.getOrDefault(false)) {
+            return true
+        }
         val supportsMiuiLegacy = pm.queryBroadcastReceivers(legacyIntent, 0).isNotEmpty()
         if (supportsMiuiLegacy) {
             return runCatching {
@@ -161,7 +187,7 @@ object CompatibilityAppManager {
                 true
             }.getOrDefault(false)
         }
-        return ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
+        return false
     }
 
     fun launchFromShortcut(
