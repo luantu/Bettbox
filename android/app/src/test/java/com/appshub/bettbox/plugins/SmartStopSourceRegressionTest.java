@@ -40,6 +40,15 @@ public final class SmartStopSourceRegressionTest {
         require(compatibility.contains("com.miui.home") &&
                 compatibility.contains("INSTALL_SHORTCUT"),
             "HyperOS must receive a legacy launcher shortcut fallback");
+        int modernShortcutRequest = compatibility.indexOf(
+            "ShortcutManagerCompat.requestPinShortcut");
+        int legacyShortcutBroadcast = compatibility.indexOf(
+            "context.sendBroadcast(legacyIntent)");
+        require(modernShortcutRequest >= 0 && legacyShortcutBroadcast >= 0 &&
+                modernShortcutRequest < legacyShortcutBroadcast,
+            "modern pinned shortcuts must be attempted before the unsupported HyperOS legacy broadcast");
+        require(compatibility.contains("ShortcutManagerCompat.updateShortcuts"),
+            "an existing pinned shortcut must be refreshed with the current private token");
         require(manifest.contains("com.android.launcher.permission.INSTALL_SHORTCUT"),
             "the HyperOS shortcut fallback requires launcher install permission");
         require(compatibility.contains("UUID.randomUUID()") &&
