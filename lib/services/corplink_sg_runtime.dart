@@ -84,8 +84,16 @@ Future<void> ensureCorplinkVpnReady() async {
   final needsNativeTun = system.isAndroid && globalState.config.vpnProps.enable;
   final ready = await _corplinkVpnStartGate.ensureReady(
     waitForNative: needsNativeTun,
-    isNativeReady: () async => await clashLib?.getAndroidVpnReady() == true,
+    isNativeReady: () async {
+      if (system.isAndroid && await Vpn().isSmartStopped()) {
+        return !await Vpn().isCompatibilityPaused() &&
+            await globalState.getVpnRunIntent(reload: true) != false &&
+            await Vpn().isSgTransportReady();
+      }
+      return await clashLib?.getAndroidVpnReady() == true;
+    },
     requestStart: () async {
+      if (system.isAndroid && await Vpn().isSmartStopped()) return;
       // Native readiness, not an optimistic UI timestamp, governs Android
       // retries after a cancelled permission prompt or a failed constructor.
       if (needsNativeTun || !globalState.isStart) {
