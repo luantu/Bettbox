@@ -9,10 +9,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'constant.dart';
 import 'path.dart';
 import 'print.dart';
+import 'ordered_config_writer.dart';
 
 class Preferences {
   static Preferences? _instance;
   Completer<SharedPreferences?> sharedPreferencesCompleter = Completer();
+  late final _configWriter = OrderedConfigWriter<Config>(_saveConfigNow);
 
   Future<bool> get isInit async =>
       await sharedPreferencesCompleter.future != null;
@@ -113,7 +115,23 @@ class Preferences {
     return selectedConfig;
   }
 
-  Future<bool> saveConfig(Config config) async {
+  /// Read-only refresh for the Android service. Do not run profile migration or
+  /// restore the isolate's stale preference cache during a periodic rule check.
+  Future<VpnProps?> getSavedVpnProps() async {
+    try {
+      final file = File(await appPath.appConfigPath);
+      if (!await file.exists()) return null;
+      final value = jsonDecode(await file.readAsString());
+      if (value is! Map || value['vpnProps'] is! Map) return null;
+      return VpnProps.fromJson(Map<String, Object?>.from(value['vpnProps'] as Map));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> saveConfig(Config config) => _configWriter.save(config);
+
+  Future<bool> _saveConfigNow(Config config) async {
     final preferences = await sharedPreferencesCompleter.future;
     await preferences?.setBool('autoLaunch', config.appSetting.autoLaunch);
     if (Platform.isMacOS) {

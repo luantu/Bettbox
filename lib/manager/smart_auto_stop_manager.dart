@@ -70,7 +70,11 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager>
 
   Future<void> _saveAndCheck() async {
     // Await durable settings before asking the service isolate to reload them.
-    await globalState.appController.savePreferences();
+    final saved = await preferences.saveConfig(globalState.config);
+    if (!saved) {
+      if (mounted) globalState.showNotifier('智能启停设置保存失败，后台仍使用上一次配置，请重试');
+      return;
+    }
     if (mounted) _scheduleCheck();
   }
 

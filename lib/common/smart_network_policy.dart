@@ -145,12 +145,15 @@ class SmartNetworkPolicy {
       if (selected.isEmpty) { unknown = true; continue; }
       for (final network in selected) {
         if (rule.ssid.isNotEmpty && network.transport != 'wifi') continue;
+        if (rule.ssid.isNotEmpty && !network.ssidAvailable) {
+          unknown = true;
+          continue;
+        }
         if (rule.networks.trim().isNotEmpty && !_addressMatches(network, rule.networks)) {
           if (network.ips.isEmpty && network.gateways.isEmpty) unknown = true;
           continue;
         }
         if (rule.ssid.isNotEmpty) {
-          if (!network.ssidAvailable) { unknown = true; continue; }
           if (rule.ssid != network.ssid) continue;
         }
         return const SmartNetworkDecision(SmartNetworkMatch.match, '命中地点规则');

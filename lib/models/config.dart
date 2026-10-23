@@ -1,5 +1,7 @@
 // ignore_for_file: invalid_annotation_target
 
+import 'dart:convert';
+
 import 'package:bett_box/common/common.dart';
 import 'package:bett_box/enum/enum.dart';
 import 'package:material_ui/material_ui.dart';
@@ -339,11 +341,19 @@ abstract class VpnProps with _$VpnProps {
   }) = _VpnProps;
 
   factory VpnProps.fromJson(Map<String, Object?> json) =>
-      _$VpnPropsFromJson(json);
+      _$VpnPropsFromJson(normalizeSmartNetworkRulesField(json));
 
   factory VpnProps.safeFromJson(Map<String, Object?>? json) {
     return json == null ? defaultVpnProps : VpnProps.fromJson(json);
   }
+}
+
+Map<String, Object?> normalizeSmartNetworkRulesField(Map<String, Object?> json) {
+  final value = json['smartAutoStopRules'];
+  if (value == null || value is String) return json;
+  // Retain the invalid payload for diagnosis inside a non-executable string.
+  // A bad new field must not discard unrelated profiles or VPN settings.
+  return {...json, 'smartAutoStopRules': jsonEncode({'invalidField': value})};
 }
 
 List<String> bypassDomainSafeFromJson(List<dynamic>? bypassDomain) {

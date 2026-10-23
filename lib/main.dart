@@ -173,8 +173,8 @@ Future<void> _service(List<String> flags) async {
           if (await vpn?.isCompatibilityPaused() == true) return;
           // The service isolate's startup Config is not updated by UI providers.
           // Read the atomic saved config, never write a stale full Config back.
-          final saved = await preferences.getConfig();
-          final vpnProps = (saved ?? globalState.config).vpnProps;
+          final vpnProps = await preferences.getSavedVpnProps();
+          if (vpnProps == null) return; // unreadable config cannot authorize a transition
           final isSmartStopped = await vpn?.isSmartStopped() ?? false;
           if (!vpnProps.smartAutoStop && !isSmartStopped) return;
           final snapshot = await vpn?.getSmartNetworkSnapshot();
@@ -188,6 +188,7 @@ Future<void> _service(List<String> flags) async {
             isSmartStopped: isSmartStopped,
             isRunning: await vpn?.getStatus() ?? false,
             userRunIntent: await globalState.getVpnRunIntent(reload: true),
+            compatibilityPaused: await vpn?.isCompatibilityPaused() ?? false,
           );
           switch (action) {
             case SmartNetworkAction.stop:
