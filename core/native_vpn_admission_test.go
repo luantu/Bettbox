@@ -5,6 +5,34 @@ import (
 	"testing"
 )
 
+func TestNativeVpnSmartPausePreservesProtectedTransport(t *testing.T) {
+	var a nativeVpnAdmission
+	a.SetStarted(true)
+	if !a.SetPaused(true) || !a.AllowsTransport() || a.RepairRequired() {
+		t.Fatal("smart pause must keep protected WG transport without a TUN")
+	}
+	a.SetMode(true) // periodic configuration updates must not lose soft pause
+	if !a.AllowsTransport() {
+		t.Fatal("configuration update revoked maintenance")
+	}
+	a.SetStarted(true) // restore only the system TUN
+	if !a.AllowsTransport() {
+		t.Fatal("resume revoked protected transport")
+	}
+	a.SetReady(false) // explicit hard stop
+	if a.AllowsTransport() {
+		t.Fatal("hard stop retained maintenance admission")
+	}
+}
+
+func TestNativeVpnSmartPauseRequiresRetainedProtection(t *testing.T) {
+	var a nativeVpnAdmission
+	a.SetStarted(true)
+	if a.SetPaused(false) || a.AllowsTransport() {
+		t.Fatal("missing protection must fail closed even after a working TUN")
+	}
+}
+
 func TestNativeVpnRestoreAdmissionRequiresLiveNativeTun(t *testing.T) {
 	for _, test := range []struct {
 		name                          string

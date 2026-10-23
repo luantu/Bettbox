@@ -49,6 +49,7 @@ jobs:
         timeout-minutes: 4
         run: |
           flutter test \
+            test/corplink_maintenance_policy_test.dart \
             test/common/smart_network_policy_test.dart \
             test/common/ordered_config_writer_test.dart \
             test/common/smart_network_preferences_test.dart \
