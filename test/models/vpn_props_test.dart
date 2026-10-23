@@ -5,6 +5,23 @@ import 'package:bett_box/models/config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('malformed SSID field is isolated from the rest of a full Config', () {
+    for (final invalid in [[], {}, 123, '{broken']) {
+      final original = Config(themeProps: defaultThemeProps,
+        nodeExcludeFilter: 'preserve-me',
+        vpnProps: const VpnProps(smartAutoStop: true,
+          smartAutoStopNetworks: '192.168.110.0/24', bypassPrivateRoute: false,
+          accessControl: AccessControl(enable: true, rejectList: ['example.app'])));
+      final json = jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>;
+      (json['vpnProps'] as Map)['smartAutoStopRules'] = invalid;
+      final restored = Config.compatibleFromJson(json);
+      expect(restored.nodeExcludeFilter, 'preserve-me');
+      expect(restored.vpnProps.smartAutoStopNetworks, '192.168.110.0/24');
+      expect(restored.vpnProps.bypassPrivateRoute, isFalse);
+      expect(restored.vpnProps.accessControl.rejectList, ['example.app']);
+      expect(restored.vpnProps.smartAutoStopRules, isNotEmpty);
+    }
+  });
   test('old IP rules survive adding and round-tripping SSID rules', () {
     final old = VpnProps.fromJson({
       'smartAutoStop': true,

@@ -44,9 +44,15 @@ void main() {
     }
     expect(evaluate([wifi('<unknown ssid>')]).match, SmartNetworkMatch.unknown);
   });
-  test('known disqualifying address does not wait on SSID', () {
-    expect(evaluate([wifi(null, ip: '10.1.1.2', ssidStatus: 'unavailable')]).match,
-      SmartNetworkMatch.noMatch);
+  test('unknown SSID with changed or IPv6-only addresses keeps the pause', () {
+    for (final status in ['permissionRequired', 'locationDisabled', 'unavailable']) {
+      for (final address in ['10.1.1.2', '2001:db8::1']) {
+        final decision = evaluate([wifi(null, ip: address, ssidStatus: status)]);
+        expect(decision.match, SmartNetworkMatch.unknown);
+        expect(decision.action(isSmartStopped: true, isRunning: false,
+          userRunIntent: true), SmartNetworkAction.none);
+      }
+    }
   });
   test('leaving Wi-Fi for cellular unmatches, total disconnect is unknown', () {
     expect(evaluate([const SmartNetworkSnapshot(id: 'cell', selected: true,
