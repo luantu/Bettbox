@@ -81,7 +81,7 @@ class _SmartNetworkSettingsState extends State<SmartNetworkSettings>
         actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消'))]));
     if (saved == null || !mounted) return;
     // Refuse to overwrite an externally updated list with a stale dialog copy.
-    final current = SmartNetworkRule.decode(widget.rulesJson);
+    final current = SmartNetworkRule.decode(widget.rulesJson).toList();
     final index = current.indexWhere((rule) => rule.id == saved.id);
     if (index >= 0) { current[index] = saved; } else { current.add(saved); }
     widget.onChanged(SmartNetworkRule.encode(current));
