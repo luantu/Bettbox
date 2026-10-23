@@ -52,6 +52,7 @@ jobs:
             test/common/smart_network_policy_test.dart \
             test/common/ordered_config_writer_test.dart \
             test/common/smart_network_preferences_test.dart \
+            test/plugins/service_events_test.dart \
             test/models/vpn_props_test.dart \
             test/views/smart_network_rule_editor_test.dart
 
