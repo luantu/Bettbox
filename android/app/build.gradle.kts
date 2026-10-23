@@ -14,6 +14,9 @@ val mStorePassword: String? = localProperties.getProperty("storePassword")
 val mKeyAlias: String? = localProperties.getProperty("keyAlias")
 val mKeyPassword: String? = localProperties.getProperty("keyPassword")
 val isRelease = mStoreFile.exists() && mStorePassword != null && mKeyAlias != null && mKeyPassword != null
+if (System.getenv("BETTBOX_REQUIRE_SG_SIGNING") == "true" && !isRelease) {
+    throw GradleException("SG CI signing is missing; refusing a non-upgradeable debug-signed APK")
+}
 
 android {
     namespace = "com.appshub.bettbox"

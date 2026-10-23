@@ -98,6 +98,10 @@ jobs:
           set -euo pipefail
           test -s android/app/sg-test.keystore
           {
+            # flutter pub get may create local.properties without a final LF.
+            # Never join storeFile onto its last property (release silently
+            # falls back to a per-run debug key if storeFile cannot be read).
+            printf '\n'
             echo "storeFile=sg-test.keystore"
             echo "keyAlias=bettbox-sg-test"
             echo "storePassword=bettbox-sg-test"
@@ -378,6 +382,8 @@ jobs:
 
       - name: Build APK
         # Keep the test-signed pre-release identity; hide only its UI ribbon.
+        env:
+          BETTBOX_REQUIRE_SG_SIGNING: 'true'
         run: flutter build apk --release --target-platform android-arm64 --dart-define=SHOW_APP_ENV_BANNER=false
 
       - name: Verify APK native payload
@@ -391,6 +397,14 @@ jobs:
           grep -q '^lib/arm64-v8a/libcore.so$' build/apk-file-list.txt
           grep -q '^lib/arm64-v8a/libcorplink-rs-login.so$' build/apk-file-list.txt
           grep -q '^lib/arm64-v8a/libcode_forge.so$' build/apk-file-list.txt
+          # Never upload an APK which cannot retain existing Android app data.
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk" > build/apk-signature.txt
+          certificate=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' build/apk-signature.txt)
+          expected=ab1599095a426cb450a456f8f57158c10626032b44f362ff22fb86c02229b27c
+          if [ "$certificate" != "$expected" ]; then
+            echo "::error::SG APK signing certificate mismatch: $certificate"
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
