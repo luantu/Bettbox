@@ -182,19 +182,24 @@ class ClashLibHandler {
     return _instance!;
   }
 
-  Future<String> invokeAction(String actionParams) {
+  Future<String> invokeAction(String actionParams, {Duration? timeout}) {
     final completer = Completer<String>();
     final receiver = ReceivePort();
     receiver.listen((message) {
       if (!completer.isCompleted) {
         completer.complete(message);
-        receiver.close();
       }
     });
     final actionParamsChar = actionParams.toNativeUtf8().cast<Char>();
-    clashFFI.invokeAction(actionParamsChar, receiver.sendPort.nativePort);
-    malloc.free(actionParamsChar);
-    return completer.future;
+    try {
+      clashFFI.invokeAction(actionParamsChar, receiver.sendPort.nativePort);
+    } catch (error, stack) {
+      completer.completeError(error, stack);
+    } finally {
+      malloc.free(actionParamsChar);
+    }
+    final result = timeout == null ? completer.future : completer.future.timeout(timeout);
+    return result.whenComplete(receiver.close);
   }
 
   Future<bool> reconnectTunnels() async {

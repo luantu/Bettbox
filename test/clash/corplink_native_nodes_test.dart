@@ -9,7 +9,7 @@ void main() {
     globalState.isService = true;
     addTearDown(() => globalState.isService = wasService);
     final requests = <Map<String, dynamic>>[];
-    final client = CorplinkNativeNodes((message) async {
+    final client = CorplinkNativeNodes((message, timeout) async {
       final request = jsonDecode(message) as Map<String, dynamic>;
       requests.add(request);
       return jsonEncode({...request, 'code': 0, 'data':
@@ -34,7 +34,7 @@ void main() {
   });
   test('service action errors and mismatched replies are not healthy nodes', () async {
     for (final invalid in ['error', 'wrongId', 'wrongMethod']) {
-      final client = CorplinkNativeNodes((message) async {
+      final client = CorplinkNativeNodes((message, timeout) async {
         final request = jsonDecode(message) as Map<String, dynamic>;
         return jsonEncode({...request, 'data': true, 'code': invalid == 'error' ? -1 : 0,
           if (invalid == 'wrongId') 'id': 'stale',

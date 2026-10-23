@@ -25,6 +25,7 @@ import 'models/models.dart';
 import 'services/corplink_sg.dart';
 import 'services/corplink_sg_nodes.dart';
 import 'services/corplink_sg_runtime.dart';
+import 'services/corplink_native_nodes.dart';
 import 'services/sg_network_handoff.dart';
 import 'services/vpn_run_intent.dart';
 
@@ -116,6 +117,8 @@ Future<void> _service(List<String> flags) async {
     final quickStart = flags.contains('quick') || automaticQuickStart;
     final bootStart = flags.contains('boot');
     final clashLibHandler = ClashLibHandler();
+    final nativeSgNodes = CorplinkNativeNodes((message, timeout) =>
+      clashLibHandler.invokeAction(message, timeout: timeout));
     final smartAutoStopLock = Lock();
     Timer? smartAutoStopDebounce;
     var sgMaintenanceInFlight = false;
@@ -131,14 +134,18 @@ Future<void> _service(List<String> flags) async {
         if (!settings.enabled) return;
         final selected = await loadCorplinkNodeSelections();
         if (selected == null) return;
-        await restoreCorplinkNodesAfterNetworkChange(
+        final unready = await restoreCorplinkNodesAfterNetworkChange(
           selected.where((node) => node.enabled).map((node) => node.serverName),
-          ensureHandshake: clashCore.ensureCorplinkNode,
-          readStatus: readCorplinkNodeStatus,
-          reconnect: clashCore.reconnectCorplinkNode,
-          rebuild: clashCore.rebuildCorplinkNode,
+          ensureHandshake: nativeSgNodes.ensure,
+          readStatus: nativeSgNodes.readStatus,
+          reconnect: nativeSgNodes.reconnect,
+          rebuild: nativeSgNodes.rebuild,
           canContinue: canMaintainCorplinkNodes,
         );
+        if (await canMaintainCorplinkNodes()) {
+          commonPrint.log('[SG maintenance] checked=${selected.where((node) => node.enabled).length} '
+              'unready=${unready.length}');
+        }
       } catch (error) {
         commonPrint.log('[SG maintenance] ${error.runtimeType}');
       } finally {
@@ -170,10 +177,10 @@ Future<void> _service(List<String> flags) async {
             final remaining = await restoreCorplinkNodesAfterNetworkChange(
               selectedNodes.where((node) => node.enabled)
                   .map((node) => node.serverName),
-              ensureHandshake: clashCore.ensureCorplinkNode,
-              readStatus: readCorplinkNodeStatus,
-              reconnect: clashCore.reconnectCorplinkNode,
-              rebuild: clashCore.rebuildCorplinkNode,
+              ensureHandshake: nativeSgNodes.ensure,
+              readStatus: nativeSgNodes.readStatus,
+              reconnect: nativeSgNodes.reconnect,
+              rebuild: nativeSgNodes.rebuild,
               canContinue: canMaintainCorplinkNodes,
             );
             commonPrint.log('[reconnectTunnels] independent SG nodes '
