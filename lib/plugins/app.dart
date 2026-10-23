@@ -74,6 +74,12 @@ class App {
     await methodChannel.invokeMethod<void>('openAppSettings');
   }
 
+  Future<bool> requestSmartWifiPermission() async =>
+      await methodChannel.invokeMethod<bool>('requestSmartWifiPermission') ?? false;
+
+  Future<bool> openSmartWifiLocationSettings() async =>
+      await methodChannel.invokeMethod<bool>('openSmartWifiLocationSettings') ?? false;
+
   Future<bool> openFcmDiagnostics() async {
     if (!system.isAndroid) return false;
     return await methodChannel.invokeMethod<bool>('openFcmDiagnostics') ??

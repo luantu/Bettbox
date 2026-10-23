@@ -319,6 +319,7 @@ abstract class VpnProps with _$VpnProps {
     @Default(true) bool dozeSuspend,
     @Default(false) bool smartAutoStop,
     @Default('') String smartAutoStopNetworks,
+    @Default('') String smartAutoStopRules,
     @Default(false) bool storeFix,
     @Default(false) bool networkFix,
     @Default(false) bool loopbackProtection,

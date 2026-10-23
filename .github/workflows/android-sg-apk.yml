@@ -100,6 +100,7 @@ jobs:
           git diff --exit-code -- lib/l10n lib/models/generated lib/providers/generated
 
       - name: Upload regenerated Dart sources
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: regenerated-dart-sources
@@ -193,6 +194,17 @@ jobs:
             android/app/src/test/java/com/appshub/bettbox/plugins/VpnRunIntentSourceRegressionTest.java
           java -cp build/smart-stop-tests com.appshub.bettbox.plugins.SmartStopSourceRegressionTest
           java -cp build/smart-stop-tests com.appshub.bettbox.plugins.VpnRunIntentSourceRegressionTest
+
+      - name: Run SSID network and Wi-Fi permission policy tests
+        run: |
+          mkdir -p build/smart-network-tests
+          javac -d build/smart-network-tests \
+            android/app/src/main/java/com/appshub/bettbox/plugins/SmartNetworkPolicy.java \
+            android/app/src/main/java/com/appshub/bettbox/plugins/SmartWifiPermissionRequest.java \
+            android/app/src/test/java/com/appshub/bettbox/plugins/SmartNetworkPolicyTest.java \
+            android/app/src/test/java/com/appshub/bettbox/plugins/SmartWifiPermissionRequestTest.java
+          java -cp build/smart-network-tests com.appshub.bettbox.plugins.SmartNetworkPolicyTest
+          java -cp build/smart-network-tests com.appshub.bettbox.plugins.SmartWifiPermissionRequestTest
 
       - name: Run app-clone access policy tests
         run: |

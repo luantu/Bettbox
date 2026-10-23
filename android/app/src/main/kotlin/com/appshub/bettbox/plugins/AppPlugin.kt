@@ -35,6 +35,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -65,6 +66,14 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     private lateinit var channel: MethodChannel
     private lateinit var scope: CoroutineScope
     private var vpnCallBack: (() -> Unit)? = null
+    private var activityBinding: ActivityPluginBinding? = null
+    private val smartWifiPermissionRequest = SmartWifiPermissionRequest()
+    private val activityResultListener = PluginRegistry.ActivityResultListener { requestCode, resultCode, data ->
+        onActivityResult(requestCode, resultCode, data)
+    }
+    private val permissionResultListener = PluginRegistry.RequestPermissionsResultListener { requestCode, permissions, results ->
+        onRequestPermissionsResultListener(requestCode, permissions, results)
+    }
     @Volatile
     private var packages: List<Package> = emptyList()
     private val packagesMutex = Mutex()
@@ -80,6 +89,7 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
         private const val ICON_SIZE_DP = 48
         private const val VPN_PERMISSION_REQUEST_CODE = 1001
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
+        private const val SMART_WIFI_PERMISSION_REQUEST_CODE = 1003
         private const val CACHE_MAX_FILES = 500
         private const val PNG_MAGIC_SIZE = 8
 
@@ -194,6 +204,10 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        smartWifiPermissionRequest.complete(false)
+        detachActivityListeners()
+        activityRef = null
+        isActivityAttached = false
         channel.setMethodCallHandler(null)
         scope.cancel()
     }
@@ -269,6 +283,8 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
             "hasCameraPermission" -> {
                 result.success(hasCameraPermission())
             }
+            "requestSmartWifiPermission" -> requestSmartWifiPermission(result)
+            "openSmartWifiLocationSettings" -> result.success(openSmartWifiLocationSettings())
             "openAppSettings" -> {
                 openAppSettings()
                 result.success(true)
@@ -500,6 +516,35 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
         }
     }
 
+    private fun requestSmartWifiPermission(result: Result) {
+        if (SmartNetworkInfo.hasFineLocation(BettboxApplication.getAppContext())) {
+            result.success(true)
+            return
+        }
+        val activity = activityRef?.get()
+        if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            result.success(false)
+            return
+        }
+        if (!smartWifiPermissionRequest.begin { granted -> runCatching { result.success(granted) } }) return
+        runCatching {
+            // Android 12+ requires requesting coarse and fine together for the
+            // precise/approximate choice. Background access is a separate settings flow.
+            ActivityCompat.requestPermissions(activity, arrayOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ), SMART_WIFI_PERMISSION_REQUEST_CODE)
+        }.onFailure { smartWifiPermissionRequest.complete(false) }
+    }
+
+    private fun openSmartWifiLocationSettings(): Boolean = runCatching {
+        val activity = activityRef?.get()?.takeUnless { it.isFinishing || it.isDestroyed }
+        val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        if (activity != null) activity.startActivity(intent)
+        else BettboxApplication.getAppContext().startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    }.getOrDefault(false)
+
     suspend fun getText(text: String): String? = withContext(Dispatchers.Default) {
         channel.awaitResult<String>("getText", text)
     }
@@ -554,21 +599,31 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     }.getOrDefault(false)
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        detachActivityListeners()
+        activityBinding = binding
         activityRef = WeakReference(binding.activity)
-        if (!isActivityAttached) {
-            isActivityAttached = true
-            binding.addActivityResultListener(::onActivityResult)
-            binding.addRequestPermissionsResultListener(::onRequestPermissionsResultListener)
-        }
+        isActivityAttached = true
+        binding.addActivityResultListener(activityResultListener)
+        binding.addRequestPermissionsResultListener(permissionResultListener)
+    }
+
+    private fun detachActivityListeners() {
+        activityBinding?.removeActivityResultListener(activityResultListener)
+        activityBinding?.removeRequestPermissionsResultListener(permissionResultListener)
+        activityBinding = null
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        detachActivityListeners()
         activityRef = null
+        isActivityAttached = false
     }
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activityRef = WeakReference(binding.activity)
+        onAttachedToActivity(binding)
     }
     override fun onDetachedFromActivity() {
+        smartWifiPermissionRequest.complete(false)
+        detachActivityListeners()
         channel.invokeMethod("exit", null)
         activityRef = null
         cachedTaskId = null
@@ -593,8 +648,18 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
 
     private fun onRequestPermissionsResultListener(requestCode: Int, permissions: Array<String>, grantResults: IntArray): Boolean {
         if (!isActivityAttached) return false
-        if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) isBlockNotification = true
-        return true
+        if (requestCode == SMART_WIFI_PERMISSION_REQUEST_CODE) {
+            val granted = SmartWifiPermissionRequest.isPreciseGrant(
+                permissions, grantResults, SmartNetworkInfo.hasFineLocation(BettboxApplication.getAppContext()),
+            )
+            smartWifiPermissionRequest.complete(granted)
+            return true
+        }
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+            isBlockNotification = true
+            return true
+        }
+        return false
     }
 
     private fun isIgnoringBatteryOptimizations(): Boolean =

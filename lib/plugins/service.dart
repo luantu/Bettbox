@@ -64,6 +64,13 @@ class Service {
 
   Future<bool?> smartStop() => methodChannel.invokeMethod<bool>('smartStop');
 
+  Future<void> checkSmartAutoStop() async {
+    await methodChannel.invokeMethod<bool>('checkSmartAutoStop');
+  }
+
+  Future<Map<String, dynamic>> getSmartNetworkSnapshot() async =>
+      await methodChannel.invokeMapMethod<String, dynamic>('getSmartNetworkSnapshot') ?? const {};
+
   Future<bool?> smartResume() async {
     final options = await clashLib?.getAndroidVpnOptions();
     return await methodChannel.invokeMethod<bool>('smartResume', {

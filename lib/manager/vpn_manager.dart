@@ -30,6 +30,7 @@ class _VpnContainerState extends ConsumerState<VpnManager> {
       final onlySmartAutoStopChanged = prevProps.copyWith(
         smartAutoStop: nextProps.smartAutoStop,
         smartAutoStopNetworks: nextProps.smartAutoStopNetworks,
+        smartAutoStopRules: nextProps.smartAutoStopRules,
       ) == nextProps;
       
       final onlyQuickResponseChanged = prevProps.copyWith(

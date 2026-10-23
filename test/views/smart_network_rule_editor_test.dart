@@ -4,6 +4,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('dialog save stays visible on a small dark screen with keyboard', (tester) async {
+    tester.view.physicalSize = const Size(390, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SmartNetworkRule? saved;
+    await tester.pumpWidget(MaterialApp(theme: ThemeData.dark(), home: Scaffold(
+      body: Builder(builder: (context) => TextButton(onPressed: () {
+        showDialog<void>(context: context, builder: (context) => AlertDialog(
+          title: const Text('地点规则'), content: SizedBox(width: 440,
+            child: SmartNetworkRuleEditor(
+              initial: const SmartNetworkRule(id: 'home', name: '家里', ssid: 'Home'),
+              onSaved: (value) { saved = value; Navigator.pop(context); })),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消'))]));
+      }, child: const Text('打开'))))));
+    await tester.tap(find.text('打开')); await tester.pumpAndSettle();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('保存规则')); await tester.pumpAndSettle();
+    expect(saved?.ssid, 'Home');
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('editor always exposes Save without network discovery', (tester) async {
     SmartNetworkRule? saved;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: SmartNetworkRuleEditor(

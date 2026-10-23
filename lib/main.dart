@@ -20,7 +20,7 @@ import 'clash/core.dart';
 import 'clash/lib.dart';
 import 'common/common.dart';
 import 'common/external_control.dart';
-import 'common/network_matcher.dart';
+import 'common/smart_network_policy.dart';
 import 'models/models.dart';
 import 'services/corplink_sg.dart';
 import 'services/corplink_sg_nodes.dart';
@@ -117,6 +117,7 @@ Future<void> _service(List<String> flags) async {
     final bootStart = flags.contains('boot');
     final clashLibHandler = ClashLibHandler();
     final smartAutoStopLock = Lock();
+    Timer? smartAutoStopDebounce;
 
     // Android reports Wi-Fi availability before protected sockets necessarily
     // route over it. The phone reproduced a reconnect that stayed on cellular
@@ -168,45 +169,57 @@ Future<void> _service(List<String> flags) async {
 
     Future<void> checkSmartAutoStop() async {
       try {
-        final vpnProps = globalState.config.vpnProps;
-        if (!vpnProps.smartAutoStop) return;
-        final networks = vpnProps.smartAutoStopNetworks;
-        if (networks.isEmpty) return;
-
         await smartAutoStopLock.synchronized(() async {
           if (await vpn?.isCompatibilityPaused() == true) return;
+          // The service isolate's startup Config is not updated by UI providers.
+          // Read the atomic saved config, never write a stale full Config back.
+          final saved = await preferences.getConfig();
+          final vpnProps = (saved ?? globalState.config).vpnProps;
           final isSmartStopped = await vpn?.isSmartStopped() ?? false;
-          final candidateIps =
-              await vpn?.getLocalIpAddresses() ?? const <String>[];
-          final candidateGateways =
-              await vpn?.getLocalGateways() ?? const <String>[];
-          if (candidateIps.isEmpty && candidateGateways.isEmpty) return;
-
-          final shouldStop =
-              candidateIps.any((ip) => NetworkMatcher.matchAny(ip, networks)) ||
-              candidateGateways.any(
-                (gw) => NetworkMatcher.matchAnyGateway(gw, networks),
-              );
-
-          if (shouldStop && !isSmartStopped) {
-            final isRunning = await vpn?.getStatus() ?? false;
-            if (isRunning) {
-              await vpn?.setSmartStopped(true);
+          if (!vpnProps.smartAutoStop && !isSmartStopped) return;
+          final snapshot = await vpn?.getSmartNetworkSnapshot();
+          final decision = SmartNetworkPolicy.evaluate(
+            networks: SmartNetworkSnapshot.decode(snapshot),
+            enabled: vpnProps.smartAutoStop,
+            rulesJson: vpnProps.smartAutoStopRules,
+            legacyNetworks: vpnProps.smartAutoStopNetworks,
+          );
+          final action = decision.action(
+            isSmartStopped: isSmartStopped,
+            isRunning: await vpn?.getStatus() ?? false,
+            userRunIntent: await globalState.getVpnRunIntent(reload: true),
+          );
+          switch (action) {
+            case SmartNetworkAction.stop:
               await vpn?.smartStop();
-            }
-          } else if (!shouldStop && isSmartStopped) {
-            if (await globalState.getVpnRunIntent(reload: true) == false) {
+              break;
+            case SmartNetworkAction.resume:
+              await vpn?.smartResume(clashLibHandler.getAndroidVpnOptions());
+              break;
+            case SmartNetworkAction.clearStopped:
               await vpn?.setSmartStopped(false);
-              return;
-            }
-            await vpn?.setSmartStopped(false);
-            await vpn?.smartResume(clashLibHandler.getAndroidVpnOptions());
+              break;
+            case SmartNetworkAction.none:
+              break;
+          }
+          if (action != SmartNetworkAction.none) {
+            // Do not log the private SSID, rule name, or local addresses.
+            commonPrint.log('SmartAutoStop: ${action.name}, ${decision.match.name}');
           }
         });
       } catch (e) {
         commonPrint.warn('Smart auto stop check failed: $e');
       }
     }
+
+    void scheduleSmartAutoStopCheck() {
+      smartAutoStopDebounce?.cancel();
+      smartAutoStopDebounce = Timer(const Duration(seconds: 1), checkSmartAutoStop);
+    }
+
+    // Permission changes and same-subnet Wi-Fi roaming may not change IPs.
+    // This low-frequency compensation stays alive in the service when UI closes.
+    Timer.periodic(const Duration(seconds: 15), (_) => scheduleSmartAutoStopCheck());
 
     tile?.addListener(
       _TileListenerWithService(
@@ -233,11 +246,12 @@ Future<void> _service(List<String> flags) async {
 
     vpn?.addListener(
       _VpnListenerWithService(
+        onSmartAutoStopCheck: scheduleSmartAutoStopCheck,
         onDnsChanged: (String dns) {
           clashLibHandler.updateDns(dns);
         },
         onNetworkChanged: () {
-          checkSmartAutoStop();
+          scheduleSmartAutoStopCheck();
           networkHandoffRecovery.networkChanged();
         },
       ),
@@ -413,12 +427,18 @@ class _TileListenerWithService with TileListener {
 class _VpnListenerWithService with VpnListener {
   final Function(String dns) _onDnsChanged;
   final Function() _onNetworkChanged;
+  final Function() _onSmartAutoStopCheck;
 
   const _VpnListenerWithService({
     required Function(String dns) onDnsChanged,
     required Function() onNetworkChanged,
+    required Function() onSmartAutoStopCheck,
   }) : _onDnsChanged = onDnsChanged,
-       _onNetworkChanged = onNetworkChanged;
+       _onNetworkChanged = onNetworkChanged,
+       _onSmartAutoStopCheck = onSmartAutoStopCheck;
+
+  @override
+  void onSmartAutoStopCheck() => _onSmartAutoStopCheck();
 
   @override
   void onDnsChanged(String dns) {

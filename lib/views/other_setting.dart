@@ -7,6 +7,7 @@ import 'package:bett_box/providers/config.dart';
 import 'package:bett_box/providers/providers.dart';
 import 'package:bett_box/state.dart';
 import 'package:bett_box/widgets/widgets.dart';
+import 'package:bett_box/widgets/smart_network_settings.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -38,6 +39,12 @@ class SmartAutoStopSection extends ConsumerWidget {
           ),
         ),
         if (smartAutoStop) ...[
+          if (system.isAndroid) SmartNetworkSettings(
+            rulesJson: ref.watch(vpnSettingProvider.select((state) => state.smartAutoStopRules)),
+            legacyNetworks: smartAutoStopNetworks,
+            onChanged: (value) => ref.read(vpnSettingProvider.notifier)
+              .updateState((state) => state.copyWith(smartAutoStopRules: value)),
+          ),
           Divider(
             height: 1,
             thickness: 1,
@@ -50,7 +57,7 @@ class SmartAutoStopSection extends ConsumerWidget {
             endIndent: 16,
           ),
           ListItem.input(
-            title: Text(appLocalizations.networkMatch),
+            title: Text(system.isAndroid ? '旧版 IP 规则（独立生效）' : appLocalizations.networkMatch),
             subtitle: Text(
               smartAutoStopNetworks.isEmpty
                   ? appLocalizations.networkMatchHint

@@ -228,6 +228,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(getLocalIpAddresses())
             }
 
+            "getSmartNetworkSnapshot" -> result.success(getSmartNetworkSnapshot())
+
             "resolveUnderlyingHost" -> {
                 val host = call.argument<String>("host")?.trim().orEmpty()
                 if (host.isBlank()) {
@@ -357,6 +359,15 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (available.isNotEmpty()) return available
 
         return cm.activeNetwork?.takeIf(isPhysical)?.let { setOf(it) } ?: emptySet()
+    }
+
+    fun getSmartNetworkSnapshot(): Map<String, Any> = SmartNetworkInfo.snapshot(
+        BettboxApplication.getAppContext(),
+        runCatching { selectedUnderlyingNetwork() }.getOrNull(),
+    )
+
+    fun requestSmartAutoStopCheck() {
+        invokeDart("checkSmartAutoStop")
     }
 
     fun getLocalIpAddresses(): List<String> = runCatching {
@@ -579,7 +590,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private val networkDnsMap = ConcurrentHashMap<Network, List<String>>()
 
-    private val callback = object : ConnectivityManager.NetworkCallback() {
+    private val callback: ConnectivityManager.NetworkCallback by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PhysicalNetworkCallback(ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO)
+        } else PhysicalNetworkCallback()
+    }
+
+    // Keep the API 31 constructor behind its version gate, including on API 26.
+    private class PhysicalNetworkCallback : ConnectivityManager.NetworkCallback {
+        constructor() : super()
+        @androidx.annotation.RequiresApi(Build.VERSION_CODES.S)
+        constructor(flags: Int) : super(flags)
+
         override fun onAvailable(network: Network) {
             networks.add(network)
             connectivity?.getLinkProperties(network)?.let {
@@ -590,6 +612,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         override fun onLost(network: Network) {
+            SmartNetworkInfo.onLost(network)
             networks.remove(network)
             networkDnsMap.remove(network)
             networkPathFingerprints.remove(network)
@@ -609,10 +632,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            SmartNetworkInfo.onCapabilitiesChanged(network, networkCapabilities)
             // Capabilities can arrive after onAvailable. Re-evaluate the
             // physical network choice once Wi-Fi/cellular type is known.
-            if (networks.contains(network) && handleNetworkChange()) {
-                invokeDart("networkChanged")
+            if (networks.contains(network)) {
+                if (handleNetworkChange()) {
+                    invokeDart("networkChanged")
+                } else {
+                    // SSID/capabilities can change with the same handle and IP, including
+                    // while smart-paused. Recheck rules without rekeying healthy tunnels.
+                    ServicePlugin.notifySmartNetworkChanged()
+                    requestSmartAutoStopCheck()
+                }
             }
         }
     }
@@ -627,6 +658,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (!networkCallbackRegistered.compareAndSet(false, true)) return
         runCatching {
             networks.clear()
+            SmartNetworkInfo.clear()
             synchronized(networkChangeLock) {
                 networkPathFingerprints.clear()
                 underlyingNetworkPathPolicy.reset()
@@ -646,6 +678,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             android.util.Log.e("VpnPlugin", "Failed to unregister network callback: ${it.message}")
         }.also {
             networks.clear()
+            SmartNetworkInfo.clear()
             networkDnsMap.clear()
             synchronized(networkChangeLock) {
                 networkPathFingerprints.clear()

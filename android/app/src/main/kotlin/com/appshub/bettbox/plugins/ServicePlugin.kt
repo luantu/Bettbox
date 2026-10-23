@@ -23,16 +23,17 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private val gson = Gson()
         private const val TAG = "ServicePlugin"
 
-        private fun notify(method: String) {
+        private fun notify(method: String, arguments: Any? = null) {
             mainHandler.post {
                 activeChannels.forEach { ch ->
-                    runCatching { ch.invokeMethod(method, null) }
+                    runCatching { ch.invokeMethod(method, arguments) }
                         .onFailure { Log.e(TAG, "$method notify error: ${it.message}") }
                 }
             }
         }
 
         fun notifyNetworkChanged() = notify("networkChanged")
+        fun notifySmartNetworkChanged() = notify("networkChanged", mapOf("smartNetworkOnly" to true))
         fun notifyQuickResponse() = notify("quickResponse")
         fun notifyVpnStartFailed() = notify("vpnStartFailed")
         fun notifyRunStateChanged(state: RunState) {
@@ -85,6 +86,11 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "getLocalIpAddresses" -> result.success(VpnPlugin.getLocalIpAddresses())
             "getLocalGateways" -> result.success(VpnPlugin.getLocalGateways())
             "getNetworkInfo" -> result.success(VpnPlugin.getNetworkInfo())
+            "getSmartNetworkSnapshot" -> result.success(VpnPlugin.getSmartNetworkSnapshot())
+            "checkSmartAutoStop" -> {
+                VpnPlugin.requestSmartAutoStopCheck()
+                result.success(true)
+            }
             "getCurrentDns" -> result.success(VpnPlugin.getCurrentDns())
             "setQuickResponse" -> {
                 VpnPlugin.setQuickResponse(call.argument<Boolean>("enabled") ?: false)

@@ -12,6 +12,8 @@ abstract mixin class VpnListener {
   void onScreenStateChanged(bool isOn) {}
 
   void onNetworkChanged() {}
+
+  void onSmartAutoStopCheck() {}
 }
 
 class Vpn {
@@ -46,6 +48,11 @@ class Vpn {
             listener.onNetworkChanged();
           }
           break;
+        case 'checkSmartAutoStop':
+          for (final listener in _listeners) {
+            listener.onSmartAutoStopCheck();
+          }
+          break;
         default:
       }
     });
@@ -69,6 +76,9 @@ class Vpn {
         ) ??
         const [];
   }
+
+  Future<Map<String, dynamic>> getSmartNetworkSnapshot() async =>
+      await methodChannel.invokeMapMethod<String, dynamic>('getSmartNetworkSnapshot') ?? const {};
 
   Future<List<String>> resolveUnderlyingHost(String host) async {
     return await methodChannel.invokeListMethod<String>(
