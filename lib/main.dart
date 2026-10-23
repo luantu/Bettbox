@@ -277,7 +277,12 @@ Future<void> _service(List<String> flags) async {
 
     vpn?.addListener(
       _VpnListenerWithService(
-        onSmartAutoStopCheck: scheduleSmartAutoStopCheck,
+        onSmartAutoStopCheck: () {
+          scheduleSmartAutoStopCheck();
+          // Native startup also emits this event after installing protection.
+          // Start selected SG nodes now, not at the next periodic health tick.
+          unawaited(maintainSgNodes());
+        },
         onDnsChanged: (String dns) {
           clashLibHandler.updateDns(dns);
         },
