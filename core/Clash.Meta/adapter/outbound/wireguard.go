@@ -99,6 +99,7 @@ type WireGuard struct {
 	busyFailResetAt      atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
 	requiresRebuild      atomic.Bool  // /vpn/conn needs a fresh IP stack, not an in-place peer update
 	closed               atomic.Bool
+	nativeSuspended      bool        // lifecycleMu: explicit stop, not smart capture pause
 	dohTunnelSeen        atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
 	privateDNSTunnelSeen atomic.Bool // 一次性内网 DNS 隧道路径标记，不记录域名或地址
 }
@@ -958,6 +959,9 @@ func (w *WireGuard) init(ctx context.Context) error {
 }
 
 func (w *WireGuard) init0(ctx context.Context) (err error) {
+	if w.IsCorplink() && CorplinkTCPTransportReady != nil && !CorplinkTCPTransportReady() {
+		return ErrCorplinkNativeNotReady
+	}
 	if w.initOk.Load() {
 		return nil
 	}
@@ -1058,7 +1062,13 @@ func (w *WireGuard) init0(ctx context.Context) (err error) {
 	}
 	w.serverAddrTime.Store(time.Now())
 
-	err = tunDevice.Start()
+	if w.IsCorplink() {
+		// Managed device ownership is synchronous. A buffered EventUp could
+		// otherwise run after explicit Down and resurrect its peer timers.
+		err = wgDevice.(interface{ Up() error }).Up()
+	} else {
+		err = tunDevice.Start()
+	}
 	if err != nil {
 		log.Warnln("[WG](%s) tunDevice.Start error: %v", w.option.Name, err)
 		w.initErr = err
@@ -1071,6 +1081,9 @@ func (w *WireGuard) init0(ctx context.Context) (err error) {
 	err = w.runCtx.Err()
 	if err != nil {
 		return err
+	}
+	if w.IsCorplink() && CorplinkTCPTransportReady != nil && !CorplinkTCPTransportReady() {
+		return ErrCorplinkNativeNotReady
 	}
 	w.device, w.tunDevice = wgDevice, tunDevice
 	w.initOk.Store(true)
@@ -1348,6 +1361,40 @@ func (w *WireGuard) Close() error {
 	return nil
 }
 
+// SetCorplinkNativeActive stops peer timers only for an explicit Android stop.
+// Smart pause never calls this: its protected transport must remain alive.
+// Down/Up retain the device, keys and IP stack; Close would make it unusable.
+func (w *WireGuard) SetCorplinkNativeActive(active bool) error {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	if !w.IsCorplink() || w.closed.Load() || w.device == nil {
+		return nil
+	}
+	if active && CorplinkTCPTransportReady != nil && !CorplinkTCPTransportReady() {
+		return ErrCorplinkNativeNotReady
+	}
+	if w.nativeSuspended == !active {
+		return nil
+	}
+	dev, ok := w.device.(interface {
+		Up() error
+		Down() error
+	})
+	if !ok {
+		return E.New("corplink device does not support native lifecycle")
+	}
+	var err error
+	if active {
+		err = dev.Up()
+	} else {
+		err = dev.Down()
+	}
+	if err == nil {
+		w.nativeSuspended = !active
+	}
+	return err
+}
+
 // RebuildCorplink obtains fresh /vpn/conn parameters and replaces only this
 // outbound's WireGuard device/IP stack. The old device remains usable until
 // the replacement has been fully constructed; another outbound is untouched.
@@ -1423,11 +1470,19 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 		nextResolver = dns.NewResolver(corplinkResolverConfig(replacement.option, w, nameservers, hasIPv6))
 	}
 
+	return w.commitCorplinkReplacement(replacement, nextResolver)
+}
+
+func (w *WireGuard) commitCorplinkReplacement(replacement *WireGuard, nextResolver resolver.Resolver) error {
 	w.lifecycleMu.Lock()
 	defer w.lifecycleMu.Unlock()
 	if w.closed.Load() {
 		_ = replacement.Close()
 		return E.New("corplink outbound closed during rebuild")
+	}
+	if w.nativeSuspended || (CorplinkTCPTransportReady != nil && !CorplinkTCPTransportReady()) {
+		_ = replacement.Close()
+		return ErrCorplinkNativeNotReady
 	}
 	oldDevice := w.device
 	oldBind := w.bind
@@ -1505,7 +1560,7 @@ func (w *WireGuard) CorplinkStatus() CorplinkStatus {
 		status.RouteFull = nil
 		status.RouteInvalid = 0
 	}
-	if status.Initialized && !status.RebuildRequired && !status.Closed {
+	if status.Initialized && !status.RebuildRequired && !status.Closed && !w.nativeSuspended {
 		if bind, ok := w.bind.(interface{ HasReadyConn() bool }); ok {
 			status.Ready = bind.HasReadyConn()
 		} else if bind, ok := w.bind.(interface{ IsConnReady(string) bool }); ok {
@@ -1564,7 +1619,7 @@ func (w *WireGuard) EnsureCorplinkReady(ctx context.Context) bool {
 func (w *WireGuard) Reconnect() {
 	w.lifecycleMu.RLock()
 	defer w.lifecycleMu.RUnlock()
-	if !w.option.TCP {
+	if !w.option.TCP || w.nativeSuspended {
 		return
 	}
 	if tcpBind, ok := w.bind.(interface{ ReconnectTransport() }); ok {

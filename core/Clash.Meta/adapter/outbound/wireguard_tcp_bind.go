@@ -167,13 +167,13 @@ func (t *tcpWireGuardBind) Open(port uint16) ([]wgconn.ReceiveFunc, uint16, erro
 		return nil, 0, err
 	}
 	t.listener = ln
-	go t.accept()
+	go t.accept(ln, t.closeChan)
 	return []wgconn.ReceiveFunc{t.receive}, uint16(ln.Addr().(*net.TCPAddr).Port), nil
 }
 
-func (t *tcpWireGuardBind) accept() {
+func (t *tcpWireGuardBind) accept(listener net.Listener, closeChan <-chan struct{}) {
 	for {
-		conn, err := t.listener.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
@@ -187,7 +187,7 @@ func (t *tcpWireGuardBind) accept() {
 		endpoint := &wgconn.StdNetEndpoint{AddrPort: addrPort}
 		state := newTCPConnState(tcpConn, t.connSeq.Add(1))
 		t.tcpConnMap.Store(endpoint.DstToString(), state)
-		t.handleConn(state, endpoint, t.closeChan)
+		t.handleConn(state, endpoint, closeChan)
 	}
 }
 

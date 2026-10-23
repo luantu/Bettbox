@@ -363,8 +363,18 @@ func quickStart(initParamsChar *C.char, paramsChar *C.char, stateParamsChar *C.c
 
 //export startTUN
 func startTUN(fd C.int, callback unsafe.Pointer) bool {
-	return handleStartTun(int(fd), callback)
+	nativeTunLifecycle.Lock()
+	defer nativeTunLifecycle.Unlock()
+	ready := handleStartTun(int(fd), callback)
+	if ready {
+		setCorplinkNativeActive(true)
+	}
+	return ready
 }
+
+// Serializes explicit stop peer teardown with a subsequent native start.
+// Never hold tunLock while Down/Up waits on a WireGuard socket worker.
+var nativeTunLifecycle sync.Mutex
 
 //export getRunTime
 func getRunTime() *C.char {
@@ -373,11 +383,18 @@ func getRunTime() *C.char {
 
 //export stopTun
 func stopTun() {
+	nativeTunLifecycle.Lock()
+	defer nativeTunLifecycle.Unlock()
 	handleStopTun()
+	setCorplinkNativeActive(false)
 }
 
 //export pauseTun
-func pauseTun() bool { return handlePauseTun() }
+func pauseTun() bool {
+	nativeTunLifecycle.Lock()
+	defer nativeTunLifecycle.Unlock()
+	return handlePauseTun()
+}
 
 //export androidTransportReady
 func androidTransportReady() bool { return nativeVpnAllowsTransport(vpnAdmission.flags.Load()) }
