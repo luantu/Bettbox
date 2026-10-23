@@ -103,6 +103,12 @@ class _SmartNetworkSettingsState extends State<SmartNetworkSettings>
     var invalid = false;
     try { rules = SmartNetworkRule.decode(widget.rulesJson); } catch (_) { invalid = true; }
     final wifi = _networks.where((network) => network.selected && network.transport == 'wifi').firstOrNull;
+    final hasSelected = _networks.any((network) => network.selected);
+    final ssidStatusText = switch (wifi?.ssidStatus) {
+      'permissionRequired' => '需要位置权限',
+      'locationDisabled' => '系统定位未开启',
+      _ => '暂未取得 Wi-Fi 名称',
+    };
     final decision = SmartNetworkPolicy.evaluate(networks: _networks,
       rulesJson: widget.rulesJson, legacyNetworks: widget.legacyNetworks);
     final scheme = Theme.of(context).colorScheme;
@@ -114,8 +120,8 @@ class _SmartNetworkSettingsState extends State<SmartNetworkSettings>
             IconButton(onPressed: _loading ? null : () async {
               await service?.checkSmartAutoStop(); await _refresh();
             }, tooltip: '刷新网络状态', icon: const Icon(Icons.refresh))]),
-          Text(wifi == null ? '当前未使用 Wi-Fi' : wifi.ssidAvailable
-            ? 'Wi-Fi：${wifi.ssid}' : 'Wi-Fi：SSID 暂不可读（${wifi.ssidStatus}）'),
+          Text(!hasSelected ? '当前底层出口尚未确定，暂不自动切换' : wifi == null ? '当前使用蜂窝／有线网络' : wifi.ssidAvailable
+            ? 'Wi-Fi：${wifi.ssid}' : 'Wi-Fi：SSID 暂不可读（$ssidStatusText）'),
           if (wifi != null && wifi.ips.isNotEmpty) Text('本机 IP：${wifi.ips.join('，')}'),
           const SizedBox(height: 8),
           Text(_smartStopped ? '已智能暂停 VPN' : _running ? 'VPN 正在运行' : 'VPN 已停止'),

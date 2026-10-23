@@ -37,7 +37,8 @@ void main() {
     expect(await preferences.saveConfig(empty), isTrue);
     final prefs = await preferences.sharedPreferencesCompleter.future;
     await prefs!.setString(configKey, jsonEncode(empty.copyWith(
-      profiles: [const Profile(id: 'old')], vpnProps: const VpnProps(smartAutoStop: true))));
+      profiles: [const Profile(id: 'old', autoUpdateDuration: Duration(hours: 1))],
+      vpnProps: const VpnProps(smartAutoStop: true))));
     final before = await File(await appPath.appConfigPath).readAsString();
     expect((await preferences.getSavedVpnProps())?.smartAutoStop, isFalse);
     expect(await File(await appPath.appConfigPath).readAsString(), before);
