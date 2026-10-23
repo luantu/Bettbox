@@ -71,6 +71,16 @@ class CorplinkNodeProbeObservation {
 final _corplinkVpnStartGate = CorplinkVpnStartGate();
 
 Future<void> ensureCorplinkVpnReady() async {
+  if (system.isAndroid && await Vpn().isSmartStopped()) {
+    // A diagnostic refresh must not turn system capture back on. The retained
+    // protection callback is sufficient for WG while capture is smart-paused.
+    if (await Vpn().isCompatibilityPaused() ||
+        await globalState.getVpnRunIntent(reload: true) == false ||
+        !await Vpn().isSgTransportReady()) {
+      throw StateError('SG_MAINTENANCE_NOT_READY');
+    }
+    return;
+  }
   final needsNativeTun = system.isAndroid && globalState.config.vpnProps.enable;
   final ready = await _corplinkVpnStartGate.ensureReady(
     waitForNative: needsNativeTun,
@@ -127,19 +137,23 @@ Future<Set<String>> restoreCorplinkNodesAfterNetworkChange(
   required Future<SgCoreStatus> Function(String) readStatus,
   required Future<bool> Function(String) reconnect,
   required Future<bool> Function(String) rebuild,
+  Future<bool> Function()? canContinue,
 }) async {
   final unready = <String>{};
   await Future.wait([
     for (final name in serverNames.toSet())
       () async {
         try {
+          if (canContinue != null && !await canContinue()) return;
           await ensureHandshake(name);
+          if (canContinue != null && !await canContinue()) return;
           var status = await readStatus(name);
           if (status.phase != SgConnectionPhase.ready) {
+            if (canContinue != null && !await canContinue()) return;
             final accepted = status.rebuildRequired
                 ? await rebuild(name)
                 : await reconnect(name);
-            if (accepted) await ensureHandshake(name);
+            if (accepted && (canContinue == null || await canContinue())) await ensureHandshake(name);
             status = await readStatus(name);
           }
           if (status.phase != SgConnectionPhase.ready) unready.add(name);
@@ -150,6 +164,16 @@ Future<Set<String>> restoreCorplinkNodesAfterNetworkChange(
   ]);
   return unready;
 }
+
+/// Native capture and protected node maintenance deliberately have different
+/// lifetimes. This read cannot start TUN or change the user's run intent.
+Future<bool> canMaintainCorplinkNodes() async => allowsCorplinkMaintenance(
+  userWanted: await globalState.getVpnRunIntent(reload: true) != false,
+  running: await Vpn().getStatus() == true,
+  smartPaused: await Vpn().isSmartStopped(),
+  compatibilityPaused: await Vpn().isCompatibilityPaused(),
+  transportReady: await Vpn().isSgTransportReady(),
+);
 
 Future<List<String>> discoverCorplinkVpnNodeNames(CorplinkSgSettings settings) async {
   if (!await hasUsableCorplinkSession(settings) ||

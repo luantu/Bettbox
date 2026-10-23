@@ -107,6 +107,9 @@ class Vpn {
     return await methodChannel.invokeMethod<bool>('isSmartStopped') ?? false;
   }
 
+  Future<bool> isSgTransportReady() async =>
+      await methodChannel.invokeMethod<bool>('isSgTransportReady') ?? false;
+
   Future<bool> isCompatibilityPaused() async =>
       await methodChannel.invokeMethod<bool>('isCompatibilityPaused') ?? false;
 

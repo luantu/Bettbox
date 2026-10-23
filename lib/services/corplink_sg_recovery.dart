@@ -2,6 +2,14 @@ import 'dart:async';
 
 enum SgRecoveryAction { none, reconnect, rebuild }
 
+bool allowsCorplinkMaintenance({
+  required bool userWanted,
+  required bool running,
+  required bool smartPaused,
+  required bool compatibilityPaused,
+  required bool transportReady,
+}) => userWanted && !compatibilityPaused && transportReady && (running || smartPaused);
+
 /// Android accepts a VPN start before its TUN/protect callback is installed.
 /// All named nodes share this barrier; no handshake may race that transition.
 class CorplinkVpnStartGate {

@@ -5,7 +5,11 @@ public final class CompatibilityAppPolicy {
     private CompatibilityAppPolicy() {}
 
     public static boolean shouldPause(boolean vpnRunning, boolean userWantsVpn) {
-        return vpnRunning && userWantsVpn;
+        return shouldPause(vpnRunning, userWantsVpn, false);
+    }
+
+    public static boolean shouldPause(boolean vpnRunning, boolean userWantsVpn, boolean smartPaused) {
+        return (vpnRunning || smartPaused) && userWantsVpn;
     }
 
     public static boolean shouldResume(

@@ -7,6 +7,7 @@ const (
 	nativeTunRequired
 	nativeTunReady
 	nativeTransportDenied
+	nativeMaintenanceReady
 )
 
 // A single atomic snapshot is read by the CorpLink dial guard. It must never
@@ -20,7 +21,7 @@ var nativeVpnStateChanged func(string)
 func (a *nativeVpnAdmission) SetMode(required bool) {
 	for {
 		old := a.flags.Load()
-		next := old&(nativeTunReady|nativeTransportDenied) | nativeModeKnown
+		next := old&(nativeTunReady|nativeTransportDenied|nativeMaintenanceReady) | nativeModeKnown
 		if required {
 			next |= nativeTunRequired
 		}
@@ -33,13 +34,28 @@ func (a *nativeVpnAdmission) SetMode(required bool) {
 func (a *nativeVpnAdmission) SetReady(ready bool) {
 	for {
 		old := a.flags.Load()
-		next := old &^ nativeTunReady
+		next := old &^ (nativeTunReady | nativeMaintenanceReady)
 		if ready {
 			next &^= nativeTransportDenied
 			next |= nativeTunReady
 		}
 		if a.flags.CompareAndSwap(old, next) {
 			return
+		}
+	}
+}
+
+// Soft pause stops system capture, not protected node maintenance. The caller
+// must retain a live protection callback; never infer it from a saved setting.
+func (a *nativeVpnAdmission) SetPaused(protection bool) bool {
+	for {
+		old := a.flags.Load()
+		next := old &^ (nativeTunReady | nativeMaintenanceReady)
+		if protection {
+			next = (next | nativeModeKnown | nativeMaintenanceReady) &^ nativeTransportDenied
+		}
+		if a.flags.CompareAndSwap(old, next) {
+			return protection
 		}
 	}
 }
@@ -87,7 +103,7 @@ func (a *nativeVpnAdmission) RepairRequired() bool {
 
 func nativeVpnAllowsTransport(flags uint32) bool {
 	return flags&nativeModeKnown != 0 &&
-		(flags&nativeTunRequired == 0 || flags&nativeTunReady != 0)
+		(flags&nativeTunRequired == 0 || flags&(nativeTunReady|nativeMaintenanceReady) != 0)
 }
 
 // A running timestamp alone can survive a failed TUN constructor. Publishing

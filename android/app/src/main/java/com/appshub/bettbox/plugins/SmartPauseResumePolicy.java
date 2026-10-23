@@ -57,6 +57,10 @@ public final class SmartPauseResumePolicy {
         return expectedGeneration == generation && owner == Owner.NONE;
     }
 
+    public synchronized boolean keepResourcesAfterCancelledStart(long expectedGeneration) {
+        return expectedGeneration != generation && (owner == Owner.SMART || owner == Owner.NONE);
+    }
+
     private void changeOwner(Owner next) {
         owner = next;
         generation++;

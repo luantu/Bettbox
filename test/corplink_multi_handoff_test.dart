@@ -3,6 +3,19 @@ import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('maintenance canceled during a handshake cannot reconnect or rebuild', () async {
+    var wanted = true;
+    var retries = 0;
+    final result = await restoreCorplinkNodesAfterNetworkChange(['Office'],
+      canContinue: () async => wanted,
+      ensureHandshake: (_) async { wanted = false; return false; },
+      readStatus: (_) async => throw StateError('canceled work read status'),
+      reconnect: (_) async { retries++; return true; },
+      rebuild: (_) async { retries++; return true; },
+    );
+    expect(result, isEmpty);
+    expect(retries, 0);
+  });
   test('named probe reports HTTPS failure without triggering a reconnect', () async {
     bool? observed;
     final success = await observeCorplinkNodeProbe(

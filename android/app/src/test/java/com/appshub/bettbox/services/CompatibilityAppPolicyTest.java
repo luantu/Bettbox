@@ -8,6 +8,10 @@ public final class CompatibilityAppPolicyTest {
 
     public static void main(String[] args) {
         String target = "com.yadea.smartmoto";
+        check(CompatibilityAppPolicy.shouldPause(false, true, true),
+                "compatibility must take ownership of smart-paused capture");
+        check(!CompatibilityAppPolicy.shouldPause(false, false, true),
+                "smart pause cannot override explicit user stop");
 
         check(!CompatibilityAppPolicy.shouldPause(false, true),
                 "a stopped VPN must not create an auto-resume obligation");

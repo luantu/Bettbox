@@ -9,11 +9,37 @@ import (
 	"net/netip"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	C "github.com/metacubex/mihomo/constant"
 )
+
+func TestCorplinkNativeSocketControlRechecksProtectionBeforeConnect(t *testing.T) {
+	installNativeGuardTestHook(t, func() bool { return true })
+	previous := CorplinkTCPSocketControl
+	t.Cleanup(func() { CorplinkTCPSocketControl = previous })
+	var calls atomic.Int32
+	CorplinkTCPSocketControl = func(string, string, syscall.RawConn) error {
+		calls.Add(1)
+		return ErrCorplinkNativeNotReady // hard stop happened after initial admission
+	}
+	w, _, ln, _ := nativeGuardFixture(t, true)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if conn, err := w.dialTCPTransport(ctx); conn != nil || !errors.Is(err, ErrCorplinkNativeNotReady) {
+		t.Fatalf("socket protection refusal did not abort connect: conn=%v err=%v", conn != nil, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("CorpLink socket never reached its atomic protection boundary")
+	}
+	_ = ln.SetDeadline(time.Now().Add(20 * time.Millisecond))
+	if peer, err := ln.AcceptTCP(); err == nil {
+		_ = peer.Close()
+		t.Fatal("unprotected socket reached server")
+	}
+}
 
 func nativeGuardFixture(t *testing.T, corplink bool) (*WireGuard, *tcpWireGuardBind, *net.TCPListener, string) {
 	t.Helper()

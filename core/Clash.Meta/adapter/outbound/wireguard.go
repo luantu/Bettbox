@@ -49,6 +49,11 @@ type wireguardGoDevice interface {
 // nil preserves other platforms. It applies only to CorpLink TCP transports.
 var CorplinkTCPTransportReady func() bool
 
+// Android installs an atomic admission + socket protection boundary. Keeping
+// it separate from the generic hook preserves legitimate proxy-only/bootstrap
+// sockets while rejecting a CorpLink dial racing a hard stop or TUN handoff.
+var CorplinkTCPSocketControl func(string, string, syscall.RawConn) error
+
 // ErrCorplinkNativeNotReady is a retryable native startup condition, not an
 // endpoint/handshake failure. Callers can recognize wrapped errors with Is.
 var ErrCorplinkNativeNotReady = errors.New("CorpLink native transport not ready")
@@ -669,7 +674,11 @@ func (w *WireGuard) dialTCPTransport(ctx context.Context) (net.Conn, error) {
 	}
 	d := net.Dialer{}
 	// Protect the transport socket on Android before connecting the VPN peer.
-	if hook := dialer.DefaultSocketHook; hook != nil {
+	hook := dialer.DefaultSocketHook
+	if w.IsCorplink() && CorplinkTCPSocketControl != nil {
+		hook = CorplinkTCPSocketControl
+	}
+	if hook != nil {
 		d.ControlContext = func(ctx context.Context, network, address string, c syscall.RawConn) error {
 			log.Infoln("[WG](%s) protecting TCP transport socket", w.option.Name)
 			return hook(network, address, c)

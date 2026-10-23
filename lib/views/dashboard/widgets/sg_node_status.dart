@@ -6,6 +6,7 @@ import 'package:bett_box/services/corplink_sg_nodes.dart';
 import 'package:bett_box/services/corplink_sg_runtime.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
 import 'package:bett_box/state.dart';
+import 'package:bett_box/plugins/vpn.dart';
 import 'package:bett_box/views/corplink_sg.dart';
 import 'package:bett_box/widgets/widgets.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   bool _reading = false;
   bool _busy = false;
   bool? _lastProbeOk;
+  bool _capturePaused = false;
   SgCoreStatus? _status;
   SgNodeAggregate? _aggregate;
   String? _error;
@@ -47,6 +49,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
     try {
       final settings = await CorplinkSgSettings.load();
       final selections = await loadCorplinkNodeSelections();
+      final capturePaused = system.isAndroid && await Vpn().isSmartStopped();
       final statuses = settings.enabled && selections != null
           ? await readCorplinkNodeStatuses()
           : const <SgCoreStatus>[];
@@ -67,6 +70,7 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
           _lastProbeOk = null;
         }
         _enabled = settings.enabled;
+        _capturePaused = capturePaused;
         _status = status;
         _aggregate = aggregate;
         _error = null;
@@ -141,7 +145,10 @@ class _SgNodeStatusTileState extends State<SgNodeStatusTile> {
   String get _summary {
     if (_error != null) return '状态异常 · 点击刷新';
     if (!_enabled) return '未启用 · 点击配置';
-    if (!globalState.isStart) return 'VPN 未启动 · 点击刷新';
+    if (!globalState.isStart && !_capturePaused) return 'VPN 未启动 · 点击刷新';
+    if (_capturePaused && _aggregate != null) {
+      return '${_aggregate!.ready}/${_aggregate!.total} · 引流已暂停';
+    }
     if (_aggregate != null) return _aggregate!.label;
     final phase = _status?.phase;
     final text = switch (phase) {

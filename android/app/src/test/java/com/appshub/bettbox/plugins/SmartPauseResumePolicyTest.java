@@ -7,6 +7,19 @@ public final class SmartPauseResumePolicyTest {
     }
 
     public static void main(String[] args) {
+        SmartPauseResumePolicy cleanup = new SmartPauseResumePolicy();
+        long starting = cleanup.generation();
+        cleanup.pauseSmart();
+        require(cleanup.keepResourcesAfterCancelledStart(starting),
+                "late startup cleanup must not destroy transferred soft-pause protection");
+        cleanup.pauseCompatibility();
+        require(!cleanup.keepResourcesAfterCancelledStart(starting),
+                "compatibility ownership requires hard cleanup");
+        cleanup.stop();
+        require(!cleanup.keepResourcesAfterCancelledStart(starting), "user stop requires hard cleanup");
+        cleanup.start();
+        require(cleanup.keepResourcesAfterCancelledStart(starting),
+                "obsolete startup cannot tear down a newer user's start");
         SmartPauseResumePolicy policy = new SmartPauseResumePolicy();
         policy.pauseSmart();
         policy.pauseCompatibility();

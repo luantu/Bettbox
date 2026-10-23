@@ -17,13 +17,15 @@ public final class SmartStopSourceRegressionTest {
         String launchActivity = Files.readString(Path.of(
             "android/app/src/main/kotlin/com/appshub/bettbox/CompatibilityLaunchActivity.kt"));
 
-        String smartStop = methodBody(source, "fun handleSmartStop()");
+        String smartStop = methodBody(source, "fun handleSmartStop(");
         String smartResume = methodBody(
             source,
             "fun nativeSmartResume(options: VpnOptions, compatibility: Boolean): Boolean");
 
         require(smartStop.contains("Core.stopTun()"),
-            "smart stop must tear down the Android TUN");
+            "compatibility pause must retain its hard-stop path");
+        require(smartStop.contains("Core.pauseTun()"),
+            "smart capture pause must preserve protected SG maintenance");
         require(smartResume.contains("performStartCore("),
             "smart resume must rebuild the Android TUN");
 

@@ -52,16 +52,26 @@ func (t *TunHandler) close() {
 	t.listener = nil
 }
 
-func (t *TunHandler) handleProtect(fd int) {
+func (t *TunHandler) handleProtect(fd int) bool {
 	_ = t.limit.Acquire(context.Background(), 1)
 	defer t.limit.Release(1)
 
 	cb := t.callback
 	if cb == nil {
-		return
+		return false
 	}
 
-	Protect(cb, fd)
+	return Protect(cb, fd)
+}
+
+func (t *TunHandler) pause() bool {
+	_ = t.limit.Acquire(context.Background(), 4)
+	defer t.limit.Release(4)
+	if t.listener != nil {
+		_ = t.listener.Close()
+		t.listener = nil
+	}
+	return t.callback != nil
 }
 
 func (t *TunHandler) handleResolveProcess(source, target net.Addr) string {
@@ -95,6 +105,28 @@ var (
 
 func init() {
 	outbound.CorplinkTCPTransportReady = vpnAdmission.AllowsTransport
+	outbound.CorplinkTCPSocketControl = func(network, address string, conn syscall.RawConn) error {
+		tunLock.Lock()
+		defer tunLock.Unlock()
+		if !vpnAdmission.AllowsTransport() {
+			return outbound.ErrCorplinkNativeNotReady
+		}
+		handler := tunHandler.Load()
+		if handler == nil {
+			if vpnAdmission.flags.Load()&nativeTunRequired != 0 {
+				return outbound.ErrCorplinkNativeNotReady
+			}
+			return nil // explicitly started proxy-only mode
+		}
+		accepted := false
+		if err := conn.Control(func(fd uintptr) { accepted = handler.handleProtect(int(fd)) }); err != nil {
+			return err
+		}
+		if !accepted {
+			return errors.New("Android SG socket protection unavailable")
+		}
+		return nil
+	}
 	nativeVpnStateChanged = func(params string) {
 		var mode struct {
 			VPN *struct {
@@ -111,9 +143,14 @@ func init() {
 		}
 		handler := tunHandler.Load()
 		if handler != nil {
-			return conn.Control(func(fd uintptr) {
-				handler.handleProtect(int(fd))
-			})
+			accepted := false
+			if err := conn.Control(func(fd uintptr) { accepted = handler.handleProtect(int(fd)) }); err != nil {
+				return err
+			}
+			if !accepted {
+				return errors.New("Android socket protection unavailable")
+			}
+			return nil
 		}
 		return nil
 	}
@@ -128,6 +165,14 @@ func handleStopTun() {
 	if handler != nil {
 		handler.close()
 	}
+}
+
+func handlePauseTun() bool {
+	tunLock.Lock()
+	defer tunLock.Unlock()
+	runTime = nil
+	handler := tunHandler.Load()
+	return vpnAdmission.SetPaused(handler != nil && handler.pause())
 }
 
 func handleStartTun(fd int, callback unsafe.Pointer) bool {
@@ -330,6 +375,12 @@ func getRunTime() *C.char {
 func stopTun() {
 	handleStopTun()
 }
+
+//export pauseTun
+func pauseTun() bool { return handlePauseTun() }
+
+//export androidTransportReady
+func androidTransportReady() bool { return nativeVpnAllowsTransport(vpnAdmission.flags.Load()) }
 
 //export nativeVpnRepairRequired
 func nativeVpnRepairRequired() bool {

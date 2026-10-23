@@ -266,6 +266,7 @@ class AppController {
     }
     await globalState.startUpdateTasks([updateRunTime, updateTraffic]);
     _startSgHealthMonitor();
+    unawaited(_checkSgHealth());
     addCheckIpNumDebounce();
   }
 

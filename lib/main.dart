@@ -118,6 +118,35 @@ Future<void> _service(List<String> flags) async {
     final clashLibHandler = ClashLibHandler();
     final smartAutoStopLock = Lock();
     Timer? smartAutoStopDebounce;
+    var sgMaintenanceInFlight = false;
+
+    Future<void> maintainSgNodes() async {
+      if (sgMaintenanceInFlight) return;
+      sgMaintenanceInFlight = true;
+      try {
+        if (!await canMaintainCorplinkNodes()) return;
+        final snapshot = await vpn?.getSmartNetworkSnapshot();
+        if (SmartNetworkSnapshot.decode(snapshot).isEmpty) return;
+        final settings = await CorplinkSgSettings.load();
+        if (!settings.enabled) return;
+        final selected = await loadCorplinkNodeSelections();
+        if (selected == null) return;
+        await restoreCorplinkNodesAfterNetworkChange(
+          selected.where((node) => node.enabled).map((node) => node.serverName),
+          ensureHandshake: clashCore.ensureCorplinkNode,
+          readStatus: readCorplinkNodeStatus,
+          reconnect: clashCore.reconnectCorplinkNode,
+          rebuild: clashCore.rebuildCorplinkNode,
+          canContinue: canMaintainCorplinkNodes,
+        );
+      } catch (error) {
+        commonPrint.log('[SG maintenance] ${error.runtimeType}');
+      } finally {
+        sgMaintenanceInFlight = false;
+      }
+    }
+
+    Timer.periodic(const Duration(seconds: 45), (_) => unawaited(maintainSgNodes()));
 
     // Android reports Wi-Fi availability before protected sockets necessarily
     // route over it. The phone reproduced a reconnect that stayed on cellular
@@ -125,8 +154,7 @@ Future<void> _service(List<String> flags) async {
     final networkHandoffRecovery = SgNetworkHandoffRecovery(
       reconnect: () async {
         try {
-          final isRunning = await vpn?.getStatus();
-          if (isRunning != true) return;
+          if (!await canMaintainCorplinkNodes()) return;
           commonPrint.log('[reconnectTunnels] physical network settled, reconnecting');
           final accepted = await clashLibHandler.reconnectTunnels();
           if (!accepted) {
@@ -136,6 +164,7 @@ Future<void> _service(List<String> flags) async {
           // TCP reset is not a completed WireGuard handshake. Check after
           // the initial handshake window, then retry once if still unready.
           await Future.delayed(const Duration(seconds: 8));
+          if (!await canMaintainCorplinkNodes()) return;
           final selectedNodes = await loadCorplinkNodeSelections();
           if (selectedNodes != null) {
             final remaining = await restoreCorplinkNodesAfterNetworkChange(
@@ -145,6 +174,7 @@ Future<void> _service(List<String> flags) async {
               readStatus: readCorplinkNodeStatus,
               reconnect: clashCore.reconnectCorplinkNode,
               rebuild: clashCore.rebuildCorplinkNode,
+              canContinue: canMaintainCorplinkNodes,
             );
             commonPrint.log('[reconnectTunnels] independent SG nodes '
                 'still unready=${remaining.length}');
@@ -254,6 +284,7 @@ Future<void> _service(List<String> flags) async {
         onNetworkChanged: () {
           scheduleSmartAutoStopCheck();
           networkHandoffRecovery.networkChanged();
+          unawaited(maintainSgNodes());
         },
       ),
     );

@@ -11,6 +11,8 @@ object Core {
     private external fun startTun(fd: Int, cb: TunInterface): Boolean
     private external fun suspend(suspended: Int)
     external fun stopTun()
+    external fun pauseTun(): Boolean
+    external fun androidTransportReady(): Boolean
     external fun androidTunReady(): Boolean
     external fun nativeVpnRepairRequired(): Boolean
     external fun restoreNativeVpnAdmission(): Boolean
@@ -37,7 +39,7 @@ object Core {
         resolverProcess: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress, uid: Int) -> String
     ): Boolean {
         return startTun(fd, object : TunInterface {
-            override fun protect(fd: Int) {
+            override fun protect(fd: Int): Boolean =
                 runCatching {
                     val accepted = protect(fd)
                     if (protectLogCount.getAndIncrement() < 50) {
@@ -46,9 +48,10 @@ object Core {
                     if (!accepted) {
                         Log.w("Core", "VpnService.protect rejected outbound socket")
                     }
+                    accepted
                 }
                     .onFailure { Log.e("Core", "protect JNI callback error: ${it.message}") }
-            }
+                    .getOrDefault(false)
 
             override fun resolverProcess(
                 protocol: Int,

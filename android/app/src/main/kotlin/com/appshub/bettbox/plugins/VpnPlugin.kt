@@ -276,6 +276,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(GlobalState.isSmartStopped)
             }
 
+            "isSgTransportReady" -> {
+                result.success(Core.androidTransportReady())
+            }
+
             "isCompatibilityPaused" -> {
                 result.success(CompatibilityAppManager.isPaused())
             }
@@ -716,7 +720,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             underlyingNetworkPathPolicy.update(
                 current?.networkHandle ?: 0L,
                 fingerprint,
-                GlobalState.currentRunState == RunState.START,
+                GlobalState.currentRunState == RunState.START ||
+                    (GlobalState.isSmartStopped && Core.androidTransportReady()),
             )
         }
         if (!changedWhileRunning) return false
@@ -1003,6 +1008,13 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 (recoveryToken == null || nativeRecoveryPolicy.isCurrent(recoveryToken))))
         if (!currentRequest()) return
         val serviceRef = bettBoxService
+        fun cleanupCancelledStart() {
+            GlobalState.runLock.withLock {
+                if (smartPauseResumePolicy.keepResourcesAfterCancelledStart(pauseGeneration)) return
+                Core.stopTun()
+                serviceRef?.stop()
+            }
+        }
         var fd: Int? = 0
         var nativeOwnsFd = false
         try {
@@ -1026,7 +1038,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         if (!currentRequest()) {
-            serviceRef?.stop()
+            cleanupCancelledStart()
             return
         }
         if (fd == null || (currentOptions.enable && fd <= 0)) {
@@ -1041,7 +1053,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // Serialize the final admission and actual JNI entry with pause/stop.
         val coreStarted = GlobalState.runLock.withLock {
             if (GlobalState.currentRunState != RunState.START || !currentRequest()) {
-                serviceRef?.stop()
+                cleanupCancelledStart()
                 return
             }
             nativeOwnsFd = true
@@ -1053,8 +1065,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         if (!currentRequest()) {
-            Core.stopTun()
-            serviceRef?.stop()
+            cleanupCancelledStart()
             return
         }
 
@@ -1067,8 +1078,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         val started = GlobalState.runLock.withLock {
             if (GlobalState.currentRunState != RunState.START || !currentRequest()) {
-                Core.stopTun()
-                serviceRef?.stop()
+                cleanupCancelledStart()
                 false
             } else {
                 scope.launch {
@@ -1088,6 +1098,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         if (!started) return
         onUpdateNetwork()
+        requestSmartAutoStopCheck()
         } finally {
             // establish().detachFd() transfers ownership to this coroutine.
             // Go owns it only after JNI entry; stopSelf() does not close it.
@@ -1177,21 +1188,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         )
         var serviceRef: BaseServiceInterface? = null
         var shouldForceStop = false
-        var alreadyStopped = false
         GlobalState.runLock.withLock {
-            alreadyStopped = !force && GlobalState.currentRunState == RunState.STOP
-            if (!alreadyStopped) {
-                GlobalState.updateIsStopping(true)
-                GlobalState.updateRunState(RunState.STOP)
-                ServicePlugin.notifyRunStateChanged(RunState.STOP)
-                serviceRef = bettBoxService
-                shouldForceStop = force || bettBoxService == null
-            }
-        }
-
-        if (alreadyStopped) {
-            bettBoxService = null
-            return
+            // STOP describes capture, not native resource lifetime: a soft
+            // pause can still own a protection callback and live SG sockets.
+            GlobalState.updateIsStopping(true)
+            GlobalState.updateRunState(RunState.STOP)
+            ServicePlugin.notifyRunStateChanged(RunState.STOP)
+            serviceRef = bettBoxService
+            shouldForceStop = force || bettBoxService == null
         }
 
         suspendModule?.uninstall()
@@ -1297,15 +1301,23 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return true
     }
 
-    fun handleSmartStop() {
+    fun handleSmartStop(keepTunnels: Boolean = true) {
         GlobalState.runLock.withLock {
+            // Do not transfer a startup that has not installed its protection
+            // callback yet. Successful JNI startup schedules another check.
+            if (keepTunnels && options?.enable == true && !GlobalState.isSmartStopped &&
+                !Core.androidTunReady()) return
             smartPauseResumePolicy.pauseSmart()
             GlobalState.isSmartStopped = true
-            if (GlobalState.currentRunState == RunState.STOP) return
+            if (GlobalState.currentRunState == RunState.STOP && keepTunnels) return
             GlobalState.updateRunState(RunState.STOP)
             suspendModule?.uninstall()
             suspendModule = null
-            Core.stopTun()
+            if (!keepTunnels) {
+                Core.stopTun()
+            } else if (!Core.pauseTun()) {
+                android.util.Log.w("VpnPlugin", "Smart pause retained no SG protection callback")
+            }
         }
         (bettBoxService as? BettboxService)?.resetNotificationBuilder()
         (bettBoxService as? BettboxVpnService)?.resetNotificationBuilder()
@@ -1379,12 +1391,13 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val userWantsVpn = VpnRunIntentStore.read(context) != false
         val canResume = options?.enable == true
         GlobalState.runLock.withLock {
-            if (!canResume || !CompatibilityAppPolicy.shouldPause(getStatus(), userWantsVpn)) {
+            if (!canResume || !CompatibilityAppPolicy.shouldPause(getStatus(), userWantsVpn,
+                    GlobalState.isSmartStopped)) {
                 return false
             }
             smartPauseResumePolicy.pauseCompatibility()
             // Ownership and runtime STOP must be visible as one operation.
-            handleSmartStop()
+            handleSmartStop(keepTunnels = false)
         }
         return true
     }
