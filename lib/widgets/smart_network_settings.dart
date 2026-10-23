@@ -51,7 +51,7 @@ class _SmartNetworkSettingsState extends State<SmartNetworkSettings>
   }
 
   Future<void> _refresh() async {
-    if (_loading) return;
+    if (!mounted || _loading) return;
     setState(() => _loading = true);
     try {
       final result = await service?.getSmartNetworkSnapshot();

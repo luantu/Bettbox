@@ -36,7 +36,7 @@ class Service {
     } else if (call.method == 'vpnStartFailed') {
       await globalState.setVpnRuntimeState(false);
     }
-    for (final callback in _nativeEventCallbacks) {
+    for (final callback in List<NativeEventCallback>.of(_nativeEventCallbacks)) {
       await callback(call.method, call.arguments);
     }
   }

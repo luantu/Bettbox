@@ -22,6 +22,12 @@ public final class NativeRecoveryPolicyTest {
         check(NativeRecoveryPolicy.mergeBind(newStart,
                 new NativeRecoveryPolicy.BindRequest(3, true)) == newStart,
                 "automatic rebind must not downgrade an explicit start in the same epoch");
+        NativeRecoveryPolicy.BindRequest oldResume = new NativeRecoveryPolicy.BindRequest(3, false, 10);
+        NativeRecoveryPolicy.BindRequest ownerResume = new NativeRecoveryPolicy.BindRequest(3, false, 11);
+        check(NativeRecoveryPolicy.mergeBind(oldResume, ownerResume) == ownerResume,
+                "same-intent bind must carry the newer pause owner's generation");
+        check(NativeRecoveryPolicy.mergeBind(ownerResume, oldResume) == ownerResume,
+                "a delayed older resume must not replace current binding admission");
         check(NativeRecoveryPolicy.shouldStartCore(true, false),
                 "running flag alone must not skip repair of an unavailable native channel");
         check(!NativeRecoveryPolicy.shouldStartCore(true, true),

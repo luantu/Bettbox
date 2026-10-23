@@ -217,6 +217,17 @@ jobs:
           java -cp build/smart-network-tests com.appshub.bettbox.plugins.SmartNetworkPolicyTest
           java -cp build/smart-network-tests com.appshub.bettbox.plugins.SmartWifiPermissionRequestTest
 
+      - name: Run smart pause ownership and selected exit tests
+        run: |
+          mkdir -p build/smart-review-tests
+          javac -d build/smart-review-tests \
+            android/app/src/main/java/com/appshub/bettbox/plugins/SmartPauseResumePolicy.java \
+            android/app/src/main/java/com/appshub/bettbox/plugins/SmartSelectedNetworkPolicy.java \
+            android/app/src/test/java/com/appshub/bettbox/plugins/SmartPauseResumePolicyTest.java \
+            android/app/src/test/java/com/appshub/bettbox/plugins/SmartSelectedNetworkPolicyTest.java
+          java -cp build/smart-review-tests com.appshub.bettbox.plugins.SmartPauseResumePolicyTest
+          java -cp build/smart-review-tests com.appshub.bettbox.plugins.SmartSelectedNetworkPolicyTest
+
       - name: Run app-clone access policy tests
         run: |
           mkdir -p build/clone-access-tests

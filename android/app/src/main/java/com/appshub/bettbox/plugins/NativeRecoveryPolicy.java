@@ -6,9 +6,14 @@ public final class NativeRecoveryPolicy {
     public static final class BindRequest {
         public final long intentEpoch;
         public final boolean automatic;
+        public final long pauseGeneration;
         public BindRequest(long intentEpoch, boolean automatic) {
+            this(intentEpoch, automatic, 0L);
+        }
+        public BindRequest(long intentEpoch, boolean automatic, long pauseGeneration) {
             this.intentEpoch = intentEpoch;
             this.automatic = automatic;
+            this.pauseGeneration = pauseGeneration;
         }
     }
 
@@ -20,6 +25,8 @@ public final class NativeRecoveryPolicy {
     public static BindRequest mergeBind(BindRequest pending, BindRequest incoming) {
         if (pending == null || incoming.intentEpoch > pending.intentEpoch) return incoming;
         if (incoming.intentEpoch < pending.intentEpoch) return pending;
+        if (incoming.pauseGeneration > pending.pauseGeneration) return incoming;
+        if (incoming.pauseGeneration < pending.pauseGeneration) return pending;
         return incoming.automatic ? pending : incoming;
     }
 

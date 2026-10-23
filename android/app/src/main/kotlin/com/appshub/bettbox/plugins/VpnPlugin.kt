@@ -76,6 +76,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var quickResponseEnabled = false
     private var quickResponseJob: Job? = null
     private val nativeRecoveryPolicy = NativeRecoveryPolicy()
+    private val smartPauseResumePolicy = SmartPauseResumePolicy()
     private val coreStartInFlight = AtomicBoolean(false)
     private val controlPlanePaused = AtomicBoolean(false)
     private val coreStartMutex = Mutex()
@@ -128,7 +129,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     request.intentEpoch, request.automatic,
                     GlobalState.isSmartStopped || controlPlanePaused.get(),
                     GlobalState.isCurrentlyStopping())) {
-                handleStartService(request.intentEpoch)
+                handleStartService(request.intentEpoch, request.pauseGeneration)
             }
         }
 
@@ -339,11 +340,16 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun setSmartStopped(value: Boolean) {
-        if (value) {
-            nativeRecoveryPolicy.cancelControlPlaneBypass()
-            controlPlanePaused.set(false)
+        GlobalState.runLock.withLock {
+            if (value) {
+                smartPauseResumePolicy.pauseSmart()
+                nativeRecoveryPolicy.cancelControlPlaneBypass()
+                controlPlanePaused.set(false)
+            } else {
+                smartPauseResumePolicy.clearSmart()
+            }
+            GlobalState.isSmartStopped = value
         }
-        GlobalState.isSmartStopped = value
     }
 
     private fun getActivePhysicalNetworks(): Set<Network> {
@@ -363,7 +369,6 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     fun getSmartNetworkSnapshot(): Map<String, Any> = SmartNetworkInfo.snapshot(
         BettboxApplication.getAppContext(),
-        runCatching { selectedUnderlyingNetwork() }.getOrNull(),
     )
 
     fun requestSmartAutoStopCheck() {
@@ -451,6 +456,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStart(options: VpnOptions): Boolean {
+        GlobalState.runLock.withLock { smartPauseResumePolicy.start() }
         onUpdateNetwork()
         if (options.enable != this.options?.enable) {
             this.bettBoxService = null
@@ -510,11 +516,17 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private suspend fun recoverNativeTransport(token: Long) {
         if (!nativeRecoveryPolicy.isCurrent(token) || coreStartInFlight.get()) return
+        val pauseGeneration = smartPauseResumePolicy.generation()
         // This error can be a mode/admission mismatch, not a broken system TUN.
         // Reconcile only after Go verifies the actual listener/protect owner.
-        if (Core.restoreNativeVpnAdmission()) {
-            android.util.Log.i("VpnPlugin", "Native transport admission reconciled without TUN restart")
-            return
+        GlobalState.runLock.withLock {
+            if (!smartPauseResumePolicy.allowsStart(pauseGeneration) ||
+                GlobalState.isSmartStopped || controlPlanePaused.get() ||
+                GlobalState.isCurrentlyStopping()) return
+            if (Core.restoreNativeVpnAdmission()) {
+                android.util.Log.i("VpnPlugin", "Native transport admission reconciled without TUN restart")
+                return
+            }
         }
         val currentOptions = options?.takeIf { it.enable } ?: return
         if (bettBoxService == null) {
@@ -529,6 +541,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         val allowed = GlobalState.runLock.withLock {
             if (!nativeRecoveryPolicy.isCurrent(token) || GlobalState.isSmartStopped ||
+                !smartPauseResumePolicy.allowsStart(pauseGeneration) ||
                 controlPlanePaused.get() ||
                 GlobalState.isCurrentlyStopping()) false
             else {
@@ -540,13 +553,17 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         android.util.Log.i("VpnPlugin", "Native transport unavailable; rebuilding native TUN")
         // A failed automatic attempt keeps running intent for bounded retries.
         // It must not send the UI's user-stop path or reauthorize the account.
-        performStartCore(currentOptions, retry = true, notifyOnFailure = false, recoveryToken = token)
+        performStartCore(currentOptions, retry = true, notifyOnFailure = false,
+            recoveryToken = token, pauseGeneration = pauseGeneration)
     }
 
     private fun handleStartVpn() {
         val intentEpoch = nativeRecoveryPolicy.intentEpoch
+        val pauseGeneration = smartPauseResumePolicy.generation()
         GlobalState.getCurrentAppPlugin()?.requestVpnPermission {
-            if (nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) handleStartService(intentEpoch)
+            if (nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) {
+                handleStartService(intentEpoch, pauseGeneration)
+            }
         }
     }
 
@@ -846,7 +863,11 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun handleStartService(intentEpoch: Long = nativeRecoveryPolicy.intentEpoch) {
+    private fun handleStartService(
+        intentEpoch: Long = nativeRecoveryPolicy.intentEpoch,
+        pauseGeneration: Long = smartPauseResumePolicy.generation(),
+    ) {
+        if (!smartPauseResumePolicy.allowsStart(pauseGeneration)) return
         if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
                 GlobalState.isSmartStopped || controlPlanePaused.get(),
                 GlobalState.isCurrentlyStopping())) {
@@ -854,7 +875,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
         if (bettBoxService == null) {
-            bindService(intentEpoch = intentEpoch)
+            bindService(intentEpoch = intentEpoch, pauseGeneration = pauseGeneration)
             return
         }
         
@@ -862,6 +883,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             coreStartMutex.withCoroutineLock {
             coreStartInFlight.set(true)
             try {
+                if (!smartPauseResumePolicy.allowsStart(pauseGeneration)) return@launch
                 if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
                         GlobalState.isSmartStopped || controlPlanePaused.get(),
                         GlobalState.isCurrentlyStopping())) return@launch
@@ -877,7 +899,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         GlobalState.updateRunState(RunState.STOP)
                         withContext(Dispatchers.Main) {
                             GlobalState.getCurrentAppPlugin()?.requestVpnPermission {
-                                handleStartService(intentEpoch)
+                                handleStartService(intentEpoch, pauseGeneration)
                             }
                         }
                         return@launch
@@ -888,6 +910,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val nativeReady = currentOptions?.enable != true ||
                     (Core.androidTunReady() && !Core.nativeVpnRepairRequired())
                 val startAllowed = GlobalState.runLock.withLock {
+                    if (!smartPauseResumePolicy.allowsStart(pauseGeneration)) return@withLock false
                     if (!nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
                             GlobalState.isSmartStopped || controlPlanePaused.get(),
                             GlobalState.isCurrentlyStopping())) return@withLock false
@@ -911,10 +934,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
                 if (!startAllowed || currentOptions == null) return@launch
 
-                performStartCoreInternal(currentOptions, retry = true, notifyOnFailure = true, intentEpoch = intentEpoch)
+                performStartCoreInternal(currentOptions, retry = true, notifyOnFailure = true,
+                    intentEpoch = intentEpoch, pauseGeneration = pauseGeneration)
             } catch (e: Exception) {
                 android.util.Log.e("VpnPlugin", "Fatal error in start flow: ${e.message}")
-                if (nativeRecoveryPolicy.isIntentCurrent(intentEpoch)) GlobalState.updateRunState(RunState.STOP)
+                GlobalState.runLock.withLock {
+                    if (nativeRecoveryPolicy.isIntentCurrent(intentEpoch) &&
+                        smartPauseResumePolicy.allowsStart(pauseGeneration)) GlobalState.updateRunState(RunState.STOP)
+                }
             } finally {
                 coreStartInFlight.set(false)
             }
@@ -927,11 +954,15 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         retry: Boolean,
         notifyOnFailure: Boolean,
         recoveryToken: Long? = null,
+        resumeRequest: SmartPauseResumePolicy.Resume? = null,
+        pauseGeneration: Long = smartPauseResumePolicy.generation(),
     ) {
         val intentEpoch = nativeRecoveryPolicy.intentEpoch
         coreStartMutex.withCoroutineLock {
             coreStartInFlight.set(true)
             try {
+                if (!smartPauseResumePolicy.allowsStart(pauseGeneration) ||
+                    (resumeRequest != null && !smartResumeCurrent(resumeRequest))) return@withCoroutineLock
                 if (recoveryToken != null) {
                     if (!nativeRecoveryPolicy.isCurrent(recoveryToken) ||
                         GlobalState.isSmartStopped || controlPlanePaused.get() ||
@@ -943,7 +974,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         return@withCoroutineLock
                     }
                 }
-                performStartCoreInternal(currentOptions, retry, notifyOnFailure, intentEpoch, recoveryToken)
+                performStartCoreInternal(currentOptions, retry, notifyOnFailure, intentEpoch,
+                    recoveryToken, resumeRequest, pauseGeneration)
             } finally {
                 coreStartInFlight.set(false)
             }
@@ -956,13 +988,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         notifyOnFailure: Boolean,
         intentEpoch: Long,
         recoveryToken: Long? = null,
+        resumeRequest: SmartPauseResumePolicy.Resume? = null,
+        pauseGeneration: Long,
     ) {
         fun currentRequest(): Boolean =
+            smartPauseResumePolicy.allowsStart(pauseGeneration) &&
+            (resumeRequest == null || smartResumeCurrent(resumeRequest)) &&
             nativeRecoveryPolicy.shouldStartAfterBind(intentEpoch, false,
                 GlobalState.isSmartStopped || controlPlanePaused.get(),
                 GlobalState.isCurrentlyStopping()) &&
             (!currentOptions.enable ||
-            (nativeRecoveryPolicy.isIntentCurrent(intentEpoch) &&
+            (VpnRunIntentStore.read(BettboxApplication.getAppContext()) != false &&
+                nativeRecoveryPolicy.isIntentCurrent(intentEpoch) &&
                 (recoveryToken == null || nativeRecoveryPolicy.isCurrent(recoveryToken))))
         if (!currentRequest()) return
         val serviceRef = bettBoxService
@@ -979,6 +1016,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             if (retry) {
                 android.util.Log.w("VpnPlugin", "VPN establish failed, retrying...")
                 delay(300)
+                if (!currentRequest()) return
                 try {
                     fd = serviceRef?.start(currentOptions)
                 } catch (e: Exception) {
@@ -1000,20 +1038,19 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
 
-        val canStart = GlobalState.runLock.withLock {
-            if (GlobalState.currentRunState != RunState.START) {
+        // Serialize the final admission and actual JNI entry with pause/stop.
+        val coreStarted = GlobalState.runLock.withLock {
+            if (GlobalState.currentRunState != RunState.START || !currentRequest()) {
                 serviceRef?.stop()
-                false
-            } else true
+                return
+            }
+            nativeOwnsFd = true
+            Core.startTun(
+                fd = fd ?: 0,
+                protect = this@VpnPlugin::protect,
+                resolverProcess = this@VpnPlugin::resolverProcess,
+            )
         }
-        if (!canStart) return
-
-        nativeOwnsFd = true
-        val coreStarted = com.appshub.bettbox.core.Core.startTun(
-            fd = fd ?: 0,
-            protect = this@VpnPlugin::protect,
-            resolverProcess = this@VpnPlugin::resolverProcess,
-        )
 
         if (!currentRequest()) {
             Core.stopTun()
@@ -1115,8 +1152,11 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStop(force: Boolean = false) {
-        nativeRecoveryPolicy.cancelIntent()
-        controlPlanePaused.set(false)
+        GlobalState.runLock.withLock {
+            smartPauseResumePolicy.stop()
+            nativeRecoveryPolicy.cancelIntent()
+            controlPlanePaused.set(false)
+        }
         nativeRecoveryJob?.cancel()
         nativeRecoveryJob = null
         bindTimeoutJob?.cancel()
@@ -1244,26 +1284,29 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (owned) controlPlanePaused.set(false)
         if (!shouldResume) return false
         val currentOptions = options?.takeIf { it.enable } ?: return false
+        val pauseGeneration = smartPauseResumePolicy.generation()
         android.util.Log.i("VpnPlugin", "CorpLink control-plane bypass finished; resuming VPN")
         if (bettBoxService == null) {
-            bindService(intentEpoch = nativeRecoveryPolicy.intentEpoch)
+            bindService(intentEpoch = nativeRecoveryPolicy.intentEpoch, pauseGeneration = pauseGeneration)
             return true
         }
         scope.launch {
-            performStartCore(currentOptions, retry = false, notifyOnFailure = false)
+            performStartCore(currentOptions, retry = false, notifyOnFailure = false,
+                pauseGeneration = pauseGeneration)
         }
         return true
     }
 
     fun handleSmartStop() {
         GlobalState.runLock.withLock {
+            smartPauseResumePolicy.pauseSmart()
+            GlobalState.isSmartStopped = true
             if (GlobalState.currentRunState == RunState.STOP) return
             GlobalState.updateRunState(RunState.STOP)
-            GlobalState.isSmartStopped = true
+            suspendModule?.uninstall()
+            suspendModule = null
+            Core.stopTun()
         }
-        suspendModule?.uninstall()
-        suspendModule = null
-        Core.stopTun()
         (bettBoxService as? BettboxService)?.resetNotificationBuilder()
         (bettBoxService as? BettboxVpnService)?.resetNotificationBuilder()
         scope.launch {
@@ -1276,20 +1319,39 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleSmartResume(options: VpnOptions): Boolean {
-        if (VpnRunIntentStore.read(BettboxApplication.getAppContext()) == false) {
-            setSmartStopped(false)
-            return false
+        return nativeSmartResume(options, compatibility = false)
+    }
+
+    private fun smartResumeCurrent(request: SmartPauseResumePolicy.Resume): Boolean =
+        smartPauseResumePolicy.isCurrent(request) &&
+            VpnRunIntentStore.read(BettboxApplication.getAppContext()) != false &&
+            !controlPlanePaused.get() && !GlobalState.isCurrentlyStopping()
+
+    private fun nativeSmartResume(options: VpnOptions, compatibility: Boolean): Boolean {
+        val request = GlobalState.runLock.withLock {
+            if (GlobalState.isCurrentlyStopping() || GlobalState.currentRunState == RunState.START) return false
+            val admitted = smartPauseResumePolicy.admitResume(
+                compatibility,
+                VpnRunIntentStore.read(BettboxApplication.getAppContext()) != false,
+                controlPlanePaused.get(),
+            ) ?: return false
+            nativeRecoveryPolicy.setWanted(options.enable)
+            admitted
         }
-        nativeRecoveryPolicy.setWanted(options.enable)
         if (options.enable) startNativeRecoveryWatchdog()
         scope.launch {
             val startAllowed = GlobalState.runLock.withLock {
                 if (GlobalState.currentRunState == RunState.START) return@withLock false
+                if (GlobalState.isCurrentlyStopping() || !smartPauseResumePolicy.commitResume(
+                        request,
+                        VpnRunIntentStore.read(BettboxApplication.getAppContext()) != false,
+                        controlPlanePaused.get(),
+                    )) return@withLock false
                 GlobalState.isSmartStopped = false
                 this@VpnPlugin.options = options
 
                 if (bettBoxService == null) {
-                    bindService()
+                    bindService(pauseGeneration = request.generation)
                     return@withLock false
                 }
 
@@ -1301,7 +1363,9 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             (bettBoxService as? BettboxService)?.resetNotificationBuilder()
             (bettBoxService as? BettboxVpnService)?.resetNotificationBuilder()
-            performStartCore(options, retry = false, notifyOnFailure = false)
+            performStartCore(options, retry = false, notifyOnFailure = false,
+                resumeRequest = request, pauseGeneration = request.generation)
+            if (!smartResumeCurrent(request) || !getStatus()) return@launch
             withContext(Dispatchers.Main) {
                 Toast.makeText(BettboxApplication.getAppContext(), "Bettbox Connected", Toast.LENGTH_SHORT).show()
             }
@@ -1314,10 +1378,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val context = BettboxApplication.getAppContext()
         val userWantsVpn = VpnRunIntentStore.read(context) != false
         val canResume = options?.enable == true
-        if (!canResume || !CompatibilityAppPolicy.shouldPause(getStatus(), userWantsVpn)) {
-            return false
+        GlobalState.runLock.withLock {
+            if (!canResume || !CompatibilityAppPolicy.shouldPause(getStatus(), userWantsVpn)) {
+                return false
+            }
+            smartPauseResumePolicy.pauseCompatibility()
+            // Ownership and runtime STOP must be visible as one operation.
+            handleSmartStop()
         }
-        handleSmartStop()
         return true
     }
 
@@ -1325,17 +1393,20 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val context = BettboxApplication.getAppContext()
         if (VpnRunIntentStore.read(context) == false) return false
         val currentOptions = options?.takeIf { it.enable } ?: return false
-        return handleSmartResume(currentOptions)
+        // resumeNow calls us before clearSession, so the owner token, rather
+        // than CompatibilityAppManager.isPaused(), authorizes this path.
+        return nativeSmartResume(currentOptions, compatibility = true)
     }
 
     private fun bindService(
         automatic: Boolean = false,
         intentEpoch: Long = nativeRecoveryPolicy.intentEpoch,
+        pauseGeneration: Long = smartPauseResumePolicy.generation(),
     ) {
         val beginBinding = synchronized(bindingLock) {
             if (!nativeRecoveryPolicy.isEpochCurrent(intentEpoch)) return@synchronized false
             pendingBindRequest = NativeRecoveryPolicy.mergeBind(pendingBindRequest,
-                NativeRecoveryPolicy.BindRequest(intentEpoch, automatic))
+                NativeRecoveryPolicy.BindRequest(intentEpoch, automatic, pauseGeneration))
             isBinding.compareAndSet(false, true)
         }
         if (!beginBinding) return

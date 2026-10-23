@@ -71,7 +71,7 @@ object SmartNetworkInfo {
     }
 
     @Suppress("DEPRECATION") // allNetworks remains available on API 26+; no Wi-Fi scan APIs.
-    fun snapshot(context: Context, selected: Network?): Map<String, Any> {
+    fun snapshot(context: Context): Map<String, Any> {
         val backgroundGranted = backgroundLocationGranted(context)
         val cm = context.getSystemService(ConnectivityManager::class.java)
             ?: return mapOf("networks" to emptyList<Any>(), "backgroundLocationGranted" to backgroundGranted)
@@ -85,6 +85,9 @@ object SmartNetworkInfo {
                 if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return@runCatching null
                 PhysicalNetwork(network, caps, cm.getLinkProperties(network))
             }.getOrNull()
+        }
+        val selected = selectedPhysicalNetwork(cm, physical)?.takeIf {
+            runCatching { cm.allNetworks.toSet() == all.toSet() }.getOrDefault(false)
         }
         val fallbackOwner = fallback?.let { info ->
             SmartNetworkPolicy.fallbackOwner(
@@ -130,6 +133,40 @@ object SmartNetworkInfo {
         }
         return mapOf("networks" to records, "backgroundLocationGranted" to backgroundGranted)
     }
+
+    // Public API 26+ strategy (also used on 31+): a non-VPN activeNetwork is
+    // authoritative. A VPN must inherit exactly one physical transport, with
+    // exactly one matching live network. OEMs without that evidence and
+    // multi-transport/multi-Wi-Fi configurations deliberately have no selected
+    // record, so rule evaluation/UI can report unknown. No hidden API,
+    // reflection, requestNetwork, or SG/WG path preference is involved.
+    private fun selectedPhysicalNetwork(cm: ConnectivityManager, physical: List<PhysicalNetwork>): Network? =
+        runCatching {
+            val active = cm.activeNetwork ?: return@runCatching null
+            val caps = cm.getNetworkCapabilities(active) ?: return@runCatching null
+            val vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            val inherited = physicalTransports(caps)
+            val selected = SmartSelectedNetworkPolicy.select(active, vpn, inherited,
+                physical.associate { it.network to physicalTransports(it.capabilities) })
+            // Do not combine enumeration from one default network with a new
+            // VPN transport after a handoff.
+            val latestCaps = cm.getNetworkCapabilities(active)
+            if (cm.activeNetwork != active || latestCaps == null ||
+                latestCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) != vpn ||
+                physicalTransports(latestCaps) != inherited) null else selected
+        }.getOrNull()
+
+    private fun physicalTransports(caps: NetworkCapabilities): Set<Int> = setOf(
+        NetworkCapabilities.TRANSPORT_CELLULAR,
+        NetworkCapabilities.TRANSPORT_WIFI,
+        NetworkCapabilities.TRANSPORT_BLUETOOTH,
+        NetworkCapabilities.TRANSPORT_ETHERNET,
+        NetworkCapabilities.TRANSPORT_WIFI_AWARE,
+        NetworkCapabilities.TRANSPORT_LOWPAN,
+        NetworkCapabilities.TRANSPORT_USB,
+        NetworkCapabilities.TRANSPORT_THREAD,
+        NetworkCapabilities.TRANSPORT_SATELLITE,
+    ).filterTo(mutableSetOf()) { caps.hasTransport(it) }
 
     private fun wifiInfo(capabilities: NetworkCapabilities): WifiInfo? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) capabilities.transportInfo as? WifiInfo else null

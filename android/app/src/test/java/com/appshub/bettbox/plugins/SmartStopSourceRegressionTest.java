@@ -20,7 +20,7 @@ public final class SmartStopSourceRegressionTest {
         String smartStop = methodBody(source, "fun handleSmartStop()");
         String smartResume = methodBody(
             source,
-            "fun handleSmartResume(options: VpnOptions): Boolean");
+            "fun nativeSmartResume(options: VpnOptions, compatibility: Boolean): Boolean");
 
         require(smartStop.contains("Core.stopTun()"),
             "smart stop must tear down the Android TUN");
