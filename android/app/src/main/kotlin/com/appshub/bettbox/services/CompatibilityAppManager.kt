@@ -39,7 +39,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.NetworkInterface
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.UUID
 
 object CompatibilityAppManager {
@@ -56,10 +55,10 @@ object CompatibilityAppManager {
     private const val SHORTCUT_TOKEN_KEY = "yadea_shortcut_token"
     private const val AWAY_GRACE_MILLIS = 10_000L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val active = AtomicBoolean(false)
+    private val session = CompatibilityLaunchSession()
 
     @Volatile private var pausedByCompatibility = false
-    fun isPaused(): Boolean = active.get() && pausedByCompatibility
+    fun isPaused(): Boolean = synchronized(session) { session.isActive && pausedByCompatibility }
 
     fun canPostNotifications(context: Context): Boolean {
         val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -219,47 +218,65 @@ object CompatibilityAppManager {
         val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
             ?: return false
-        if (!active.compareAndSet(false, true)) return false
+        val request = session.requestLaunch()
+        // A click while removal/launch is in flight is accepted by that same
+        // worker, not reported as an invalid shortcut or a second pause owner.
+        if (!request.dispatch) return true
         scope.launch {
-            val paused = VpnPlugin.handleCompatibilityPause()
-            pausedByCompatibility = paused
-            if (paused) waitForVpnGone(context.applicationContext)
             try {
+                val paused = synchronized(session) {
+                    if (!session.isCurrent(request.generation)) return@launch
+                    if (request.newSession) pausedByCompatibility = VpnPlugin.handleCompatibilityPause()
+                    pausedByCompatibility
+                }
+                if (paused) waitForVpnGone(context.applicationContext)
+                var dispatched = false
                 withContext(Dispatchers.Main) {
-                    context.applicationContext.startActivity(launchIntent)
+                    synchronized(session) {
+                        if (session.isCurrent(request.generation)) {
+                            context.applicationContext.startActivity(launchIntent)
+                            dispatched = true
+                        }
+                    }
+                }
+                if (!dispatched) return@launch
+                synchronized(session) {
+                    if (!session.finishLaunch(request.generation)) return@launch
+                    if (!paused) {
+                        clearSession(context.applicationContext, request.generation)
+                        return@launch
+                    }
+                    showResumeNotification(context.applicationContext)
+                }
+                if (request.newSession && hasUsageAccess(context.applicationContext)) {
+                    monitorForeground(context.applicationContext, packageName, request.generation)
                 }
             } catch (error: Throwable) {
                 Log.e(TAG, "target launch failed: ${error.javaClass.simpleName}")
-                resumeNow(context.applicationContext)
-                return@launch
-            }
-            if (!paused) {
-                clearSession(context.applicationContext)
-                return@launch
-            }
-            showResumeNotification(context.applicationContext)
-            if (hasUsageAccess(context.applicationContext)) {
-                monitorForeground(context.applicationContext, packageName)
+                synchronized(session) {
+                    if (session.isCurrent(request.generation)) resumeNow(context.applicationContext)
+                }
             }
         }
         return true
     }
 
-    fun resumeNow(context: Context): Boolean {
+    fun resumeNow(context: Context): Boolean = synchronized(session) {
+        if (!session.isActive) return@synchronized false
         val shouldResume = pausedByCompatibility &&
             VpnRunIntentStore.read(context.applicationContext) != false
         val resumed = shouldResume && VpnPlugin.handleCompatibilityResume()
-        clearSession(context.applicationContext)
-        return resumed
+        clearSession(context.applicationContext, session.generation())
+        resumed
     }
 
-    fun keepStopped(context: Context): Boolean {
-        if (!active.get()) return false
+    fun keepStopped(context: Context): Boolean = synchronized(session) {
+        if (!session.isActive) return@synchronized false
         VpnRunIntentStore.write(context.applicationContext, false)
         VpnPlugin.setSmartStopped(false)
         VpnPlugin.handleStop(force = true)
-        clearSession(context.applicationContext)
-        return true
+        clearSession(context.applicationContext, session.generation())
+        true
     }
 
     private suspend fun waitForVpnGone(context: Context) {
@@ -284,11 +301,20 @@ object CompatibilityAppManager {
         return transportVisible || tunVisible
     }
 
-    private suspend fun monitorForeground(context: Context, target: String) {
+    private suspend fun monitorForeground(context: Context, target: String, generation: Long) {
         var targetSeen = false
         var awaySince: Long? = null
-        while (active.get()) {
+        var observedRevision = -1L
+        while (session.isCurrent(generation)) {
             if (!hasUsageAccess(context)) return
+            val revision = session.revision(generation)
+            if (revision != observedRevision) {
+                // Re-opening revokes the old departure, even if its grace
+                // deadline was reached while the launcher click was arriving.
+                observedRevision = revision
+                targetSeen = false
+                awaySince = null
+            }
             val foreground = currentForegroundPackage(context)
             val transient = isTransientSystemUi(foreground)
             if (foreground == target) {
@@ -313,11 +339,14 @@ object CompatibilityAppManager {
                     awayDuration,
                     AWAY_GRACE_MILLIS,
                 )) {
-                resumeNow(context)
-                return
+                val ended = synchronized(session) {
+                    if (!session.canAutoResume(generation, revision)) false
+                    else { resumeNow(context); true }
+                }
+                if (ended) return
             }
             if (!userWantsVpn) {
-                clearSession(context)
+                clearSession(context, generation)
                 return
             }
             delay(1_000)
@@ -395,8 +424,8 @@ object CompatibilityAppManager {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
-    private fun clearSession(context: Context) {
-        active.set(false)
+    private fun clearSession(context: Context, generation: Long) = synchronized(session) {
+        if (!session.end(generation)) return@synchronized
         pausedByCompatibility = false
         context.getSystemService(NotificationManager::class.java)
             ?.cancel(NOTIFICATION_ID)

@@ -259,10 +259,13 @@ jobs:
           javac -d build/compatibility-app-tests \
             android/app/src/main/java/com/appshub/bettbox/services/CompatibilityAppPolicy.java \
             android/app/src/main/java/com/appshub/bettbox/services/CompatibilityShortcutPolicy.java \
+            android/app/src/main/java/com/appshub/bettbox/services/CompatibilityLaunchSession.java \
             android/app/src/test/java/com/appshub/bettbox/services/CompatibilityAppPolicyTest.java \
+            android/app/src/test/java/com/appshub/bettbox/services/CompatibilityLaunchSessionTest.java \
             android/app/src/test/java/com/appshub/bettbox/services/CompatibilityShortcutPolicyTest.java
           java -cp build/compatibility-app-tests com.appshub.bettbox.services.CompatibilityAppPolicyTest
           java -cp build/compatibility-app-tests com.appshub.bettbox.services.CompatibilityShortcutPolicyTest
+          java -cp build/compatibility-app-tests com.appshub.bettbox.services.CompatibilityLaunchSessionTest
 
       - name: Run Go outbound tests
         working-directory: core/Clash.Meta
