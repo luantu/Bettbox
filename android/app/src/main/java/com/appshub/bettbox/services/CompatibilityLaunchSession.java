@@ -54,4 +54,8 @@ public final class CompatibilityLaunchSession {
         launching = false;
         return true;
     }
+
+    public synchronized boolean endIfIdle(long expected, long observedRevision) {
+        return canAutoResume(expected, observedRevision) && end(expected);
+    }
 }

@@ -312,7 +312,6 @@ object CompatibilityAppManager {
                 // Re-opening revokes the old departure, even if its grace
                 // deadline was reached while the launcher click was arriving.
                 observedRevision = revision
-                targetSeen = false
                 awaySince = null
             }
             val foreground = currentForegroundPackage(context)
@@ -346,8 +345,9 @@ object CompatibilityAppManager {
                 if (ended) return
             }
             if (!userWantsVpn) {
-                clearSession(context, generation)
-                return
+                // Turning VPN off must not swallow a newer accepted target
+                // open: finish that dispatch, but never auto-start the VPN.
+                if (clearSession(context, generation, revision)) return
             }
             delay(1_000)
         }
@@ -424,10 +424,13 @@ object CompatibilityAppManager {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
-    private fun clearSession(context: Context, generation: Long) = synchronized(session) {
-        if (!session.end(generation)) return@synchronized
+    private fun clearSession(context: Context, generation: Long, revision: Long? = null): Boolean = synchronized(session) {
+        val ended = if (revision == null) session.end(generation)
+            else session.endIfIdle(generation, revision)
+        if (!ended) return@synchronized false
         pausedByCompatibility = false
         context.getSystemService(NotificationManager::class.java)
             ?.cancel(NOTIFICATION_ID)
+        true
     }
 }

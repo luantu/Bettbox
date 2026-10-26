@@ -43,6 +43,18 @@ public final class CompatibilityLaunchSessionTest {
                 "old coroutine modified a newer session");
         check(session.isCurrent(next.generation), "new session was cleared by the old monitor");
 
+        CompatibilityLaunchSession stopped = new CompatibilityLaunchSession();
+        CompatibilityLaunchSession.Request stoppedFirst = stopped.requestLaunch();
+        stopped.finishLaunch(stoppedFirst.generation);
+        CompatibilityLaunchSession.Request stoppedReopen = stopped.requestLaunch();
+        check(!stopped.endIfIdle(stoppedFirst.generation, stoppedFirst.revision),
+                "stale stopped-intent cleanup swallowed an accepted reopen");
+        check(!stopped.endIfIdle(stoppedReopen.generation, stoppedReopen.revision),
+                "stopped intent canceled an in-flight target launch");
+        stopped.finishLaunch(stoppedReopen.generation);
+        check(stopped.endIfIdle(stoppedReopen.generation, stoppedReopen.revision),
+                "completed open with stopped VPN could not release its idle monitor");
+
         CompatibilityLaunchSession concurrent = new CompatibilityLaunchSession();
         CountDownLatch ready = new CountDownLatch(1);
         AtomicInteger dispatches = new AtomicInteger();
