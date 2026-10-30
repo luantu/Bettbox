@@ -34,8 +34,13 @@ func TestServiceRoutingScriptProviderFilteringAndColdRules(t *testing.T) {
 const fs = require('fs'), vm = require('vm');
 const ctx = vm.createContext({BETTBOX_RULE_SNAPSHOT:{openai:['DOMAIN-SUFFIX,chatgpt.com'],google:['DOMAIN-SUFFIX,google.com']}});
 vm.runInContext(fs.readFileSync('../scripts/overrides/overwrite-bettbox.js','utf8'),ctx);
+vm.runInContext("DELETED_NAME_KEYWORDS.push('[测试]', '\u0060仅限')",ctx);
 const leaf = name => ({name,type:'socks5',server:'127.0.0.1',port:9});
-const c = ctx.main({'proxies':[leaf('JP01')], 'proxy-providers':{subscription:{type:'inline',payload:[leaf('KR01'),leaf('HK01'),leaf('US01'),leaf('US-KR 1'),
+const c = ctx.main({'proxies':[leaf('JP01'),leaf('KR02 IPV6专用')],
+  'proxy-groups':[{name:'上游空组',type:'select',proxies:['KR02 IPV6专用']}],
+  rules:['DOMAIN,blocked.example,KR02 IPV6专用'],
+  'proxy-providers':{subscription:{type:'inline','exclude-filter':'(?i)expired',payload:[leaf('KR01'),leaf('HK01'),leaf('US01'),leaf('US-KR 1'),leaf('KR03 ipv6专用'),leaf('US02 Expired'),
+  leaf('US03 [测试]'),leaf('KR04 \u0060仅限'),
   {name:'韩国零号',type:'direct'}, {name:'日本零号',type:'dns'}, {name:'美国零号',type:'reject'}, leaf('🇰🇵 Korea Seoul'),leaf('SouthAmerica 01')]}}});
 process.stdout.write(JSON.stringify(c));`
 	data, err := exec.Command("node", "-e", program).CombinedOutput()
@@ -69,6 +74,7 @@ process.stdout.write(JSON.stringify(c));`
 		t.Fatal(err)
 	}
 	for name, want := range map[string][]string{
+		"上游空组":           {"REJECT"},
 		"Google 服务 · 韩国": {"KR01"},
 		"Google 服务 · 其他": {"JP01", "US01"},
 		"OpenAI 服务 · 订阅": {"JP01", "KR01", "US01"},

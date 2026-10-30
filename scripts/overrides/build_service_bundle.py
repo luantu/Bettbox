@@ -35,9 +35,9 @@ def build(rule_dir, output):
             elif parts[0] not in ('DOMAIN', 'DOMAIN-SUFFIX', 'DOMAIN-KEYWORD') or len(parts) != 2:
                 raise ValueError('Unsupported local rule type: ' + name)
     source = Path(__file__).with_name('overwrite-bettbox.js').read_text()
-    content = '// 自动生成：规则来源为同目录 HTTP YAML，包含首启应急快照。\n' + \
+    content = source + '\n// 自动生成：规则来源为同目录 HTTP YAML，包含首启应急快照。\n' + \
         'const BETTBOX_RULE_SNAPSHOT = ' + json.dumps(snapshots, ensure_ascii=False, separators=(',', ':')) + ';\n' + \
-        'const BETTBOX_LOCAL_ROUTING = ' + json.dumps(local, ensure_ascii=False, separators=(',', ':')) + ';\n' + source
+        'const BETTBOX_LOCAL_ROUTING = ' + json.dumps(local, ensure_ascii=False, separators=(',', ':')) + ';\n'
     output.write_text(content)
 
 

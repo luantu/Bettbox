@@ -1,8 +1,65 @@
 // Bettbox 服务分流 v1：远程 rule-provider，保留应用生成的 CorpLink 节点。
 // 飞连配置中关闭既有 ChatGPT/OpenAI 自动规则；本脚本负责服务分流。
 // 来源与部署说明：docs/07-远程覆写与服务分流.md。
+// 上游节点名称包含任一关键词即移除，忽略英文大小写；[] 关闭过滤。
+// 按字面子串匹配，不是正则表达式。飞连管理的 WG 节点不参与过滤。
+const DELETED_NAME_KEYWORDS = ['IPV6专用'];
+
 function main(config) {
   'use strict';
+  // 先过滤，再从剩余节点生成服务组；provider 更新时由内核继续过滤。
+  const keywords = DELETED_NAME_KEYWORDS.filter(k => typeof k === 'string' && k.trim());
+  const blocked = name => typeof name === 'string' && keywords.some(k => name.toLowerCase().includes(k.toLowerCase()));
+  const removed = new Set();
+  if (Array.isArray(config.proxies)) config.proxies = config.proxies.filter(p => {
+    if (!p.corplink && blocked(p.name)) { removed.add(p.name); return false; }
+    return true;
+  });
+  const originalGroups = Array.isArray(config['proxy-groups']) ? config['proxy-groups'] : [];
+  const groupNames = new Set(originalGroups.map(g => g.name));
+  const protectedNodes = new Set((config.proxies || []).filter(p => p.corplink).map(p => p.name));
+  const unavailable = name => removed.has(name) ||
+    (!groupNames.has(name) && !protectedNodes.has(name) && blocked(name));
+  for (const g of originalGroups) {
+    if (Array.isArray(g.proxies)) {
+      const before = g.proxies.length;
+      g.proxies = g.proxies.filter(name => !unavailable(name));
+      if (before && !g.proxies.length && !(g.use || []).length && !g['include-all'] && !g['include-all-proxies'] && !g['include-all-providers']) {
+        g.proxies = ['REJECT'];
+      }
+    }
+    if (keywords.length && ((g.use || []).length || g['include-all'] || g['include-all-providers'])) {
+      if (!g['empty-fallback']) g['empty-fallback'] = 'REJECT';
+    }
+  }
+  const nodeFilters = {};
+  const oldFilters = (config['bettbox-service-routing'] || {}).nodeFilters || {};
+  // Mihomo 用反引号分隔多个 exclude-filter 正则；转义关键词里的分隔符。
+  const keywordPattern = keywords.length ? '(?i)' + keywords.map(k =>
+    k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/`/g, '\\x60')).join('|') : '';
+  for (const [name, provider] of Object.entries(config['proxy-providers'] || {})) {
+    if (unavailable(provider['dialer-proxy'])) provider['dialer-proxy'] = 'REJECT';
+    let original = provider['exclude-filter'];
+    if (oldFilters[name] && original === oldFilters[name].applied) original = oldFilters[name].original;
+    if (keywordPattern) {
+      const applied = original ? original + '`' + keywordPattern : keywordPattern;
+      provider['exclude-filter'] = applied;
+      nodeFilters[name] = { original, applied };
+    } else if (original === undefined) delete provider['exclude-filter'];
+    else provider['exclude-filter'] = original;
+  }
+  for (const p of config.proxies || []) {
+    if (unavailable(p['dialer-proxy'])) p['dialer-proxy'] = 'REJECT';
+  }
+  for (const field of ['rules', 'rule']) if (Array.isArray(config[field])) {
+    config[field] = config[field].map(rule => {
+      if (typeof rule !== 'string') return rule;
+      const parts = rule.split(',');
+      const target = parts.length - (parts[parts.length - 1] === 'no-resolve' ? 2 : 1);
+      if (target > 0 && unavailable(parts[target])) parts[target] = 'REJECT';
+      return parts.join(',');
+    });
+  }
   const base = 'http://172.18.34.110:44468';
   const names = ['OpenAI 服务', 'Google 服务', 'OpenAI 服务 · 订阅',
     'Google 服务 · 韩国', 'Google 服务 · 其他'];
@@ -187,5 +244,6 @@ function main(config) {
   }
   config.dns = dns;
   config[marker] = { version: 1, groups: added.map(g => g.name), providers: providerNames, rules };
+  if (Object.keys(nodeFilters).length) config[marker].nodeFilters = nodeFilters;
   return config;
 }

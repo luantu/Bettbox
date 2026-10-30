@@ -5,12 +5,13 @@ const vm = require('node:vm');
 const path = require('node:path');
 const script = path.join(__dirname, '../../scripts/overrides/overwrite-bettbox.js');
 
-function apply(input) {
+function apply(input, keywords) {
   const source = fs.existsSync(script) ? fs.readFileSync(script, 'utf8') : 'function main(c) { return c; }';
   const ctx = vm.createContext({ BETTBOX_LOCAL_ROUTING: {
     bypass: ['IP-CIDR,127.0.0.0/8,no-resolve'], corporate: ['DOMAIN-SUFFIX,ruijie.work'],
   } });
   vm.runInContext(source, ctx);
+  if (keywords) vm.runInContext('DELETED_NAME_KEYWORDS.splice(0, DELETED_NAME_KEYWORDS.length, ...' + JSON.stringify(keywords) + ')', ctx);
   return JSON.parse(JSON.stringify(ctx.main(JSON.parse(JSON.stringify(input)))));
 }
 function base() {
@@ -23,6 +24,56 @@ function base() {
   ], rules: ['MATCH,DIRECT'] };
 }
 function group(c, name) { return c['proxy-groups'].find(g => g.name === name); }
+
+test('关键词过滤先于服务组生成，清理原组引用，空组拒绝而不变成直连', () => {
+  const c = base();
+  c.proxies.push({ name: 'KR01 IPV6专用', type: 'ss' }, { name: 'JP01 ipv6专用', type: 'ss' }, { name: 'US01', type: 'ss' });
+  c['proxy-groups'].push(
+    { name: '上游选择', type: 'select', proxies: ['KR01 IPV6专用', 'US01'] },
+    { name: '上游自动', type: 'url-test', proxies: ['JP01 ipv6专用'], url: 'https://example.com/' },
+    { name: 'IPV6专用分组', type: 'select', proxies: ['US01'] },
+    { name: '上层', type: 'select', proxies: ['IPV6专用分组'] });
+  const out = apply(c);
+  assert.deepEqual(out.proxies.map(p => p.name), ['FZ-INT-Node-WG', 'Fuzhou-Node-1-WG', 'US01']);
+  assert.deepEqual(group(out, 'Google 服务').proxies, ['US01', 'FZ-INT-Node']);
+  assert.deepEqual(group(out, '上游选择').proxies, ['US01']);
+  assert.deepEqual(group(out, '上游自动').proxies, ['REJECT']);
+  assert.deepEqual(group(out, '上层').proxies, ['IPV6专用分组']);
+  assert.deepEqual(apply(out), out);
+});
+
+test('关键词可增删，按字面子串匹配，空词不误删全部节点，飞连WG不受影响', () => {
+  const c = base();
+  c.proxies.push({ name: 'KR01 [测试]', type: 'ss' }, { name: 'US01 测试', type: 'ss' });
+  assert.deepEqual(group(apply(c, ['[测试]', '', '  ', 'FZ-INT']), 'Google 服务').proxies, ['US01 测试', 'FZ-INT-Node']);
+  c.proxies.push({ name: 'JP01 IPV6专用', type: 'ss' });
+  assert.ok(apply(c, []).proxies.some(p => p.name === 'JP01 IPV6专用'));
+});
+
+test('动态provider排除关键词，合并原有正则且重复运行不追加相同过滤', () => {
+  const c = base();
+  c['proxy-providers'] = { airport: { type: 'http', url: 'https://example.com/airport', 'exclude-filter': '(?i)expired' } };
+  const out = apply(c);
+  const excluded = new RegExp(out['proxy-providers'].airport['exclude-filter'].replace(/\(\?i\)/g, '').replace(/`/g, '|'), 'iu');
+  assert.ok(excluded.test('KR01 ipv6专用'));
+  assert.ok(excluded.test('US01 Expired'));
+  assert.equal(excluded.test('KR01 普通'), false);
+  assert.deepEqual(apply(out), out);
+  const changed = apply(out, ['测试']);
+  assert.equal(changed['proxy-providers'].airport['exclude-filter'], '(?i)expired`(?i)测试');
+  assert.equal(apply(changed, [])['proxy-providers'].airport['exclude-filter'], '(?i)expired');
+});
+
+test('直接指向被移除节点的规则和链式拨号改为拒绝，避免配置加载失败或意外直连', () => {
+  const c = base();
+  c.proxies.push({ name: 'KR01 IPV6专用', type: 'ss' },
+    { name: 'US01', type: 'socks5', 'dialer-proxy': 'KR01 IPV6专用' });
+  c.rules.unshift('DOMAIN,blocked.example,KR01 IPV6专用', 'IP-CIDR,192.0.2.0/24,KR01 IPV6专用,no-resolve');
+  const out = apply(c);
+  assert.ok(out.rules.includes('DOMAIN,blocked.example,REJECT'));
+  assert.ok(out.rules.includes('IP-CIDR,192.0.2.0/24,REJECT,no-resolve'));
+  assert.equal(out.proxies.find(p => p.name === 'US01')['dialer-proxy'], 'REJECT');
+});
 
 test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', () => {
   const c = apply(base());
@@ -156,7 +207,8 @@ test('原 provider 即使使用宽松同URL探针，也不会污染服务探针�
   const out = apply(c);
   assert.notEqual(group(out, 'OpenAI 服务').url, c['proxy-providers'].airport['health-check'].url);
   assert.notEqual(group(out, 'OpenAI 服务').url, c['proxy-providers'].other['health-check'].url);
-  assert.deepEqual(out['proxy-providers'], c['proxy-providers']);
+  assert.equal(out['proxy-providers'].airport['health-check'].url, c['proxy-providers'].airport['health-check'].url);
+  assert.deepEqual(out['proxy-providers'].other['health-check'], c['proxy-providers'].other['health-check']);
   assert.deepEqual(apply(out), out);
 });
 
