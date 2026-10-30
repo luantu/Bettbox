@@ -1,18 +1,25 @@
 // Bettbox 服务分流 v1：远程 rule-provider，保留应用生成的 CorpLink 节点。
 // 飞连配置中关闭既有 ChatGPT/OpenAI 自动规则；本脚本负责服务分流。
 // 来源与部署说明：docs/07-远程覆写与服务分流.md。
+// 按上游节点的 server 字段排除；[] 关闭。true 为精确匹配，false 为包含匹配。
+const DELETED_SERVERS = ['127.0.0.1', '0.0.0.0'];
+const SERVER_STRICT_MODE = true;
+
 // 上游节点名称包含任一关键词即移除，忽略英文大小写；[] 关闭过滤。
 // 按字面子串匹配，不是正则表达式。飞连管理的 WG 节点不参与过滤。
-const DELETED_NAME_KEYWORDS = ['IPV6专用'];
+const DELETED_NAME_KEYWORDS = ['IPV6专用', '剩余', '到期'];
 
 function main(config) {
   'use strict';
   // 先过滤，再从剩余节点生成服务组；provider 更新时由内核继续过滤。
   const keywords = DELETED_NAME_KEYWORDS.filter(k => typeof k === 'string' && k.trim());
   const blocked = name => typeof name === 'string' && keywords.some(k => name.toLowerCase().includes(k.toLowerCase()));
+  const deletedServers = DELETED_SERVERS.filter(s => typeof s === 'string' && s.trim());
+  const blockedServer = server => typeof server === 'string' && server.length > 0 &&
+    (SERVER_STRICT_MODE ? deletedServers.includes(server) : deletedServers.some(s => server.includes(s)));
   const removed = new Set();
   if (Array.isArray(config.proxies)) config.proxies = config.proxies.filter(p => {
-    if (!p.corplink && blocked(p.name)) { removed.add(p.name); return false; }
+    if (!p.corplink && (blocked(p.name) || blockedServer(p.server))) { removed.add(p.name); return false; }
     return true;
   });
   const originalGroups = Array.isArray(config['proxy-groups']) ? config['proxy-groups'] : [];

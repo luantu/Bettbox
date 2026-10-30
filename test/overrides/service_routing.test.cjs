@@ -5,13 +5,15 @@ const vm = require('node:vm');
 const path = require('node:path');
 const script = path.join(__dirname, '../../scripts/overrides/overwrite-bettbox.js');
 
-function apply(input, keywords) {
-  const source = fs.existsSync(script) ? fs.readFileSync(script, 'utf8') : 'function main(c) { return c; }';
+function apply(input, keywords, servers, strictMode) {
+  let source = fs.existsSync(script) ? fs.readFileSync(script, 'utf8') : 'function main(c) { return c; }';
+  if (strictMode !== undefined) source = source.replace('const SERVER_STRICT_MODE = true;', 'const SERVER_STRICT_MODE = ' + strictMode + ';');
   const ctx = vm.createContext({ BETTBOX_LOCAL_ROUTING: {
     bypass: ['IP-CIDR,127.0.0.0/8,no-resolve'], corporate: ['DOMAIN-SUFFIX,ruijie.work'],
   } });
   vm.runInContext(source, ctx);
   if (keywords) vm.runInContext('DELETED_NAME_KEYWORDS.splice(0, DELETED_NAME_KEYWORDS.length, ...' + JSON.stringify(keywords) + ')', ctx);
+  if (servers) vm.runInContext('DELETED_SERVERS.splice(0, DELETED_SERVERS.length, ...' + JSON.stringify(servers) + ')', ctx);
   return JSON.parse(JSON.stringify(ctx.main(JSON.parse(JSON.stringify(input)))));
 }
 function base() {
@@ -24,6 +26,40 @@ function base() {
   ], rules: ['MATCH,DIRECT'] };
 }
 function group(c, name) { return c['proxy-groups'].find(g => g.name === name); }
+
+test('服务器地址默认精确排除两个占位地址，保留相似地址及飞连WG并清理节点引用', () => {
+  const c = base();
+  c.proxies[0].server = '127.0.0.1';
+  for (const [name, server] of [['KR01','127.0.0.1'],['KR02','0.0.0.0'],['US01','127.0.0.10'],['JP01','edge.127.0.0.1.example']])
+    c.proxies.push({name,server,type:'socks5'});
+  c['proxy-groups'].push({name:'上游选择',type:'select',proxies:['KR01','US01']},
+    {name:'占位组',type:'select',proxies:['KR02']});
+  c.rules.unshift('DOMAIN,blocked.example,KR01');
+  const out = apply(c);
+  assert.deepEqual(out.proxies.map(p => p.name), ['FZ-INT-Node-WG','Fuzhou-Node-1-WG','US01','JP01']);
+  assert.deepEqual(group(out,'上游选择').proxies, ['US01']);
+  assert.deepEqual(group(out,'占位组').proxies, ['REJECT']);
+  assert.ok(out.rules.includes('DOMAIN,blocked.example,REJECT'));
+  assert.deepEqual(group(out,'Google 服务').proxies, ['US01','JP01','FZ-INT-Node']);
+  assert.deepEqual(apply(out),out);
+});
+
+test('非严格服务器模式按字面包含过滤，空地址项不误删，缺失server的节点保留', () => {
+  const c = base();
+  c.proxies.push({name:'KR01',server:'edge.bad[1].example',type:'socks5'},
+    {name:'US01',server:'edge.bad1.example',type:'socks5'}, {name:'JP01',type:'socks5'});
+  assert.deepEqual(group(apply(c, undefined, ['bad[1]','','  '], false),'Google 服务').proxies,
+    ['US01','JP01','FZ-INT-Node']);
+  assert.deepEqual(group(apply(c, undefined, ['bad[1]'], true),'Google 服务').proxies,
+    ['KR01','US01','JP01','FZ-INT-Node']);
+});
+
+test('清空服务器排除表关闭地址过滤，名称过滤仍独立生效', () => {
+  const c = base();
+  c.proxies.push({name:'KR01',server:'127.0.0.1',type:'socks5'},
+    {name:'JP01 IPV6专用',server:'192.0.2.1',type:'socks5'});
+  assert.deepEqual(group(apply(c, undefined, []),'Google 服务').proxies,['KR01','FZ-INT-Node']);
+});
 
 test('关键词过滤先于服务组生成，清理原组引用，空组拒绝而不变成直连', () => {
   const c = base();

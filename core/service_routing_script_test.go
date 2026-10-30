@@ -35,8 +35,8 @@ const fs = require('fs'), vm = require('vm');
 const ctx = vm.createContext({BETTBOX_RULE_SNAPSHOT:{openai:['DOMAIN-SUFFIX,chatgpt.com'],google:['DOMAIN-SUFFIX,google.com']}});
 vm.runInContext(fs.readFileSync('../scripts/overrides/overwrite-bettbox.js','utf8'),ctx);
 vm.runInContext("DELETED_NAME_KEYWORDS.push('[测试]', '\u0060仅限')",ctx);
-const leaf = name => ({name,type:'socks5',server:'127.0.0.1',port:9});
-const c = ctx.main({'proxies':[leaf('JP01'),leaf('KR02 IPV6专用')],
+const leaf = name => ({name,type:'socks5',server:'192.0.2.1',port:9});
+const c = ctx.main({'proxies':[leaf('JP01'),leaf('KR02 IPV6专用'),{...leaf('KR05'),server:'127.0.0.1'}, { ...leaf('KR06'),server:'0.0.0.0'}],
   'proxy-groups':[{name:'上游空组',type:'select',proxies:['KR02 IPV6专用']}],
   rules:['DOMAIN,blocked.example,KR02 IPV6专用'],
   'proxy-providers':{subscription:{type:'inline','exclude-filter':'(?i)expired',payload:[leaf('KR01'),leaf('HK01'),leaf('US01'),leaf('US-KR 1'),leaf('KR03 ipv6专用'),leaf('US02 Expired'),
