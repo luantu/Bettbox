@@ -22,6 +22,8 @@ jobs:
   build-android-arm64:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CORPLINK_HELPER_REV: 13f8106e7efef30fa30a802e59a74931dbae6d8d
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -282,7 +284,7 @@ jobs:
           path: |
             assets/bin/android-arm64-v8a/corplink-rs-login
             android/app/src/main/jniLibs/arm64-v8a/libcorplink-rs-login.so
-          key: corplink-helper-android-arm64-e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92-ndk28.2-api35-v1
+          key: corplink-helper-android-arm64-${{ env.CORPLINK_HELPER_REV }}-ndk28.2-api35-v1
 
       - name: Build corplink-rs Android login helper
         if: steps.corplink-helper-cache.outputs.cache-hit != 'true'
@@ -296,12 +298,12 @@ jobs:
           # the pre-e3465ad "feilian password login returned no completion
           # URL" error on Android. A full clone guarantees the checkout SHA.
           git clone https://github.com/luantu/corplink-rs.git tools/corplink-rs-src
-          git -C tools/corplink-rs-src checkout e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92
+          git -C tools/corplink-rs-src checkout "$CORPLINK_HELPER_REV"
           # Sanity-check: fail the build loudly if the checkout did not land
           # on the expected commit, so a future CI regression is obvious.
           actual_sha=$(git -C tools/corplink-rs-src rev-parse HEAD)
-          if [ "$actual_sha" != "e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92" ]; then
-            echo "::error::helper checkout landed on $actual_sha, expected e3465ad82fb071ccc2a9d5ed903c5bc5cdc06c92"
+          if [ "$actual_sha" != "$CORPLINK_HELPER_REV" ]; then
+            echo "::error::helper checkout landed on $actual_sha, expected $CORPLINK_HELPER_REV"
             exit 1
           fi
           export ANDROID_CLANG="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"

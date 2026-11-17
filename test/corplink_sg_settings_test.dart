@@ -1,13 +1,45 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:bett_box/services/corplink_sg.dart';
 import 'package:bett_box/services/corplink_sg_bootstrap.dart';
 import 'package:bett_box/services/corplink_sg_recovery.dart';
 import 'package:bett_box/services/corplink_sg_status.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synchronized/synchronized.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('keeps password punctuation through settings and helper JSON', () async {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+    const password = r'''  Sample!@${}#%"'\`?=【】－  ''';
+    await const CorplinkSgSettings(
+      enabled: true,
+      username: 'demo-user',
+      password: password,
+      server: 'https://example.invalid',
+    ).save();
+
+    final loaded = await CorplinkSgSettings.load();
+    expect(loaded.password, password);
+    final request = buildAndroidCorplinkMachineRequest(
+      server: loaded.server,
+      username: loaded.username,
+      password: loaded.password,
+      deviceName: 'fixture-device',
+      deviceId: 'fixture-id',
+      publicKey: 'public',
+      privateKey: 'private',
+      authFile: '/test/auth.json',
+      cookieFile: '/test/cookies.json',
+    );
+    expect(jsonDecode(jsonEncode(request))['password'], password);
+  });
+
   test('detects CorpLink settings changes that require profile rebuild', () {
     const before = CorplinkSgSettings(
       enabled: false,
@@ -512,5 +544,94 @@ void main() {
     } finally {
       timer.cancel();
     }
+  });
+
+  test('two expired nodes share one login; failed apply reuses fresh session', () async {
+    final policy = SgAutomaticAuthorization();
+    var now = DateTime.utc(2026, 11, 17);
+    var revision = 'expired-cookie';
+    final login = Completer<bool>();
+    var loginCalls = 0;
+    var applyCalls = 0;
+    final status = SgCoreStatus.fromJson({
+      'present': true,
+      'rebuildRequired': true,
+      'authorizationError': 'CORPLINK_SESSION_EXPIRED',
+    });
+    Future<bool> recover() => policy.recover(
+      confirmed: () async => status.sessionExpired,
+      sessionKey: () async => revision,
+      canContinue: () async => true,
+      login: () async {
+        loginCalls++;
+        final ok = await login.future;
+        revision = 'fresh-cookie';
+        return ok;
+      },
+      apply: () async => ++applyCalls > 1,
+      now: () => now,
+    );
+    final first = recover();
+    expect(recover(), same(first));
+    login.complete(true);
+    expect(await first, isFalse);
+    expect(await recover(), isFalse);
+    expect(loginCalls, 1);
+    expect(applyCalls, 1);
+
+    now = now.add(const Duration(minutes: 5));
+    expect(await recover(), isTrue);
+    expect(loginCalls, 1);
+    expect(applyCalls, 2);
+  });
+
+  test('fresh login followed by another 101 is throttled from login completion', () async {
+    final policy = SgAutomaticAuthorization();
+    var now = DateTime.utc(2026, 11, 17);
+    var revision = 'expired-cookie';
+    var logins = 0;
+    Future<bool> recover() => policy.recover(
+      confirmed: () async => true,
+      sessionKey: () async => revision,
+      canContinue: () async => true,
+      login: () async {
+        revision = 'fresh-${++logins}';
+        now = now.add(const Duration(minutes: 6));
+        return true;
+      },
+      apply: () async => true,
+      now: () => now,
+    );
+    expect(await recover(), isTrue);
+    expect(await recover(), isFalse);
+    expect(logins, 1);
+  });
+
+  test('an explicit stop during fresh login prevents automatic profile apply', () async {
+    final policy = SgAutomaticAuthorization();
+    var allowed = true;
+    var revision = 'expired-cookie';
+    var applied = false;
+    expect(await policy.recover(
+      confirmed: () async => true,
+      sessionKey: () async => revision,
+      canContinue: () async => allowed,
+      login: () async {
+        allowed = false;
+        revision = 'fresh-cookie';
+        return true;
+      },
+      apply: () async => applied = true,
+    ), isFalse);
+    expect(applied, isFalse);
+  });
+
+  test('terminal rejections are recognized and numeric rejection has next steps', () {
+    expect(isTerminalCorplinkLoginError('LOGIN_FAILED'), isTrue);
+    expect(isTerminalCorplinkLoginError('FEILIAN_LOGIN_10110001'), isTrue);
+    expect(isTerminalCorplinkLoginError('NETWORK_FAILED'), isFalse);
+    final message = describeCorplinkAuthorizationError('FEILIAN_LOGIN_10110001');
+    expect(message, contains('10110001'));
+    expect(message, contains('保存并应用'));
   });
 }

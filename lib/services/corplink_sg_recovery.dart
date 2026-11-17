@@ -232,3 +232,62 @@ class SgRecoveryPolicy {
     return SgRecoveryAction.rebuild;
   }
 }
+
+const corplinkSessionExpiredCode = 'CORPLINK_SESSION_EXPIRED';
+
+String? corplinkAuthorizationError(Object? value) =>
+    value == corplinkSessionExpiredCode ? corplinkSessionExpiredCode : null;
+
+bool isTerminalCorplinkLoginError(String? code) =>
+    code == 'LOGIN_FAILED' || code == 'FEILIAN_LOGIN_10110001';
+
+/// Shared by all automatic entry points in the authorization owner's isolate.
+class SgAutomaticAuthorization {
+  Future<bool>? _inFlight;
+  String? _lastSession;
+  String? _refreshedSession;
+  DateTime? _nextAttempt;
+
+  Future<bool> recover({
+    required Future<bool> Function() confirmed,
+    required Future<String> Function() sessionKey,
+    required Future<bool> Function() canContinue,
+    required Future<bool> Function() login,
+    required Future<bool> Function() apply,
+    DateTime Function()? now,
+  }) {
+    final active = _inFlight;
+    if (active != null) return active;
+    final attempt = () async {
+      if (!await canContinue()) return false;
+      final session = await sessionKey();
+      final alreadyRefreshed = _refreshedSession == session;
+      if ((!alreadyRefreshed && !await confirmed()) || !await canContinue()) {
+        return false;
+      }
+      final time = (now ?? DateTime.now)();
+      if (_lastSession == session && _nextAttempt?.isAfter(time) == true) {
+        return false;
+      }
+      _lastSession = session;
+      const cooldown = Duration(minutes: 5);
+      _nextAttempt = time.add(cooldown);
+      if (!alreadyRefreshed) {
+        if (!await login()) return false;
+        _lastSession = _refreshedSession = await sessionKey();
+        // The helper may take several minutes and replaces the cookie file.
+        // Cool down the new revision from completion, even if setup returns 101.
+        _nextAttempt = (now ?? DateTime.now)().add(cooldown);
+      }
+      if (!await canContinue()) {
+        _nextAttempt = null;
+        return false;
+      }
+      if (!await apply()) return false;
+      _refreshedSession = null;
+      return true;
+    }();
+    _inFlight = attempt.whenComplete(() => _inFlight = null);
+    return _inFlight!;
+  }
+}

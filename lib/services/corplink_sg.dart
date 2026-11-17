@@ -27,6 +27,7 @@ const corplinkSgPasswordSecureKey = 'corplinkSg.password';
 const corplinkSgDeviceIdSecureKey = 'corplinkSg.deviceId';
 const corplinkSgDeviceNameSecureKey = 'corplinkSg.deviceName';
 const _secureStorage = FlutterSecureStorage();
+const _blockedAuthorizationKey = 'corplinkSg.blockedAutomaticAuthorization';
 final corplinkSgLastErrorCode = ValueNotifier<String?>(null);
 final corplinkSgLastCoreErrorCode = ValueNotifier<String?>(null);
 final corplinkSgLastScriptErrorCode = ValueNotifier<String?>(null);
@@ -78,8 +79,9 @@ class CorplinkSgSettings {
     return null;
   }
 
-  static Future<CorplinkSgSettings> load() async {
+  static Future<CorplinkSgSettings> load({bool reload = false}) async {
     final prefs = await SharedPreferences.getInstance();
+    if (reload) await prefs.reload();
     final securePassword =
         await _secureStorage.read(key: corplinkSgPasswordSecureKey) ?? '';
     return CorplinkSgSettings(
@@ -93,6 +95,11 @@ class CorplinkSgSettings {
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
+    final authChanged =
+        (prefs.getString(corplinkSgUsernameKey) ?? '') != username ||
+        (prefs.getString(corplinkSgServerKey) ?? '') != server ||
+        (await _secureStorage.read(key: corplinkSgPasswordSecureKey) ?? '') !=
+            password;
     await prefs.setBool(corplinkSgEnabledKey, enabled);
     await prefs.setBool(corplinkSgRouteOpenAiKey, routeOpenAi);
     await prefs.setString(corplinkSgUsernameKey, username);
@@ -101,6 +108,7 @@ class CorplinkSgSettings {
       value: password,
     );
     await prefs.setString(corplinkSgServerKey, server);
+    if (authChanged) await prefs.remove(_blockedAuthorizationKey);
   }
 
   Future<void> disable() => CorplinkSgSettings(
@@ -122,6 +130,22 @@ bool corplinkSgSettingsChanged(
       before.server != after.server;
 }
 
+bool corplinkPasswordChanged(
+  CorplinkSgSettings? before,
+  CorplinkSgSettings after,
+) => before != null &&
+    before.username.trim() == after.username.trim() &&
+    before.server.trim().replaceFirst(RegExp(r'/$'), '') ==
+        after.server.trim().replaceFirst(RegExp(r'/$'), '') &&
+    before.password != after.password;
+
+String describeCorplinkAuthorizationError(String? code) => switch (code) {
+  'FEILIAN_LOGIN_10110001' =>
+    '飞连拒绝登录（10110001）。请核对账号和完整密码（包括符号），修改后点“保存并应用”。',
+  null => '飞连授权失败，请查看应用日志。',
+  _ => '飞连授权失败（$code）。',
+};
+
 Future<String> corplinkSgHomePath() =>
     appPath.homeDirPath.then((path) => joinPath(path, 'corplink-sg'));
 
@@ -129,7 +153,42 @@ String joinPath(String base, String child) =>
     '$base${Platform.pathSeparator}$child';
 
 final _corplinkAuthCoordinator = CorplinkAuthCoordinator();
-String? _androidAuthorizationSessionKey;
+enum CorplinkAuthorizationRequest { useSaved, force, bootstrap, recover, recoverSetup }
+
+Future<String> corplinkSessionRevision() async {
+  final home = await corplinkSgHomePath();
+  for (final name in ['corplink_cookies.json', 'bettbox_cookies.txt']) {
+    final stat = await File(joinPath(home, name)).stat();
+    if (stat.type == FileSystemEntityType.file) {
+      return '$name:${stat.modified.microsecondsSinceEpoch}:${stat.size}';
+    }
+  }
+  return 'missing';
+}
+
+Future<bool> isCorplinkAutoAuthorizationBlocked(String revision) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.reload();
+  return prefs.getString(_blockedAuthorizationKey) == revision;
+}
+
+Future<void> blockCorplinkAutoAuthorization(String revision) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(_blockedAuthorizationKey, revision);
+}
+
+Future<bool> requestAndroidCorplinkAuthorization(
+  CorplinkAuthorizationRequest request,
+) async {
+  final (success, errorCode) = await clashLib!.requestCorplinkAuthorization(
+    request.name,
+    openLoginUrl: (url) async {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    },
+  );
+  corplinkSgLastErrorCode.value = errorCode;
+  return success;
+}
 
 /// The CookieStore is account-wide. Concurrent nodes must join the same
 /// login; a different account/server waits for that attempt to finish.
@@ -196,19 +255,47 @@ Future<bool> ensureCorplinkAuthorization(
   CorplinkSgSettings settings, {
   bool force = false,
 }) {
-  final sessionKey = '${settings.username.trim()}\u0000${settings.server.trim()}';
+  if (Platform.isAndroid) {
+    return requestAndroidCorplinkAuthorization(force
+        ? CorplinkAuthorizationRequest.force
+        : CorplinkAuthorizationRequest.useSaved);
+  }
+  return authorizeCorplinkInOwner(settings, force: force);
+}
+
+/// Android has one helper owner (the service isolate) for UI and native events.
+Future<bool> authorizeCorplinkInOwner(
+  CorplinkSgSettings settings, {
+  bool force = false,
+  void Function(Uri)? onLoginUrl,
+  Future<bool> Function()? canStart,
+}) async {
+  if (!settings.enabled) return false;
+  if (Platform.isAndroid && !force &&
+      await hasStoredCorplinkAuthorization(settings)) return true;
+  if (!settings.isConfigured) return false;
+  final sessionKey = '${settings.username.trim()}\u0000${settings.server.trim()}'
+      '\u0000${settings.password}';
   return _corplinkAuthCoordinator.ensure(
     sessionKey,
-    () => _ensureCorplinkAuthorization(settings, force: force),
+    () async {
+      if (canStart != null && !await canStart()) return false;
+      corplinkSgLastErrorCode.value = null;
+      return _ensureCorplinkAuthorization(settings, force: force,
+          onLoginUrl: onLoginUrl, canStart: canStart);
+    },
   );
 }
 
 Future<bool> _ensureCorplinkAuthorization(
   CorplinkSgSettings settings, {
-  bool force = false,
+  required bool force,
+  void Function(Uri)? onLoginUrl,
+  Future<bool> Function()? canStart,
 }) async {
   if (Platform.isAndroid) {
-    return _ensureAndroidCorplinkAuthorization(settings, force: force);
+    return _ensureAndroidCorplinkAuthorization(settings, force: force,
+        onLoginUrl: onLoginUrl, canStart: canStart);
   }
   final home = await corplinkSgHomePath();
   final configPath = joinPath(home, 'config.json');
@@ -298,9 +385,11 @@ Future<bool> _ensureCorplinkAuthorization(
 }
 
 Future<bool> _ensureAndroidCorplinkAuthorization(
-  CorplinkSgSettings settings,
-  {bool force = false}
-) async {
+  CorplinkSgSettings settings, {
+  required bool force,
+  void Function(Uri)? onLoginUrl,
+  Future<bool> Function()? canStart,
+}) async {
   if (!force) {
     final home = await corplinkSgHomePath();
     final current = await loadCorplinkConfig();
@@ -325,20 +414,30 @@ Future<bool> _ensureAndroidCorplinkAuthorization(
   // can never complete a login (it requires a TOTP completion URL), so it
   // would only convert a real helper error into a misleading LOGIN_FAILED.
   return _corplinkAuthorizationNetworkGate.run<bool>(
-    beginBypass: Vpn().beginControlPlaneBypass,
+    beginBypass: () async {
+      if (canStart != null && !await canStart()) {
+        throw StateError('SG_MAINTENANCE_NOT_READY');
+      }
+      final token = await Vpn().beginControlPlaneBypass();
+      if (token == null && canStart != null && !await canStart()) {
+        throw StateError('SG_MAINTENANCE_NOT_READY');
+      }
+      return token;
+    },
     action: () async {
       final nativeResult = await _ensureAndroidCorplinkRsAuthorization(
         settings,
         force: force,
+        onLoginUrl: onLoginUrl,
       );
       if (nativeResult == true) return true;
       if (nativeResult == null) {
-        return _ensureAndroidCorplinkAuthorizationLegacy(settings);
+        return _ensureAndroidCorplinkAuthorizationLegacy(settings, force: force);
       }
       return false;
     },
     endBypass: Vpn().endControlPlaneBypass,
-    isNativeReady: () async => await clashLib?.getAndroidVpnReady() == true,
+    isNativeReady: () => ClashLibHandler().getAndroidVpnReady(),
     settle: () => Future<void>.delayed(const Duration(milliseconds: 200)),
   );
 }
@@ -381,31 +480,35 @@ Future<bool> hasUsableCorplinkSession(CorplinkSgSettings settings) async {
   );
 }
 
-/// Discard renewable CorpLink session material. A server-side auth rejection
-/// also invalidates the device binding: the next login must advertise a new
-/// Android device identity so one account can keep multiple installations
-/// connected, matching the Feilian multi-device revision.
-Future<void> invalidateCorplinkAuthorization() async {
-  final home = await corplinkSgHomePath();
-  for (final name in const [
-    'config.json',
-    'corplink_cookies.json',
-    'bettbox_cookies.txt',
-  ]) {
-    final file = File(joinPath(home, name));
-    if (file.existsSync()) await file.delete();
-  }
-  await _secureStorage.delete(key: corplinkSgDeviceIdSecureKey);
-  await _secureStorage.delete(key: corplinkSgDeviceNameSecureKey);
-  _androidAuthorizationSessionKey = null;
+Future<bool> hasStoredCorplinkAuthorization(CorplinkSgSettings settings) async {
+  return corplinkAuthMatchesSettings(await loadCorplinkConfig(), settings) &&
+      await corplinkSessionRevision() != 'missing';
 }
 
 Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   CorplinkSgSettings settings,
-  {bool force = false}
+  {required bool force, void Function(Uri)? onLoginUrl}
 ) async {
   final home = await corplinkSgHomePath();
   await Directory(home).create(recursive: true);
+  // Start with empty helper files, while keeping the installed identity,
+  // keys and session intact if the new login is refused.
+  final staging = force ? await Directory(home).createTemp('reauthorize-') : null;
+  try {
+    return await _runAndroidCorplinkRsAuthorization(
+      settings, home, staging: staging, onLoginUrl: onLoginUrl,
+    );
+  } finally {
+    if (staging != null) await staging.delete(recursive: true);
+  }
+}
+
+Future<bool?> _runAndroidCorplinkRsAuthorization(
+  CorplinkSgSettings settings,
+  String home, {
+  required Directory? staging,
+  void Function(Uri)? onLoginUrl,
+}) async {
   // Android SELinux does not allow an app to execute an ELF copied into its
   // ordinary files directory. The CI build packages this helper as a native
   // library, whose extracted directory is executable by the app process.
@@ -434,27 +537,20 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
 
   final configPath = joinPath(home, 'config.json');
   final cookiePath = joinPath(home, 'corplink_cookies.json');
+  final targetConfig = joinPath(staging?.path ?? home, 'config.json');
+  final targetCookie = joinPath(staging?.path ?? home, 'corplink_cookies.json');
   final current = await loadCorplinkConfig();
-  final sessionKey = '${settings.username}\u0000${settings.server}';
-  final hasPersistedAuthorization =
-      corplinkAuthMatchesSettings(current, settings) &&
-      File(cookiePath).existsSync();
-  if (hasPersistedAuthorization && !force) {
-    // The core will reject an expired session and the next explicit retry can
-    // re-enter the helper. Do not force a browser/Feilian login on every app
-    // process restart when the persisted session is still usable.
-    _androidAuthorizationSessionKey = sessionKey;
-    return true;
-  }
+  final matchingKeys = corplinkAuthMatchesSettings(current, settings);
+  if (matchingKeys && File(cookiePath).existsSync() && staging == null) return true;
   final identity = await _loadOrCreateAndroidIdentity(current);
   // The helper reuses the stable device identity and writes the refreshed
   // CookieStore/config atomically.
 
-  final keyPair = await X25519().newKeyPair();
-  final publicKey = hasPersistedAuthorization
+  final keyPair = matchingKeys ? null : await X25519().newKeyPair();
+  final publicKey = keyPair == null
       ? current!['public_key'].toString()
       : base64Encode((await keyPair.extractPublicKey()).bytes);
-  final privateKey = hasPersistedAuthorization
+  final privateKey = keyPair == null
       ? current!['private_key'].toString()
       : base64Encode(await keyPair.extractPrivateKeyBytes());
   final request = jsonEncode(buildAndroidCorplinkMachineRequest(
@@ -465,8 +561,8 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
     deviceId: identity.$2,
     publicKey: publicKey,
     privateKey: privateKey,
-    authFile: configPath,
-    cookieFile: cookiePath,
+    authFile: targetConfig,
+    cookieFile: targetCookie,
   ));
 
   Process process;
@@ -497,9 +593,7 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
         if (event['event'] == 'login_url') {
           debugPrint('[APP] CorpLink helper event=login_url');
           final url = Uri.tryParse(event['url']?.toString() ?? '');
-          if (url != null) {
-            await launchUrl(url, mode: LaunchMode.externalApplication);
-          }
+          if (url != null) onLoginUrl?.call(url);
         } else if (event['event'] == 'success') {
           debugPrint('[APP] CorpLink helper event=success');
           corplinkSgLastErrorCode.value = null;
@@ -507,11 +601,15 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
         } else if (event['event'] == 'auth_required') {
           debugPrint('[APP] CorpLink helper event=auth_required');
         } else if (event['event'] == 'error') {
-          corplinkSgLastErrorCode.value =
-              event['code']?.toString() ?? 'LOGIN_FAILED';
+          final rawCode = event['code'];
+          final code = rawCode is String &&
+                  RegExp(r'^[A-Z][A-Z0-9_]{0,63}$').hasMatch(rawCode)
+              ? rawCode
+              : 'LOGIN_FAILED';
+          corplinkSgLastErrorCode.value = code;
           debugPrint(
             '[APP] CorpLink helper event=error '
-            'code=${event['code'] ?? 'unknown'}',
+            'code=$code',
           );
         } else if (event['event'] == 'refresh_started') {
           debugPrint('[APP] CorpLink helper event=refresh_started');
@@ -550,15 +648,16 @@ Future<bool?> _ensureAndroidCorplinkRsAuthorization(
   );
   if (exitCode != 0 || !succeeded) return false;
 
-  final generated = await loadCorplinkConfig();
-  if (generated == null) return false;
-  final sanitized = Map<String, dynamic>.from(generated)..remove('password');
-  await File(configPath).writeAsString(jsonEncode(sanitized), flush: true);
-  final authorized = sanitized['private_key'] is String &&
-      (sanitized['private_key'] as String).isNotEmpty &&
-      File(cookiePath).existsSync();
-  if (authorized) _androidAuthorizationSessionKey = sessionKey;
-  return authorized;
+  final generated = await _readCorplinkConfig(targetConfig);
+  if (!corplinkAuthMatchesSettings(generated, settings) ||
+      !await File(targetCookie).exists()) return false;
+  final sanitized = Map<String, dynamic>.from(generated!)..remove('password');
+  await File(targetConfig).writeAsString(jsonEncode(sanitized), flush: true);
+  if (staging != null) {
+    await File(targetConfig).rename(configPath);
+    await File(targetCookie).rename(cookiePath);
+  }
+  return true;
 }
 
 Map<String, dynamic> buildAndroidCorplinkMachineRequest({
@@ -594,8 +693,9 @@ Map<String, dynamic> buildAndroidCorplinkMachineRequest({
 }
 
 Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
-  CorplinkSgSettings settings,
-) async {
+  CorplinkSgSettings settings, {
+  required bool force,
+}) async {
   final home = await corplinkSgHomePath();
   await Directory(home).create(recursive: true);
   final configPath = joinPath(home, 'config.json');
@@ -603,7 +703,7 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
   final rustCookiePath = joinPath(home, 'corplink_cookies.json');
   final current = await loadCorplinkConfig();
   final identity = await _loadOrCreateAndroidIdentity(current);
-  if (corplinkAuthMatchesSettings(current, settings) &&
+  if (!force && corplinkAuthMatchesSettings(current, settings) &&
       (File(cookiePath).existsSync() || File(rustCookiePath).existsSync())) {
     return true;
   }
@@ -699,7 +799,10 @@ Future<bool> _ensureAndroidCorplinkAuthorizationLegacy(
 }
 
 Future<Map<String, dynamic>?> loadCorplinkConfig() async {
-  final path = joinPath(await corplinkSgHomePath(), 'config.json');
+  return _readCorplinkConfig(joinPath(await corplinkSgHomePath(), 'config.json'));
+}
+
+Future<Map<String, dynamic>?> _readCorplinkConfig(String path) async {
   final file = File(path);
   if (!file.existsSync()) return null;
   try {

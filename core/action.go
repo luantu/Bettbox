@@ -314,7 +314,7 @@ func handleAction(action *Action, result ActionResult) {
 			result.success(false)
 			return
 		}
-		result.success(handleRebuildCorplinkNode(serverName))
+		result.success(corplinkRebuildReply(handleRebuildCorplinkNode(serverName)))
 		return
 	case ensureCorplinkNodeMethod:
 		serverName, ok := action.Data.(string)

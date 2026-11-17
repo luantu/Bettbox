@@ -24,6 +24,7 @@ import 'common/smart_network_policy.dart';
 import 'models/models.dart';
 import 'services/corplink_sg.dart';
 import 'services/corplink_sg_nodes.dart';
+import 'services/corplink_sg_recovery.dart';
 import 'services/corplink_sg_runtime.dart';
 import 'services/corplink_native_nodes.dart';
 import 'services/sg_network_handoff.dart';
@@ -122,16 +123,142 @@ Future<void> _service(List<String> flags) async {
     final smartAutoStopLock = Lock();
     Timer? smartAutoStopDebounce;
     var sgMaintenanceInFlight = false;
+    var setupReportedExpired = false;
+    var bootstrapRequested = false;
+    final authorizationRecovery = SgAutomaticAuthorization();
+    final sgNodeRecoveryPolicies = <String, SgRecoveryPolicy>{};
+
+    Future<bool> recoverAuthorization({bool bootstrap = false}) async {
+      final settings = await CorplinkSgSettings.load(reload: true);
+      if (!settings.enabled || !settings.isConfigured) return false;
+      Future<bool> settingsStillCurrent() async {
+        final latest = await CorplinkSgSettings.load(reload: true);
+        return latest.enabled &&
+            latest.username == settings.username &&
+            latest.server == settings.server &&
+            latest.password == settings.password;
+      }
+      Future<bool> canContinue() async =>
+          await settingsStillCurrent() && await canMaintainCorplinkNodes();
+
+      if (!bootstrap && !setupReportedExpired &&
+          (await loadCorplinkNodeSelections()) == null) return false;
+      return authorizationRecovery.recover(
+        confirmed: () async {
+          final names = (await loadCorplinkNodeSelections())
+              ?.where((node) => node.enabled).map((node) => node.serverName).toSet();
+          final expired = setupReportedExpired ||
+              (await nativeSgNodes.readStatuses()).any(
+                (status) => status.sessionExpired && names?.contains(status.serverName) == true,
+              );
+          return expired || (bootstrap && !await hasStoredCorplinkAuthorization(settings));
+        },
+        sessionKey: () async => '${await corplinkSessionRevision()}\u0000'
+            '${settings.username}\u0000${settings.server}\u0000${settings.password}',
+        canContinue: canContinue,
+        login: () async {
+          final revision = await corplinkSessionRevision();
+          if (await isCorplinkAutoAuthorizationBlocked(revision)) return false;
+          bool ok;
+          try {
+            ok = await authorizeCorplinkInOwner(
+              settings, force: true,
+              canStart: canContinue,
+            );
+          } catch (_) {
+            // A helper can publish a fresh session before the Android TUN
+            // restoration reports failure. Retain it for a later apply.
+            if (await corplinkSessionRevision() != revision &&
+                await settingsStillCurrent() &&
+                await hasStoredCorplinkAuthorization(settings)) return true;
+            rethrow;
+          }
+          if (!ok && isTerminalCorplinkLoginError(corplinkSgLastErrorCode.value) &&
+              await settingsStillCurrent()) {
+            await blockCorplinkAutoAuthorization(revision);
+          }
+          return ok;
+        },
+        apply: () async {
+          final saved = await preferences.getConfig();
+          if (saved == null) return false;
+          final profile = saved.currentProfile;
+          if (profile == null || !await canContinue()) return false;
+          final activeProfile = clashLibHandler.getCurrentProfileName();
+          if (activeProfile.isNotEmpty &&
+              activeProfile != (profile.label ?? profile.id)) return false;
+          globalState.config = saved;
+          final params = await globalState.getSetupParams(
+            pathConfig: saved.patchClashConfig.copyWith.tun(enable: false),
+          );
+          if (!await canContinue() ||
+              activeProfile != clashLibHandler.getCurrentProfileName()) {
+            if (params.scriptedConfig.isNotEmpty) {
+              await File(params.scriptedConfig).delete();
+            }
+            return false;
+          }
+          final result = await clashLibHandler.setupConfig(params);
+          if (result.message.isNotEmpty) return false;
+          setupReportedExpired = false;
+          bootstrapRequested = false;
+          sgNodeRecoveryPolicies.clear();
+          commonPrint.log('[CorpLinkSG] automatic authorization applied');
+          return true;
+        },
+      );
+    }
+
+    Future<bool> handleAuthorizationRequest(
+      CorplinkAuthorizationRequest request,
+      void Function(Uri) onLoginUrl,
+    ) async {
+      switch (request) {
+        case CorplinkAuthorizationRequest.useSaved:
+        case CorplinkAuthorizationRequest.force:
+          final settings = await CorplinkSgSettings.load(reload: true);
+          final revision = await corplinkSessionRevision();
+          final ok = await authorizeCorplinkInOwner(
+            settings,
+            force: request == CorplinkAuthorizationRequest.force,
+            onLoginUrl: onLoginUrl,
+          );
+          if (ok) {
+            setupReportedExpired = false;
+            bootstrapRequested = false;
+          } else if (isTerminalCorplinkLoginError(corplinkSgLastErrorCode.value)) {
+            final latest = await CorplinkSgSettings.load(reload: true);
+            if (latest.username == settings.username &&
+                latest.server == settings.server &&
+                latest.password == settings.password) {
+              await blockCorplinkAutoAuthorization(revision);
+            }
+          }
+          return ok;
+        case CorplinkAuthorizationRequest.recoverSetup:
+          setupReportedExpired = true;
+          return recoverAuthorization();
+        case CorplinkAuthorizationRequest.recover:
+          return recoverAuthorization();
+        case CorplinkAuthorizationRequest.bootstrap:
+          bootstrapRequested = true;
+          return recoverAuthorization(bootstrap: true);
+      }
+    }
+
+    bool shouldRebuildUnreadyNode(String name, bool healthy) {
+      final policy = sgNodeRecoveryPolicies.putIfAbsent(name, SgRecoveryPolicy.new);
+      return policy.recordProbe(healthy, DateTime.now()) == SgRecoveryAction.rebuild;
+    }
 
     Future<void> maintainSgNodes() async {
       if (sgMaintenanceInFlight) return;
       sgMaintenanceInFlight = true;
       try {
         if (!await canMaintainCorplinkNodes()) return;
-        final snapshot = await vpn?.getSmartNetworkSnapshot();
-        if (SmartNetworkSnapshot.decode(snapshot).isEmpty) return;
-        final settings = await CorplinkSgSettings.load();
+        final settings = await CorplinkSgSettings.load(reload: true);
         if (!settings.enabled) return;
+        if (await recoverAuthorization(bootstrap: bootstrapRequested)) return;
         final selected = await loadCorplinkNodeSelections();
         if (selected == null) return;
         final unready = await restoreCorplinkNodesAfterNetworkChange(
@@ -141,7 +268,9 @@ Future<void> _service(List<String> flags) async {
           reconnect: nativeSgNodes.reconnect,
           rebuild: nativeSgNodes.rebuild,
           canContinue: canMaintainCorplinkNodes,
+          shouldRebuildUnready: shouldRebuildUnreadyNode,
         );
+        await recoverAuthorization();
         if (await canMaintainCorplinkNodes()) {
           commonPrint.log('[SG maintenance] checked=${selected.where((node) => node.enabled).length} '
               'unready=${unready.length}');
@@ -182,7 +311,9 @@ Future<void> _service(List<String> flags) async {
               reconnect: nativeSgNodes.reconnect,
               rebuild: nativeSgNodes.rebuild,
               canContinue: canMaintainCorplinkNodes,
+              shouldRebuildUnready: shouldRebuildUnreadyNode,
             );
+            await recoverAuthorization();
             commonPrint.log('[reconnectTunnels] independent SG nodes '
                 'still unready=${remaining.length}');
             return;
@@ -277,7 +408,7 @@ Future<void> _service(List<String> flags) async {
           commonPrint.log(
             'Service: reconnectIpc requested, re-establishing IPC',
           );
-          _handleMainIpc(clashLibHandler);
+          _handleMainIpc(clashLibHandler, handleAuthorizationRequest);
         },
       ),
     );
@@ -302,7 +433,7 @@ Future<void> _service(List<String> flags) async {
     );
 
     if (!quickStart && !bootStart) {
-      _handleMainIpc(clashLibHandler);
+      _handleMainIpc(clashLibHandler, handleAuthorizationRequest);
       return;
     }
 
@@ -315,7 +446,7 @@ Future<void> _service(List<String> flags) async {
       commonPrint.log(
         'Automatic service start suppressed by settings or explicit user stop.',
       );
-      _handleMainIpc(clashLibHandler);
+      _handleMainIpc(clashLibHandler, handleAuthorizationRequest);
       return;
     }
 
@@ -337,11 +468,13 @@ Future<void> _service(List<String> flags) async {
         if (profileId == null) {
           return;
         }
-        var message = (await clashLibHandler.quickStart(
+        final setup = await clashLibHandler.quickStart(
           InitParams(homeDir: homeDirPath, version: version),
           params,
           globalState.getCoreState(),
-        )).message;
+        );
+        setupReportedExpired = corplinkAuthorizationError(setup.corplinkAuthorizationError) != null;
+        var message = setup.message;
         if (message.isNotEmpty) {
           final settings = await CorplinkSgSettings.load();
           if (await hasUsableCorplinkSession(settings)) {
@@ -392,6 +525,7 @@ Future<void> _service(List<String> flags) async {
         }
 
         clashLibHandler.startListener();
+        unawaited(maintainSgNodes());
       } catch (e) {
         commonPrint.error('Fatal error during service background start: $e');
         await vpn?.stop();
@@ -401,7 +535,10 @@ Future<void> _service(List<String> flags) async {
   }
 }
 
-void _handleMainIpc(ClashLibHandler clashLibHandler) {
+void _handleMainIpc(
+  ClashLibHandler clashLibHandler,
+  Future<bool> Function(CorplinkAuthorizationRequest, void Function(Uri)) authorize,
+) {
   final sendPort = IsolateNameServer.lookupPortByName(mainIsolate);
   if (sendPort == null) {
     commonPrint.warn(
@@ -415,6 +552,21 @@ void _handleMainIpc(ClashLibHandler clashLibHandler) {
 
   _serviceReceiverPort = ReceivePort();
   _serviceReceiverPort!.listen((message) async {
+    if (message is List && message.length == 2 && message.first is SendPort) {
+      final reply = message.first as SendPort;
+      try {
+        final request = CorplinkAuthorizationRequest.values.byName(message.last as String);
+        final ok = await authorize(
+          request,
+          (url) => reply.send(['loginUrl', url.toString()]),
+        );
+        reply.send([ok, corplinkSgLastErrorCode.value]);
+      } catch (error) {
+        commonPrint.log('[CorpLinkSG] authorization request failed: ${error.runtimeType}');
+        reply.send([false, corplinkSgLastErrorCode.value ?? 'CORPLINK_AUTHORIZATION_FAILED']);
+      }
+      return;
+    }
     final res = await clashLibHandler.invokeAction(message);
     _safeSend(sendPort, res);
   });

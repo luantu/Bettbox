@@ -125,6 +125,35 @@ class ClashLib extends ClashHandlerInterface with AndroidClashInterface {
     return null;
   }
 
+  Future<(bool, String?)> requestCorplinkAuthorization(
+    String request, {
+    required Future<void> Function(Uri) openLoginUrl,
+  }) async {
+    final connected = await _canSendCompleter.future.timeout(
+      const Duration(seconds: 5), onTimeout: () => false,
+    );
+    final target = sendPort;
+    if (!connected || target == null) throw StateError('CORPLINK_SERVICE_UNAVAILABLE');
+    final replies = ReceivePort();
+    try {
+      target.send([replies.sendPort, request]);
+      await for (final reply in replies.timeout(const Duration(minutes: 8))) {
+        if (reply is List && reply.length == 2) {
+          if (reply.first == 'loginUrl') {
+            final url = Uri.tryParse(reply.last as String);
+            if (url != null) await openLoginUrl(url);
+            continue;
+          }
+          if (reply.first is bool) return (reply.first as bool, reply.last as String?);
+        }
+        throw StateError('CORPLINK_SERVICE_REPLY_INVALID');
+      }
+      throw StateError('CORPLINK_SERVICE_UNAVAILABLE');
+    } finally {
+      replies.close();
+    }
+  }
+
   // @override
   // Future<bool> stopTun() {
   //   return invoke<bool>(
@@ -207,6 +236,24 @@ class ClashLibHandler {
     final response = await invokeAction('{"id":"$id","method":"reconnectTunnels"}');
     final result = ActionResult.fromJson(json.decode(response));
     return result.code == ResultType.success && result.data == true;
+  }
+
+  Future<bool> getAndroidVpnReady() async {
+    final response = await invokeAction(
+      '{"method":"getAndroidVpnReady"}', timeout: const Duration(seconds: 2),
+    );
+    final result = ActionResult.fromJson(json.decode(response));
+    return result.code == ResultType.success && result.data == true;
+  }
+
+  Future<SetupResult> setupConfig(SetupParams params) async {
+    final response = await invokeAction(jsonEncode({
+      'method': 'setupConfig',
+      'data': jsonEncode(params),
+    }), timeout: const Duration(seconds: 55));
+    final result = ActionResult.fromJson(json.decode(response));
+    if (result.code != ResultType.success) throw StateError('CORPLINK_SETUP_FAILED');
+    return SetupResult.fromData(result.data);
   }
 
   Future<bool?> corplinkSgReady() async {

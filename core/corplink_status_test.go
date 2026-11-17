@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -119,13 +120,13 @@ func TestCorplinkNamedRebuildTouchesOnlyOneNode(t *testing.T) {
 		"FZ-INT-Node-WG":   statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(intl)},
 		"FUZHOU-NODE-1-WG": statusProxy{adapter: outbound.NewAutoCloseProxyAdapter(fuzhou)},
 	}
-	if !rebuildCorplinkNodeFromProxies(context.Background(), proxies, "FZ-INT-Node") {
+	if err := rebuildCorplinkNodeFromProxies(context.Background(), proxies, "FZ-INT-Node"); err != nil {
 		t.Fatal("selected node was not rebuilt")
 	}
 	if intl.rebuilds != 1 || fuzhou.rebuilds != 0 {
 		t.Fatalf("rebuild crossed node boundary: intl=%d fuzhou=%d", intl.rebuilds, fuzhou.rebuilds)
 	}
-	if rebuildCorplinkNodeFromProxies(context.Background(), proxies, "missing") {
+	if err := rebuildCorplinkNodeFromProxies(context.Background(), proxies, "missing"); err == nil {
 		t.Fatal("unknown node unexpectedly rebuilt")
 	}
 }
@@ -152,6 +153,20 @@ func TestCorplinkVPNNodeListRejectsMalformedInput(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "Cookie") || strings.Contains(err.Error(), "private") {
 		t.Fatal("discovery error exposed authentication material")
+	}
+}
+
+func TestCorplinkRebuildReplyPreservesOnlyTypedExpiry(t *testing.T) {
+	if reply := corplinkRebuildReply(nil); reply != true {
+		t.Fatalf("successful rebuild returned %v", reply)
+	}
+	if reply := corplinkRebuildReply(errors.New("corplink vpn list code 101")); reply != false {
+		t.Fatalf("untyped error crossed the IPC boundary: %v", reply)
+	}
+	wrapped := fmt.Errorf("private context: %w", outbound.ErrCorplinkSessionExpired)
+	reply, ok := corplinkRebuildReply(wrapped).(map[string]string)
+	if !ok || len(reply) != 1 || reply["authorizationError"] != outbound.CorplinkSessionExpiredCode {
+		t.Fatalf("rebuild lost typed expiration or exposed context: %v", reply)
 	}
 }
 

@@ -44,6 +44,7 @@ abstract class SetupResult with _$SetupResult {
   const factory SetupResult({
     @Default('') String message,
     @Default('') String global,
+    String? corplinkAuthorizationError,
   }) = _SetupResult;
 
   factory SetupResult.fromJson(Map<String, dynamic> json) =>

@@ -619,13 +619,23 @@ func handleReconnectCorplinkNode(serverName string) bool {
 	return reconnectCorplinkNodeFromProxies(tunnel.Proxies(), serverName)
 }
 
-func rebuildCorplinkNodeFromProxies(ctx context.Context, proxies map[string]constant.Proxy, serverName string) bool {
+var errCorplinkNodeUnavailable = fmt.Errorf("corplink node unavailable")
+
+// Keep bool replies for ordinary results, adding only the safe typed rejection.
+func corplinkRebuildReply(err error) any {
+	if code := outbound.CorplinkAuthorizationErrorCode(err); code != "" {
+		return map[string]string{"authorizationError": code}
+	}
+	return err == nil
+}
+
+func rebuildCorplinkNodeFromProxies(ctx context.Context, proxies map[string]constant.Proxy, serverName string) error {
 	if serverName == "" {
-		return false
+		return errCorplinkNodeUnavailable
 	}
 	proxy, ok := proxies[serverName+"-WG"]
 	if !ok {
-		return false
+		return errCorplinkNodeUnavailable
 	}
 	adapter := outbound.UnderlyingProxyAdapter(proxy.Adapter())
 	named, ok := adapter.(interface {
@@ -633,16 +643,16 @@ func rebuildCorplinkNodeFromProxies(ctx context.Context, proxies map[string]cons
 		RebuildCorplink(context.Context) error
 	})
 	if !ok || named.CorplinkServerName() != serverName {
-		return false
+		return errCorplinkNodeUnavailable
 	}
-	return named.RebuildCorplink(ctx) == nil
+	return named.RebuildCorplink(ctx)
 }
 
-func handleRebuildCorplinkNode(serverName string) bool {
+func handleRebuildCorplinkNode(serverName string) error {
 	runLock.Lock()
 	if !isInit {
 		runLock.Unlock()
-		return false
+		return errCorplinkNodeUnavailable
 	}
 	proxies := tunnel.Proxies()
 	runLock.Unlock()
@@ -1382,7 +1392,7 @@ func handleSetupConfig(bytes []byte) *SetupResult {
 	suspendModeLock.Unlock()
 	global, err := setupConfig(params)
 	if err != nil {
-		return &SetupResult{Message: err.Error()}
+		return &SetupResult{Message: err.Error(), CorplinkAuthorizationError: outbound.CorplinkAuthorizationErrorCode(err)}
 	}
 	return &SetupResult{Global: global}
 }

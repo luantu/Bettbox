@@ -446,6 +446,19 @@ func (s *corplinkControlSession) request(method, endpoint string, body io.Reader
 	return s.client.Do(req)
 }
 
+// ErrCorplinkSessionExpired is a confirmed rejection of the management session.
+var ErrCorplinkSessionExpired = errors.New("corplink vpn list code 101")
+
+const CorplinkSessionExpiredCode = "CORPLINK_SESSION_EXPIRED"
+
+// CorplinkAuthorizationErrorCode is safe to send over IPC or include in status.
+func CorplinkAuthorizationErrorCode(err error) string {
+	if errors.Is(err, ErrCorplinkSessionExpired) {
+		return CorplinkSessionExpiredCode
+	}
+	return ""
+}
+
 func (s *corplinkControlSession) listVPNNodes() ([]corplinkVPNNode, error) {
 	var nodes corplinkEnvelope[[]corplinkVPNNode]
 	listResp, err := s.request(http.MethodGet, s.base+"/api/vpn/list?os=Android&os_version=2", nil)
@@ -462,6 +475,9 @@ func (s *corplinkControlSession) listVPNNodes() ([]corplinkVPNNode, error) {
 	}
 	if err := json.Unmarshal(listBody, &nodes); err != nil {
 		return nil, errors.New("corplink vpn list invalid response")
+	}
+	if nodes.Code == 101 {
+		return nil, ErrCorplinkSessionExpired
 	}
 	if nodes.Code != 0 {
 		// The server message may contain account or session material. Only the

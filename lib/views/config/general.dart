@@ -848,9 +848,12 @@ class CorplinkSgItem extends ConsumerWidget {
             if (result.enabled) {
               globalState.showNotifier('正在授权飞连 SG-Node…');
               try {
-                final authorized = await ensureCorplinkAuthorization(result);
+                final authorized = await ensureCorplinkAuthorization(result,
+                    force: corplinkPasswordChanged(current, result));
                 if (!authorized) {
-                  globalState.showNotifier('SG-Node 授权失败，普通代理仍可继续使用');
+                  globalState.showNotifier(
+                    describeCorplinkAuthorizationError(corplinkSgLastErrorCode.value),
+                  );
                 }
               } on Object catch (e) {
                 commonPrint.log('[CorpLinkSG] authorize failed: $e');

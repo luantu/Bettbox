@@ -22,13 +22,17 @@ class CorplinkNativeNodes {
   }
 
   Future<SgCoreStatus> readStatus(String name) async {
-    final data = await _invoke('getCorplinkNodeStatuses', null, const Duration(seconds: 4));
-    if (data is! List) throw StateError('CORPLINK_NATIVE_STATUS_UNAVAILABLE');
-    for (final value in data) {
-      if (value is Map && value['serverName'] == name) return SgCoreStatus.fromJson(value);
+    for (final status in await readStatuses()) {
+      if (status.serverName == name) return status;
     }
     return SgCoreStatus(serverName: name, present: false, initialized: false,
       ready: false, rebuildRequired: false, closed: false, tunnelIp: '', endpoint: '');
+  }
+
+  Future<List<SgCoreStatus>> readStatuses() async {
+    final data = await _invoke('getCorplinkNodeStatuses', null, const Duration(seconds: 4));
+    if (data is! List) throw StateError('CORPLINK_NATIVE_STATUS_UNAVAILABLE');
+    return [for (final value in data) if (value is Map) SgCoreStatus.fromJson(value)];
   }
 
   Future<bool> ensure(String name) async =>

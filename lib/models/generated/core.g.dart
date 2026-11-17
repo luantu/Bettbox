@@ -30,10 +30,15 @@ Map<String, dynamic> _$SetupParamsToJson(_SetupParams instance) =>
 _SetupResult _$SetupResultFromJson(Map<String, dynamic> json) => _SetupResult(
   message: json['message'] as String? ?? '',
   global: json['global'] as String? ?? '',
+  corplinkAuthorizationError: json['corplinkAuthorizationError'] as String?,
 );
 
 Map<String, dynamic> _$SetupResultToJson(_SetupResult instance) =>
-    <String, dynamic>{'message': instance.message, 'global': instance.global};
+    <String, dynamic>{
+      'message': instance.message,
+      'global': instance.global,
+      'corplinkAuthorizationError': instance.corplinkAuthorizationError,
+    };
 
 _UpdateParams _$UpdateParamsFromJson(Map<String, dynamic> json) =>
     _UpdateParams(

@@ -71,6 +71,10 @@ class CorplinkNodeProbeObservation {
 final _corplinkVpnStartGate = CorplinkVpnStartGate();
 
 Future<void> ensureCorplinkVpnReady() async {
+  if (await globalState.getVpnRunIntent(reload: true) == false ||
+      (system.isAndroid && await Vpn().isCompatibilityPaused())) {
+    throw StateError('SG_MAINTENANCE_NOT_READY');
+  }
   if (system.isAndroid && await Vpn().isSmartStopped()) {
     // A diagnostic refresh must not turn system capture back on. The retained
     // protection callback is sufficient for WG while capture is smart-paused.
@@ -93,11 +97,15 @@ Future<void> ensureCorplinkVpnReady() async {
       return await clashLib?.getAndroidVpnReady() == true;
     },
     requestStart: () async {
-      if (system.isAndroid && await Vpn().isSmartStopped()) return;
+      if (await globalState.getVpnRunIntent(reload: true) == false ||
+          (system.isAndroid &&
+              (await Vpn().isSmartStopped() || await Vpn().isCompatibilityPaused()))) {
+        return;
+      }
       // Native readiness, not an optimistic UI timestamp, governs Android
       // retries after a cancelled permission prompt or a failed constructor.
       if (needsNativeTun || !globalState.isStart) {
-        await globalState.appController.updateStatus(true);
+        await globalState.appController.updateStatus(true, recordRunIntent: false);
       }
     },
     settle: () => Future<void>.delayed(const Duration(milliseconds: 200)),
@@ -119,13 +127,13 @@ Future<SgCoreStatus> refreshCorplinkNodeStatus(
   String healthUrl = '',
   void Function(bool success)? onProbe,
 }) async {
-  await ensureCorplinkVpnReady();
-  return recoverCorplinkNodeStatus(
+  Future<SgCoreStatus> refresh() => recoverCorplinkNodeStatus(
     serverName: serverName,
     readStatus: () => readCorplinkNodeStatus(serverName),
     ensureHandshake: clashCore.ensureCorplinkNode,
     reconnect: clashCore.reconnectCorplinkNode,
     rebuild: clashCore.rebuildCorplinkNode,
+    canContinue: system.isAndroid ? canMaintainCorplinkNodes : null,
     probeUrl: healthUrl,
     probe: (name, url) => observeCorplinkNodeProbe(
       name,
@@ -134,6 +142,20 @@ Future<SgCoreStatus> refreshCorplinkNodeStatus(
       onProbe: onProbe,
     ),
   );
+  // During an automatic login Android may have temporarily removed capture.
+  // Join that login before considering a startup request.
+  final before = await readCorplinkNodeStatus(serverName);
+  if (before.sessionExpired) {
+    if (!await globalState.appController.recoverExpiredCorplinkSession() ||
+        (system.isAndroid && !await canMaintainCorplinkNodes())) return before;
+    return refresh();
+  }
+  await ensureCorplinkVpnReady();
+  final status = await refresh();
+  if (!status.sessionExpired) return status;
+  if (!await globalState.appController.recoverExpiredCorplinkSession()) return status;
+  if (system.isAndroid && !await canMaintainCorplinkNodes()) return status;
+  return refresh();
 }
 
 /// After Android moves to a new physical network, probe each managed
@@ -146,6 +168,7 @@ Future<Set<String>> restoreCorplinkNodesAfterNetworkChange(
   required Future<bool> Function(String) reconnect,
   required Future<bool> Function(String) rebuild,
   Future<bool> Function()? canContinue,
+  bool Function(String name, bool healthy)? shouldRebuildUnready,
 }) async {
   final unready = <String>{};
   await Future.wait([
@@ -153,12 +176,19 @@ Future<Set<String>> restoreCorplinkNodesAfterNetworkChange(
       () async {
         try {
           if (canContinue != null && !await canContinue()) return;
+          var status = await readStatus(name);
+          if (status.sessionExpired || !status.present || status.closed) {
+            unready.add(name);
+            return;
+          }
           await ensureHandshake(name);
           if (canContinue != null && !await canContinue()) return;
-          var status = await readStatus(name);
-          if (status.phase != SgConnectionPhase.ready) {
+          status = await readStatus(name);
+          final ready = status.phase == SgConnectionPhase.ready;
+          final escalate = shouldRebuildUnready?.call(name, ready) ?? false;
+          if (!ready && !status.sessionExpired) {
             if (canContinue != null && !await canContinue()) return;
-            final accepted = status.rebuildRequired
+            final accepted = status.rebuildRequired || escalate
                 ? await rebuild(name)
                 : await reconnect(name);
             if (accepted && (canContinue == null || await canContinue())) await ensureHandshake(name);

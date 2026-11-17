@@ -1,3 +1,5 @@
+import 'corplink_sg_recovery.dart';
+
 enum SgConnectionPhase { missing, waitingForTraffic, connecting, ready, needsRebuild }
 
 enum SgStatusRecovery { none, probe, reconnect, rebuild }
@@ -6,6 +8,7 @@ enum SgStatusRecovery { none, probe, reconnect, rebuild }
 class SgCoreStatus {
   const SgCoreStatus({
     this.serverName = '',
+    this.authorizationError,
     required this.present,
     required this.initialized,
     required this.ready,
@@ -20,6 +23,8 @@ class SgCoreStatus {
   });
 
   final String serverName;
+  final String? authorizationError;
+  bool get sessionExpired => !closed && authorizationError == corplinkSessionExpiredCode;
   final bool present;
   final bool initialized;
   final bool ready;
@@ -38,6 +43,7 @@ class SgCoreStatus {
 
   factory SgCoreStatus.fromJson(Map<dynamic, dynamic> json) => SgCoreStatus(
         serverName: json['serverName'] as String? ?? '',
+        authorizationError: corplinkAuthorizationError(json['authorizationError']),
         present: json['present'] == true,
         initialized: json['initialized'] == true,
         ready: json['ready'] == true,
@@ -96,10 +102,14 @@ Future<SgCoreStatus> recoverCorplinkNodeStatus({
   required Future<bool> Function(String) ensureHandshake,
   required Future<bool> Function(String) reconnect,
   required Future<bool> Function(String) rebuild,
+  Future<bool> Function()? canContinue,
   String probeUrl = '',
   Future<bool> Function(String serverName, String url)? probe,
 }) async {
   var status = await readStatus();
+  if (status.sessionExpired || (canContinue != null && !await canContinue())) {
+    return status;
+  }
   switch (status.phase) {
     case SgConnectionPhase.needsRebuild:
       if (await rebuild(serverName)) await ensureHandshake(serverName);
@@ -109,6 +119,13 @@ Future<SgCoreStatus> recoverCorplinkNodeStatus({
       break;
     case SgConnectionPhase.connecting:
       if (await reconnect(serverName)) await ensureHandshake(serverName);
+      status = await readStatus();
+      if (status.present && !status.closed && !status.ready &&
+          !status.sessionExpired && (canContinue == null || await canContinue())) {
+        // A device disconnect can leave a valid-looking stack whose old peer
+        // never handshakes again. The control request can confirm expiry.
+        if (await rebuild(serverName)) await ensureHandshake(serverName);
+      }
       break;
     case SgConnectionPhase.missing:
     case SgConnectionPhase.ready:

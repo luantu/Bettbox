@@ -202,6 +202,7 @@ class _AppStateManagerState extends ConsumerState<AppStateManager>
 
       detectionState.checkOnForegroundResume();
       mediaUnlockState.checkOnForegroundResume();
+      unawaited(globalState.appController.checkCorplinkHealthOnResume());
     }
     if (state == AppLifecycleState.resumed && system.isAndroid) {
       final hidden = ref.read(appSettingProvider.select((s) => s.hidden));

@@ -529,12 +529,14 @@ abstract class ClashHandlerInterface with ClashInterface {
   }
 
   @override
-  Future<bool> rebuildCorplinkNode(String serverName) {
-    return invoke<bool>(
+  Future<bool> rebuildCorplinkNode(String serverName) async {
+    final result = await invoke<dynamic>(
       method: ActionMethod.rebuildCorplinkNode,
       data: serverName,
       timeout: const Duration(seconds: 50),
     );
+    // Typed authorization errors are also latched in node status.
+    return result == true;
   }
 
   @override

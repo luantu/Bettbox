@@ -51,8 +51,9 @@ type SetupParams struct {
 }
 
 type SetupResult struct {
-	Message string `json:"message"`
-	Global  string `json:"global"`
+	CorplinkAuthorizationError string `json:"corplinkAuthorizationError,omitempty"`
+	Message                    string `json:"message"`
+	Global                     string `json:"global"`
 }
 
 type UpdateParams struct {

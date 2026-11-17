@@ -131,7 +131,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
         ];
         for (final node in selected) {
           final status = byName[node.serverName];
-          final phase = switch (status?.phase) {
+          final phase = status?.sessionExpired == true ? '会话已失效' : switch (status?.phase) {
             SgConnectionPhase.ready => '已连接',
             SgConnectionPhase.waitingForTraffic => '等待握手',
             SgConnectionPhase.connecting => '连接中',
@@ -495,6 +495,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       final nodesToSave = _hasNodeScopeChanges
           ? clearCorplinkNodeProbes(_nodes)
           : _nodes;
+      final passwordChanged = corplinkPasswordChanged(_appliedSettings, settings);
       await settings.save();
       await saveCorplinkNodeSelections(nodesToSave);
       _appliedSettings = settings;
@@ -504,7 +505,8 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       _nodeSelectionSaved = true;
       await globalState.appController.ensureSgBootstrapProfile();
       final authorized = settings.enabled &&
-          await ensureCorplinkAuthorization(settings, force: forceAuthorization);
+          await ensureCorplinkAuthorization(settings,
+              force: forceAuthorization || passwordChanged);
       if (authorized && _nodes.isEmpty) {
         final names = await discoverCorplinkVpnNodeNames(settings);
         if (!mounted) return;
@@ -513,7 +515,8 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           CorplinkNodeSelection(serverName: name, enabled: false)];
       }
       await globalState.appController.applyProfile();
-      await _refreshLiveStatus(recover: authorized);
+      final canProbe = authorized && await globalState.getVpnRunIntent(reload: true) != false;
+      await _refreshLiveStatus(recover: canProbe);
       if (!mounted) return;
       setState(() => _status = !settings.enabled
           ? '飞连已停用'
@@ -521,8 +524,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
               ? _appliedNodes.where((node) => node.enabled).isEmpty
                   ? '账号已登录；请选择要同时连接的节点，再保存并应用。'
                   : '配置已应用，连接状态已更新'
-              : '授权失败（${corplinkSgLastErrorCode.value ?? '请查看应用日志'}）；'
-                  '未创建飞连节点，普通代理按原配置运行');
+              : describeCorplinkAuthorizationError(corplinkSgLastErrorCode.value));
     } catch (error) {
       if (!mounted) return;
       setState(() => _status = '保存或应用失败：${error.runtimeType}');
@@ -540,7 +542,15 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     try {
       if (_nodeSelectionSaved) {
         await _refreshLiveStatus(recover: true);
-        if (mounted) setState(() => _status = '各节点状态已检查；详见下方实时信息');
+        if (mounted) setState(() {
+          final expired = _nodeStatuses.any((status) => status.sessionExpired);
+          final code = corplinkSgLastErrorCode.value;
+          _status = !expired
+              ? '各节点状态已检查；详见下方实时信息'
+              : code != null
+                  ? describeCorplinkAuthorizationError(code)
+                  : '飞连会话已失效，自动授权尚未完成。可手动重新授权。';
+        });
         return;
       }
       final ok = await _probeChatGpt();
@@ -554,7 +564,9 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
       setState(() => _status = error is StateError &&
           error.message == 'ANDROID_VPN_START_TIMEOUT'
           ? 'Android VPN 尚未就绪；请确认系统授权后重试检查。未启动隧道探针。'
-          : '节点探测失败：${error.runtimeType}');
+          : error is StateError && error.message == 'SG_MAINTENANCE_NOT_READY'
+              ? 'VPN 已停止或暂停。请恢复 VPN 后再检查。'
+              : '节点探测失败：${error.runtimeType}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -569,9 +581,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
     try {
       await ensureCorplinkVpnReady();
       final before = await readCorplinkNodeStatus(serverName);
-      if (before.rebuildRequired) {
-        await clashCore.rebuildCorplinkNode(serverName);
-      } else {
+      if (!before.rebuildRequired) {
         await clashCore.reconnectCorplinkNode(serverName);
       }
       await clashCore.ensureCorplinkNode(serverName);
@@ -780,7 +790,7 @@ class _CorplinkSgViewState extends State<CorplinkSgView> {
           valueListenable: corplinkSgLastErrorCode,
           builder: (_, code, _) => code == null
               ? const SizedBox.shrink()
-              : Text('最近授权错误码：$code'),
+              : Text(describeCorplinkAuthorizationError(code)),
         ),
         ValueListenableBuilder<String?>(
           valueListenable: corplinkSgLastCoreErrorCode,

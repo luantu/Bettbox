@@ -531,6 +531,43 @@ func TestFetchCorplinkWgInfoReportsSafeVpnListErrorCode(t *testing.T) {
 	}
 }
 
+func TestCorplinkDegradedNodeReportsConfirmedSessionExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		status                 int
+		body                   string
+		wantAuthorizationError string
+	}{
+		{"expired", http.StatusOK, `{"code":101,"message":"private-response"}`, CorplinkSessionExpiredCode},
+		{"temporary outage", http.StatusServiceUnavailable, `{"code":101}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/vpn/list" {
+					t.Errorf("unexpected request: %q", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer control.Close()
+			key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+			node, err := newWireGuard(WireGuardOption{
+				WireGuardPeerOption: WireGuardPeerOption{Server: "127.0.0.1", Port: 443, PublicKey: key},
+				Ip:                  "192.0.2.1/32", PrivateKey: key, TCP: true,
+				Corplink: CorplinkOption{APIServer: control.URL, CookieFile: writeCorplinkCookieFile(t)},
+			}, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer node.Close()
+			status := node.CorplinkStatus()
+			if status.Ready || !status.RebuildRequired || status.AuthorizationError != tc.wantAuthorizationError {
+				t.Fatalf("unexpected degraded status: %+v", status)
+			}
+		})
+	}
+}
+
 func TestCorplinkTCPDialTargetTracksRefreshedEndpoint(t *testing.T) {
 	w := &WireGuard{option: WireGuardOption{
 		WireGuardPeerOption: WireGuardPeerOption{

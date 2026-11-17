@@ -318,7 +318,7 @@ as Map<String, dynamic>?,
 /// @nodoc
 mixin _$SetupResult {
 
- String get message; String get global;
+ String get message; String get global; String? get corplinkAuthorizationError;
 /// Create a copy of SetupResult
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -332,20 +332,20 @@ $SetupResultCopyWith<SetupResult> get copyWith => _$SetupResultCopyWithImpl<Setu
 @override
 bool operator ==(Object other) {
   final _this = this as SetupResult;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SetupResult&&(identical(other.message, _this.message) || other.message == _this.message)&&(identical(other.global, _this.global) || other.global == _this.global));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SetupResult&&(identical(other.message, _this.message) || other.message == _this.message)&&(identical(other.global, _this.global) || other.global == _this.global)&&(identical(other.corplinkAuthorizationError, _this.corplinkAuthorizationError) || other.corplinkAuthorizationError == _this.corplinkAuthorizationError));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
 int get hashCode {
   final _this = this as SetupResult;
-  return Object.hash(runtimeType,_this.message,_this.global);
+  return Object.hash(runtimeType,_this.message,_this.global,_this.corplinkAuthorizationError);
 }
 
 @override
 String toString() {
   final _this = this as SetupResult;
-  return 'SetupResult(message: ${_this.message}, global: ${_this.global})';
+  return 'SetupResult(message: ${_this.message}, global: ${_this.global}, corplinkAuthorizationError: ${_this.corplinkAuthorizationError})';
 }
 
 
@@ -356,7 +356,7 @@ abstract mixin class $SetupResultCopyWith<$Res>  {
   factory $SetupResultCopyWith(SetupResult value, $Res Function(SetupResult) _then) = _$SetupResultCopyWithImpl;
 @useResult
 $Res call({
- String message, String global
+ String message, String global, String? corplinkAuthorizationError
 });
 
 
@@ -373,11 +373,11 @@ class _$SetupResultCopyWithImpl<$Res>
 
 /// Create a copy of SetupResult
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? message = null,Object? global = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? message = null,Object? global = null,Object? corplinkAuthorizationError = freezed,}) {
   return _then(SetupResult(
 message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
 as String,global: null == global ? _self.global : global // ignore: cast_nullable_to_non_nullable
-as String,
+as String,corplinkAuthorizationError: freezed == corplinkAuthorizationError ? _self.corplinkAuthorizationError : corplinkAuthorizationError as String?,
   ));
 }
 
@@ -462,10 +462,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String message,  String global)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String message,  String global,  String? corplinkAuthorizationError)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SetupResult() when $default != null:
-return $default(_that.message,_that.global);case _:
+return $default(_that.message,_that.global,_that.corplinkAuthorizationError);case _:
   return orElse();
 
 }
@@ -483,10 +483,10 @@ return $default(_that.message,_that.global);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String message,  String global)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String message,  String global,  String? corplinkAuthorizationError)  $default,) {final _that = this;
 switch (_that) {
 case _SetupResult():
-return $default(_that.message,_that.global);case _:
+return $default(_that.message,_that.global,_that.corplinkAuthorizationError);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -503,10 +503,10 @@ return $default(_that.message,_that.global);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String message,  String global)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String message,  String global,  String? corplinkAuthorizationError)?  $default,) {final _that = this;
 switch (_that) {
 case _SetupResult() when $default != null:
-return $default(_that.message,_that.global);case _:
+return $default(_that.message,_that.global,_that.corplinkAuthorizationError);case _:
   return null;
 
 }
@@ -518,11 +518,12 @@ return $default(_that.message,_that.global);case _:
 @JsonSerializable()
 
 class _SetupResult implements SetupResult {
-  const _SetupResult({this.message = '', this.global = ''});
+  const _SetupResult({this.message = '', this.global = '', this.corplinkAuthorizationError});
   factory _SetupResult.fromJson(Map<String, dynamic> json) => _$SetupResultFromJson(json);
 
 @override@JsonKey() final  String message;
 @override@JsonKey() final  String global;
+@override final String? corplinkAuthorizationError;
 
 /// Create a copy of SetupResult
 /// with the given fields replaced by the non-null parameter values.
@@ -537,18 +538,18 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SetupResult&&(identical(other.message, message) || other.message == message)&&(identical(other.global, global) || other.global == global));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SetupResult&&(identical(other.message, message) || other.message == message)&&(identical(other.global, global) || other.global == global)&&(identical(other.corplinkAuthorizationError, corplinkAuthorizationError) || other.corplinkAuthorizationError == corplinkAuthorizationError));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
 int get hashCode {
-    return Object.hash(runtimeType,message,global);
+    return Object.hash(runtimeType,message,global,corplinkAuthorizationError);
 }
 
 @override
 String toString() {
-    return 'SetupResult(message: $message, global: $global)';
+    return 'SetupResult(message: $message, global: $global, corplinkAuthorizationError: $corplinkAuthorizationError)';
 }
 
 
@@ -559,7 +560,7 @@ abstract mixin class _$SetupResultCopyWith<$Res> implements $SetupResultCopyWith
   factory _$SetupResultCopyWith(_SetupResult value, $Res Function(_SetupResult) _then) = __$SetupResultCopyWithImpl;
 @override @useResult
 $Res call({
- String message, String global
+ String message, String global, String? corplinkAuthorizationError
 });
 
 
@@ -576,11 +577,11 @@ class __$SetupResultCopyWithImpl<$Res>
 
 /// Create a copy of SetupResult
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? message = null,Object? global = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? message = null,Object? global = null,Object? corplinkAuthorizationError = freezed,}) {
   return _then(_SetupResult(
 message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
 as String,global: null == global ? _self.global : global // ignore: cast_nullable_to_non_nullable
-as String,
+as String,corplinkAuthorizationError: freezed == corplinkAuthorizationError ? _self.corplinkAuthorizationError : corplinkAuthorizationError as String?,
   ));
 }
 

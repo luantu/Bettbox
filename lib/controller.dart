@@ -305,6 +305,8 @@ class AppController {
     }
   }
 
+  Future<void> checkCorplinkHealthOnResume() => _checkSgHealth();
+
   Future<void> _checkCorplinkNodeHealth(List<CorplinkNodeSelection> selections) async {
     final enabled = selections.where((node) => node.enabled).toList();
     final enabledNames = enabled.map((node) => node.serverName).toSet();
@@ -313,6 +315,10 @@ class AppController {
       for (final status in await readCorplinkNodeStatuses())
         status.serverName: status,
     };
+    if (enabled.any((node) => statuses[node.serverName]?.sessionExpired == true)) {
+      await recoverExpiredCorplinkSession();
+      return;
+    }
     for (final node in enabled) {
       try {
         var status = statuses[node.serverName] ?? SgCoreStatus(
@@ -350,6 +356,10 @@ class AppController {
             if (status.present &&
                 await clashCore.rebuildCorplinkNode(node.serverName)) {
               await clashCore.ensureCorplinkNode(node.serverName);
+            } else if (status.present &&
+                (await readCorplinkNodeStatus(node.serverName)).sessionExpired) {
+              await recoverExpiredCorplinkSession();
+              return;
             }
             break;
         }
@@ -360,22 +370,44 @@ class AppController {
     }
   }
 
-  Future<void> _autoAuthorizeSg({bool force = false}) async {
+  Future<bool> recoverExpiredCorplinkSession() async {
+    corplinkSgLastCoreErrorCode.value = corplinkSessionExpiredCode;
+    final recovered = system.isAndroid
+        ? await requestAndroidCorplinkAuthorization(CorplinkAuthorizationRequest.recover)
+        : await _autoAuthorizeSg(force: true);
+    if (recovered) corplinkSgLastCoreErrorCode.value = null;
+    return recovered;
+  }
+
+  Future<bool> _autoAuthorizeSg({bool force = false}) async {
+    if (system.isAndroid) {
+      return requestAndroidCorplinkAuthorization(force
+          ? CorplinkAuthorizationRequest.recoverSetup
+          : CorplinkAuthorizationRequest.bootstrap);
+    }
+    if (await globalState.getVpnRunIntent(reload: true) == false) return false;
     final now = DateTime.now();
     if (_sgAutoAuthInFlight ||
         (_sgNextAutoAuthAt != null && now.isBefore(_sgNextAutoAuthAt!))) {
-      return;
+      return false;
     }
     _sgAutoAuthInFlight = true;
     _sgNextAutoAuthAt = now.add(const Duration(minutes: 5));
     try {
       final settings = await CorplinkSgSettings.load();
-      if (!settings.enabled || !settings.isConfigured) return;
+      if (!settings.enabled || !settings.isConfigured) return false;
+      final revision = await corplinkSessionRevision();
+      if (await isCorplinkAutoAuthorizationBlocked(revision)) return false;
       commonPrint.log('[CorpLinkSG] automatic authorization started');
       if (await ensureCorplinkAuthorization(settings, force: force)) {
+        if (await globalState.getVpnRunIntent(reload: true) == false) return false;
         await applyProfile(silence: true);
         commonPrint.log('[CorpLinkSG] automatic authorization applied');
+        return true;
       } else {
+        if (isTerminalCorplinkLoginError(corplinkSgLastErrorCode.value)) {
+          await blockCorplinkAutoAuthorization(revision);
+        }
         commonPrint.log('[CorpLinkSG] automatic authorization failed');
       }
     } catch (error, stack) {
@@ -386,6 +418,7 @@ class AppController {
     } finally {
       _sgAutoAuthInFlight = false;
     }
+    return false;
   }
 
   Future<void> _fastStart() async {
@@ -557,18 +590,13 @@ class AppController {
       r'corplink vpn list (?:HTTP|code) [0-9]+',
       caseSensitive: false,
     ).firstMatch(message)?.group(0);
-    corplinkSgLastCoreErrorCode.value = safeCoreError;
+    final authRejected = corplinkAuthorizationError(result.corplinkAuthorizationError) != null;
+    corplinkSgLastCoreErrorCode.value = authRejected ? corplinkSessionExpiredCode : safeCoreError;
     final sgSettings = await CorplinkSgSettings.load();
     final sgSessionUsable = await hasUsableCorplinkSession(sgSettings);
-    var authRejected = false;
     if (message.isNotEmpty && sgSessionUsable) {
       // An optional SG outbound must not prevent the rest of the subscription
       // from starting. Retry with the SG group visible but its node withheld.
-      authRejected = message.contains('10220001') ||
-          message.toLowerCase().contains('cookies are missing');
-      if (authRejected) {
-        await invalidateCorplinkAuthorization();
-      }
       final retryParams = await globalState.getSetupParams(
         pathConfig: realPatchConfig,
         suppressCorplinkNode: true,
@@ -599,9 +627,13 @@ class AppController {
         cookiePresent: cookiePresent,
       )) {
         // A fail-closed group lets normal proxies start while login runs.
-        _sgTaskScheduler.schedule(
-          () => _autoAuthorizeSg(force: authRejected),
-        );
+        _sgTaskScheduler.schedule(() async {
+          try {
+            await _autoAuthorizeSg(force: authRejected);
+          } catch (error) {
+            commonPrint.log('[CorpLinkSG] automatic authorization failed: ${error.runtimeType}');
+          }
+        });
       }
     }
     _applyGlobalSelection(result.global);

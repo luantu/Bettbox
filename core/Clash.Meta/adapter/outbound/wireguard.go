@@ -95,13 +95,14 @@ type WireGuard struct {
 	// busyFail 记录连续业务失败（业务 dial 超时/隧道内连接失败）次数。
 	// 达到阈值（busyFailThreshold）时视为隧道 unhealthy，主动失效底层
 	// TCP 连接并触发受控重连，解决"连接看似存在但数据面无响应"的静默断链。
-	busyFail             atomic.Int32
-	busyFailResetAt      atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
-	requiresRebuild      atomic.Bool  // /vpn/conn needs a fresh IP stack, not an in-place peer update
-	closed               atomic.Bool
-	nativeSuspended      bool        // lifecycleMu: explicit stop, not smart capture pause
-	dohTunnelSeen        atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
-	privateDNSTunnelSeen atomic.Bool // 一次性内网 DNS 隧道路径标记，不记录域名或地址
+	busyFail               atomic.Int32
+	busyFailResetAt        atomic.Int64 // unix nano，距上次失败超过窗口则重置计数
+	corplinkSessionExpired atomic.Bool  // confirmed by /api/vpn/list
+	requiresRebuild        atomic.Bool  // /vpn/conn needs a fresh IP stack, not an in-place peer update
+	closed                 atomic.Bool
+	nativeSuspended        bool        // lifecycleMu: explicit stop, not smart capture pause
+	dohTunnelSeen          atomic.Bool // 一次性运行时 DoH 路径诊断，不记录域名或查询内容
+	privateDNSTunnelSeen   atomic.Bool // 一次性内网 DNS 隧道路径标记，不记录域名或地址
 }
 
 type CorplinkDNSPolicyInfo struct {
@@ -815,6 +816,7 @@ func newWireGuard(option WireGuardOption, allowDegradedCorplink bool) (*WireGuar
 			// also remove healthy CorpLink and airport proxies. This outbound
 			// remains fail-closed until a targeted rebuild obtains its own IP.
 			outbound.option = option
+			outbound.corplinkSessionExpired.Store(errors.Is(err, ErrCorplinkSessionExpired))
 			outbound.requiresRebuild.Store(true)
 			log.Warnln("[WG](%s) CorpLink node unavailable at config load; keeping retryable outbound", option.Name)
 			return outbound, nil
@@ -1411,6 +1413,10 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 	defer w.rebuildMu.Unlock()
 
 	w.lifecycleMu.RLock()
+	if onlyIfMissing && w.corplinkSessionExpired.Load() {
+		w.lifecycleMu.RUnlock()
+		return ErrCorplinkSessionExpired
+	}
 	if onlyIfMissing && (w.device != nil || !w.requiresRebuild.Load()) {
 		w.lifecycleMu.RUnlock()
 		return nil
@@ -1439,6 +1445,9 @@ func (w *WireGuard) rebuildCorplink(ctx context.Context, onlyIfMissing bool) err
 	}
 	replacement, err := newWireGuard(option, false)
 	if err != nil {
+		if errors.Is(err, ErrCorplinkSessionExpired) {
+			w.corplinkSessionExpired.Store(true)
+		}
 		return err
 	}
 	if err := replacement.init(ctx); err != nil {
@@ -1502,6 +1511,7 @@ func (w *WireGuard) commitCorplinkReplacement(replacement *WireGuard, nextResolv
 	w.serverAddrTime.Store(replacement.serverAddrTime.Load())
 	w.initErr = nil
 	w.initOk.Store(true)
+	w.corplinkSessionExpired.Store(false)
 	w.requiresRebuild.Store(false)
 	w.busyFail.Store(0)
 	w.dohTunnelSeen.Store(false)
@@ -1526,16 +1536,17 @@ func (w *WireGuard) commitCorplinkReplacement(replacement *WireGuard, nextResolv
 
 // CorplinkStatus contains only connection telemetry; no cookies, keys or OTP.
 type CorplinkStatus struct {
-	Initialized     bool     `json:"initialized"`
-	Ready           bool     `json:"ready"`
-	RebuildRequired bool     `json:"rebuildRequired"`
-	Closed          bool     `json:"closed"`
-	TunnelIP        string   `json:"tunnelIp"`
-	Endpoint        string   `json:"endpoint"`
-	RoutesPresent   bool     `json:"routesPresent"`
-	RouteSplit      []string `json:"routeSplit,omitempty"`
-	RouteFull       []string `json:"routeFull,omitempty"`
-	RouteInvalid    int      `json:"routeInvalid,omitempty"`
+	AuthorizationError string   `json:"authorizationError,omitempty"`
+	Initialized        bool     `json:"initialized"`
+	Ready              bool     `json:"ready"`
+	RebuildRequired    bool     `json:"rebuildRequired"`
+	Closed             bool     `json:"closed"`
+	TunnelIP           string   `json:"tunnelIp"`
+	Endpoint           string   `json:"endpoint"`
+	RoutesPresent      bool     `json:"routesPresent"`
+	RouteSplit         []string `json:"routeSplit,omitempty"`
+	RouteFull          []string `json:"routeFull,omitempty"`
+	RouteInvalid       int      `json:"routeInvalid,omitempty"`
 }
 
 func (w *WireGuard) CorplinkStatus() CorplinkStatus {
@@ -1551,6 +1562,10 @@ func (w *WireGuard) CorplinkStatus() CorplinkStatus {
 		RouteSplit:      append([]string(nil), w.option.corplinkRoutes.Split...),
 		RouteFull:       append([]string(nil), w.option.corplinkRoutes.Full...),
 		RouteInvalid:    w.option.corplinkRoutes.Invalid,
+	}
+	if !status.Closed && w.corplinkSessionExpired.Load() {
+		status.AuthorizationError = CorplinkSessionExpiredCode
+		status.RebuildRequired = true
 	}
 	if w.device == nil && w.requiresRebuild.Load() && !w.initOk.Load() {
 		status.TunnelIP = ""

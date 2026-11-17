@@ -9,7 +9,13 @@ void main() {
     final result = await restoreCorplinkNodesAfterNetworkChange(['Office'],
       canContinue: () async => wanted,
       ensureHandshake: (_) async { wanted = false; return false; },
-      readStatus: (_) async => throw StateError('canceled work read status'),
+      readStatus: (_) async {
+        if (!wanted) throw StateError('canceled work read status');
+        return const SgCoreStatus(
+          present: true, initialized: true, ready: false,
+          rebuildRequired: false, closed: false, tunnelIp: '', endpoint: '',
+        );
+      },
       reconnect: (_) async { retries++; return true; },
       rebuild: (_) async { retries++; return true; },
     );

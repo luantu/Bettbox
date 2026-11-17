@@ -3,6 +3,7 @@ package outbound
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -181,7 +182,14 @@ func TestCorplinkUnavailableAtLoadCanRebuildAfterServerRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	var available atomic.Bool
+	var expired atomic.Bool
+	var listRequests atomic.Int32
 	control := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		listRequests.Add(1)
+		if expired.Load() {
+			_, _ = io.WriteString(w, `{"code":101,"message":"do not forward"}`)
+			return
+		}
 		if !available.Load() {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
@@ -210,12 +218,30 @@ func TestCorplinkUnavailableAtLoadCanRebuildAfterServerRecovery(t *testing.T) {
 	if w.device != nil || !w.CorplinkStatus().RebuildRequired || w.CorplinkStatus().TunnelIP != "" {
 		t.Fatalf("unavailable node did not stay fail-closed: %+v", w.CorplinkStatus())
 	}
+	if w.CorplinkStatus().AuthorizationError != "" {
+		t.Fatal("HTTP outage was mistaken for expired authorization")
+	}
+	expired.Store(true)
+	if err := w.RebuildCorplink(context.Background()); !errors.Is(err, ErrCorplinkSessionExpired) {
+		t.Fatalf("rebuild lost typed expiration: %v", err)
+	}
+	if got := w.CorplinkStatus(); got.AuthorizationError != CorplinkSessionExpiredCode || got.Ready {
+		t.Fatalf("expired node did not expose actionable status: %+v", got)
+	}
+	before := listRequests.Load()
+	if w.EnsureCorplinkReady(context.Background()) || listRequests.Load() != before {
+		t.Fatal("lazy handshake retried a known expired session")
+	}
+	expired.Store(false)
 	available.Store(true)
 	if err := w.RebuildCorplink(context.Background()); err != nil {
 		t.Fatalf("server recovery could not rebuild the node: %v", err)
 	}
 	if w.device == nil || w.option.Ip != "10.31.0.4/32" || w.CorplinkStatus().RebuildRequired {
 		t.Fatalf("recovered node did not adopt its own new stack: %+v", w.CorplinkStatus())
+	}
+	if w.CorplinkStatus().AuthorizationError != "" {
+		t.Fatal("successful rebuild did not clear expired authorization")
 	}
 }
 
