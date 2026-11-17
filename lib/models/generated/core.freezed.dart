@@ -377,7 +377,8 @@ class _$SetupResultCopyWithImpl<$Res>
   return _then(SetupResult(
 message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
 as String,global: null == global ? _self.global : global // ignore: cast_nullable_to_non_nullable
-as String,corplinkAuthorizationError: freezed == corplinkAuthorizationError ? _self.corplinkAuthorizationError : corplinkAuthorizationError as String?,
+as String,corplinkAuthorizationError: freezed == corplinkAuthorizationError ? _self.corplinkAuthorizationError : corplinkAuthorizationError // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
@@ -523,7 +524,7 @@ class _SetupResult implements SetupResult {
 
 @override@JsonKey() final  String message;
 @override@JsonKey() final  String global;
-@override final String? corplinkAuthorizationError;
+@override final  String? corplinkAuthorizationError;
 
 /// Create a copy of SetupResult
 /// with the given fields replaced by the non-null parameter values.
@@ -581,7 +582,8 @@ class __$SetupResultCopyWithImpl<$Res>
   return _then(_SetupResult(
 message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
 as String,global: null == global ? _self.global : global // ignore: cast_nullable_to_non_nullable
-as String,corplinkAuthorizationError: freezed == corplinkAuthorizationError ? _self.corplinkAuthorizationError : corplinkAuthorizationError as String?,
+as String,corplinkAuthorizationError: freezed == corplinkAuthorizationError ? _self.corplinkAuthorizationError : corplinkAuthorizationError // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
