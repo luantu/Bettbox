@@ -127,6 +127,18 @@ class _GoogleBottomNavBarState extends ConsumerState<GoogleBottomNavBar>
         });
   }
 
+  void _glideToTappedIndex(int index) {
+    final target = index.toDouble();
+    if (_posController.isAnimating && _posTarget == target) return;
+    final distance = (_posController.value - target).abs();
+    if (distance <= 0.01) {
+      _glideTo(index, 0);
+      return;
+    }
+    final duration = (160 + distance * 30).clamp(180, 240).toInt();
+    _glideTo(index, duration);
+  }
+
   void _liftTo(double value, int milliseconds) {
     _liftController.animateTo(
       value,
@@ -199,9 +211,7 @@ class _GoogleBottomNavBarState extends ConsumerState<GoogleBottomNavBar>
     final primaryColor = colorScheme.primary;
     final onSurfaceVariantColor = colorScheme.onSurfaceVariant;
 
-    final navColor = navBarBodyColor(
-      colorScheme,
-    ).withValues(alpha: 0.98);
+    final navColor = navBarBodyColor(colorScheme).withValues(alpha: 0.98);
     final shadowStrength = isLight ? 1.0 : 3.0;
 
     const itemTextStyle = TextStyle(
@@ -244,10 +254,7 @@ class _GoogleBottomNavBarState extends ConsumerState<GoogleBottomNavBar>
               _haptic(enableFeedback);
             }
 
-            _posController.stop();
-            _posController.value = touchedIndex.toDouble();
-            _jumpFromIndex = null;
-            _jumpToIndex = null;
+            _glideToTappedIndex(touchedIndex);
 
             _liftTo(1.0, 140);
           },
@@ -274,6 +281,7 @@ class _GoogleBottomNavBarState extends ConsumerState<GoogleBottomNavBar>
               _isDragging = true;
               _jumpFromIndex = null;
               _jumpToIndex = null;
+              _posController.value = _anchorSlot;
             }
             if (!_isDragging || slotWidth <= 0) return;
 
@@ -331,8 +339,7 @@ class _GoogleBottomNavBarState extends ConsumerState<GoogleBottomNavBar>
                 event.localPosition.dx - _horizontalInset,
               );
               _highlightedIndex.value = targetIndex;
-              _posController.stop();
-              _posController.value = targetIndex.toDouble();
+              _glideToTappedIndex(targetIndex);
             }
 
             _velocityTracker = null;

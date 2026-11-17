@@ -51,6 +51,7 @@ jobs:
       - name: Fail fast on SSID behavior regressions
         timeout-minutes: 4
         run: |
+          mkdir -p assets/bin/android-arm64-v8a assets/data
           flutter test \
             test/clash/corplink_native_nodes_test.dart \
             test/corplink_maintenance_policy_test.dart \
