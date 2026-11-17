@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
+      CORE_VERSION: v1.19.34
       CORPLINK_HELPER_REV: 13f8106e7efef30fa30a802e59a74931dbae6d8d
     steps:
       - name: Checkout
@@ -161,6 +162,9 @@ jobs:
             test/corplink_management_panel_test.dart \
             test/sg_dashboard_alignment_test.dart \
             test/sg_dashboard_tile_test.dart
+
+      - name: Prepare bundled runtime assets
+        run: dart setup.dart assets
 
       - name: Run Flutter clash and model tests
         timeout-minutes: 6
@@ -333,7 +337,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: libclash/android/arm64-v8a
-          key: mihomo-sg-android-arm64-go1.24.6-ndk28.2-${{ hashFiles('core/**', 'setup.dart') }}
+          key: mihomo-sg-android-arm64-go1.24.6-ndk28.2-${{ env.CORE_VERSION }}-${{ hashFiles('core/**', 'setup.dart') }}
 
       - name: Build Mihomo-SG Android library
         if: steps.mihomo-sg-cache.outputs.cache-hit != 'true'

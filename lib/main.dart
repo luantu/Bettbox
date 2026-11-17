@@ -61,7 +61,11 @@ Future<void> main(List<String> args) async {
   PaintingBinding.instance.imageCache.maximumSizeBytes = 50 * 1024 * 1024;
 
   final version = await system.version;
-  await Future.wait([globalState.initApp(version), clashCore.preload()]);
+  await Future.wait([
+    globalState.initApp(version),
+    clashCore.preload(),
+    loadBundledRouteIcons(),
+  ]);
 
   try {
     await uiManager.initializeUI();
@@ -118,10 +122,13 @@ Future<void> _service(List<String> flags) async {
     final quickStart = flags.contains('quick') || automaticQuickStart;
     final bootStart = flags.contains('boot');
     final clashLibHandler = ClashLibHandler();
-    final nativeSgNodes = CorplinkNativeNodes((message, timeout) =>
-      clashLibHandler.invokeAction(message, timeout: timeout));
+    final nativeSgNodes = CorplinkNativeNodes(
+      (message, timeout) =>
+          clashLibHandler.invokeAction(message, timeout: timeout),
+    );
     final smartAutoStopLock = Lock();
     Timer? smartAutoStopDebounce;
+    String? smartStopOverrideNetwork;
     var sgMaintenanceInFlight = false;
     var setupReportedExpired = false;
     var bootstrapRequested = false;
@@ -138,22 +145,32 @@ Future<void> _service(List<String> flags) async {
             latest.server == settings.server &&
             latest.password == settings.password;
       }
+
       Future<bool> canContinue() async =>
           await settingsStillCurrent() && await canMaintainCorplinkNodes();
 
-      if (!bootstrap && !setupReportedExpired &&
-          (await loadCorplinkNodeSelections()) == null) return false;
+      if (!bootstrap &&
+          !setupReportedExpired &&
+          (await loadCorplinkNodeSelections()) == null)
+        return false;
       return authorizationRecovery.recover(
         confirmed: () async {
           final names = (await loadCorplinkNodeSelections())
-              ?.where((node) => node.enabled).map((node) => node.serverName).toSet();
-          final expired = setupReportedExpired ||
+              ?.where((node) => node.enabled)
+              .map((node) => node.serverName)
+              .toSet();
+          final expired =
+              setupReportedExpired ||
               (await nativeSgNodes.readStatuses()).any(
-                (status) => status.sessionExpired && names?.contains(status.serverName) == true,
+                (status) =>
+                    status.sessionExpired &&
+                    names?.contains(status.serverName) == true,
               );
-          return expired || (bootstrap && !await hasStoredCorplinkAuthorization(settings));
+          return expired ||
+              (bootstrap && !await hasStoredCorplinkAuthorization(settings));
         },
-        sessionKey: () async => '${await corplinkSessionRevision()}\u0000'
+        sessionKey: () async =>
+            '${await corplinkSessionRevision()}\u0000'
             '${settings.username}\u0000${settings.server}\u0000${settings.password}',
         canContinue: canContinue,
         login: () async {
@@ -162,7 +179,8 @@ Future<void> _service(List<String> flags) async {
           bool ok;
           try {
             ok = await authorizeCorplinkInOwner(
-              settings, force: true,
+              settings,
+              force: true,
               canStart: canContinue,
             );
           } catch (_) {
@@ -170,10 +188,12 @@ Future<void> _service(List<String> flags) async {
             // restoration reports failure. Retain it for a later apply.
             if (await corplinkSessionRevision() != revision &&
                 await settingsStillCurrent() &&
-                await hasStoredCorplinkAuthorization(settings)) return true;
+                await hasStoredCorplinkAuthorization(settings))
+              return true;
             rethrow;
           }
-          if (!ok && isTerminalCorplinkLoginError(corplinkSgLastErrorCode.value) &&
+          if (!ok &&
+              isTerminalCorplinkLoginError(corplinkSgLastErrorCode.value) &&
               await settingsStillCurrent()) {
             await blockCorplinkAutoAuthorization(revision);
           }
@@ -186,7 +206,8 @@ Future<void> _service(List<String> flags) async {
           if (profile == null || !await canContinue()) return false;
           final activeProfile = clashLibHandler.getCurrentProfileName();
           if (activeProfile.isNotEmpty &&
-              activeProfile != (profile.label ?? profile.id)) return false;
+              activeProfile != (profile.label ?? profile.id))
+            return false;
           globalState.config = saved;
           final params = await globalState.getSetupParams(
             pathConfig: saved.patchClashConfig.copyWith.tun(enable: false),
@@ -226,7 +247,9 @@ Future<void> _service(List<String> flags) async {
           if (ok) {
             setupReportedExpired = false;
             bootstrapRequested = false;
-          } else if (isTerminalCorplinkLoginError(corplinkSgLastErrorCode.value)) {
+          } else if (isTerminalCorplinkLoginError(
+            corplinkSgLastErrorCode.value,
+          )) {
             final latest = await CorplinkSgSettings.load(reload: true);
             if (latest.username == settings.username &&
                 latest.server == settings.server &&
@@ -247,8 +270,12 @@ Future<void> _service(List<String> flags) async {
     }
 
     bool shouldRebuildUnreadyNode(String name, bool healthy) {
-      final policy = sgNodeRecoveryPolicies.putIfAbsent(name, SgRecoveryPolicy.new);
-      return policy.recordProbe(healthy, DateTime.now()) == SgRecoveryAction.rebuild;
+      final policy = sgNodeRecoveryPolicies.putIfAbsent(
+        name,
+        SgRecoveryPolicy.new,
+      );
+      return policy.recordProbe(healthy, DateTime.now()) ==
+          SgRecoveryAction.rebuild;
     }
 
     Future<void> maintainSgNodes() async {
@@ -272,8 +299,10 @@ Future<void> _service(List<String> flags) async {
         );
         await recoverAuthorization();
         if (await canMaintainCorplinkNodes()) {
-          commonPrint.log('[SG maintenance] checked=${selected.where((node) => node.enabled).length} '
-              'unready=${unready.length}');
+          commonPrint.log(
+            '[SG maintenance] checked=${selected.where((node) => node.enabled).length} '
+            'unready=${unready.length}',
+          );
         }
       } catch (error) {
         commonPrint.log('[SG maintenance] ${error.runtimeType}');
@@ -282,7 +311,10 @@ Future<void> _service(List<String> flags) async {
       }
     }
 
-    Timer.periodic(const Duration(seconds: 45), (_) => unawaited(maintainSgNodes()));
+    Timer.periodic(
+      const Duration(seconds: 45),
+      (_) => unawaited(maintainSgNodes()),
+    );
 
     // Android reports Wi-Fi availability before protected sockets necessarily
     // route over it. The phone reproduced a reconnect that stayed on cellular
@@ -291,7 +323,9 @@ Future<void> _service(List<String> flags) async {
       reconnect: () async {
         try {
           if (!await canMaintainCorplinkNodes()) return;
-          commonPrint.log('[reconnectTunnels] physical network settled, reconnecting');
+          commonPrint.log(
+            '[reconnectTunnels] physical network settled, reconnecting',
+          );
           final accepted = await clashLibHandler.reconnectTunnels();
           if (!accepted) {
             commonPrint.log('[reconnectTunnels] no reconnectable outbound');
@@ -304,7 +338,8 @@ Future<void> _service(List<String> flags) async {
           final selectedNodes = await loadCorplinkNodeSelections();
           if (selectedNodes != null) {
             final remaining = await restoreCorplinkNodesAfterNetworkChange(
-              selectedNodes.where((node) => node.enabled)
+              selectedNodes
+                  .where((node) => node.enabled)
                   .map((node) => node.serverName),
               ensureHandshake: nativeSgNodes.ensure,
               readStatus: nativeSgNodes.readStatus,
@@ -314,21 +349,27 @@ Future<void> _service(List<String> flags) async {
               shouldRebuildUnready: shouldRebuildUnreadyNode,
             );
             await recoverAuthorization();
-            commonPrint.log('[reconnectTunnels] independent SG nodes '
-                'still unready=${remaining.length}');
+            commonPrint.log(
+              '[reconnectTunnels] independent SG nodes '
+              'still unready=${remaining.length}',
+            );
             return;
           }
           var ready = await clashLibHandler.corplinkSgReady();
           final stillRunning = await vpn?.getStatus();
           if (ready == false && stillRunning == true) {
-            commonPrint.log('[reconnectTunnels] SG handshake not ready, retrying once');
+            commonPrint.log(
+              '[reconnectTunnels] SG handshake not ready, retrying once',
+            );
             final retried = await clashLibHandler.reconnectTunnels();
             if (retried) {
               await Future.delayed(const Duration(seconds: 5));
               ready = await clashLibHandler.corplinkSgReady();
             }
           }
-          commonPrint.log('[reconnectTunnels] request accepted; SG handshake ready=$ready');
+          commonPrint.log(
+            '[reconnectTunnels] request accepted; SG handshake ready=$ready',
+          );
         } catch (e) {
           commonPrint.log('[reconnectTunnels] failed: $e');
         }
@@ -342,12 +383,31 @@ Future<void> _service(List<String> flags) async {
           // The service isolate's startup Config is not updated by UI providers.
           // Read the atomic saved config, never write a stale full Config back.
           final vpnProps = await preferences.getSavedVpnProps();
-          if (vpnProps == null) return; // unreadable config cannot authorize a transition
+          if (vpnProps == null)
+            return; // unreadable config cannot authorize a transition
           final isSmartStopped = await vpn?.isSmartStopped() ?? false;
-          if (!vpnProps.smartAutoStop && !isSmartStopped) return;
           final snapshot = await vpn?.getSmartNetworkSnapshot();
+          final networks = SmartNetworkSnapshot.decode(snapshot);
+          final selected = networks
+              .where((network) => network.selected)
+              .firstOrNull;
+          if (await vpn?.isSmartStopOverride() == true) {
+            if (!vpnProps.smartAutoStop) {
+              smartStopOverrideNetwork = null;
+              await vpn?.clearSmartStopOverride();
+            } else if (selected != null) {
+              final networkKey = '${selected.id}:${selected.ssid ?? ''}';
+              smartStopOverrideNetwork ??= networkKey;
+              if (smartStopOverrideNetwork != networkKey) {
+                smartStopOverrideNetwork = null;
+                await vpn?.clearSmartStopOverride();
+              }
+            }
+          } else {
+            smartStopOverrideNetwork = null;
+          }
           final decision = SmartNetworkPolicy.evaluate(
-            networks: SmartNetworkSnapshot.decode(snapshot),
+            networks: networks,
             enabled: vpnProps.smartAutoStop,
             rulesJson: vpnProps.smartAutoStopRules,
             legacyNetworks: vpnProps.smartAutoStopNetworks,
@@ -360,6 +420,7 @@ Future<void> _service(List<String> flags) async {
           );
           switch (action) {
             case SmartNetworkAction.stop:
+              if (await vpn?.isSmartStopOverride() == true) return;
               await vpn?.smartStop();
               break;
             case SmartNetworkAction.resume:
@@ -373,7 +434,9 @@ Future<void> _service(List<String> flags) async {
           }
           if (action != SmartNetworkAction.none) {
             // Do not log the private SSID, rule name, or local addresses.
-            commonPrint.log('SmartAutoStop: ${action.name}, ${decision.match.name}');
+            commonPrint.log(
+              'SmartAutoStop: ${action.name}, ${decision.match.name}',
+            );
           }
         });
       } catch (e) {
@@ -383,18 +446,124 @@ Future<void> _service(List<String> flags) async {
 
     void scheduleSmartAutoStopCheck() {
       smartAutoStopDebounce?.cancel();
-      smartAutoStopDebounce = Timer(const Duration(seconds: 1), checkSmartAutoStop);
+      smartAutoStopDebounce = Timer(
+        const Duration(seconds: 1),
+        checkSmartAutoStop,
+      );
     }
 
     // Permission changes and same-subnet Wi-Fi roaming may not change IPs.
     // This low-frequency compensation stays alive in the service when UI closes.
-    Timer.periodic(const Duration(seconds: 15), (_) => scheduleSmartAutoStopCheck());
+    Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => scheduleSmartAutoStopCheck(),
+    );
+
+    Future<void> startCore({bool overrideSmartStop = false}) async {
+      await ClashCore.initGeo();
+      app.tip(appLocalizations.startVpn);
+      final homeDirPath = await appPath.homeDirPath;
+      final version = await system.version;
+      final clashConfig = globalState.config.patchClashConfig.copyWith.tun(
+        enable: false,
+      );
+
+      Future(() async {
+        try {
+          final params = await globalState.getSetupParams(
+            pathConfig: clashConfig,
+          );
+          final profileId = globalState.config.currentProfileId;
+          if (profileId == null) {
+            return;
+          }
+          final setup = await clashLibHandler.quickStart(
+            InitParams(homeDir: homeDirPath, version: version),
+            params,
+            globalState.getCoreState(),
+          );
+          setupReportedExpired =
+              corplinkAuthorizationError(setup.corplinkAuthorizationError) !=
+              null;
+          var message = setup.message;
+          if (message.isNotEmpty) {
+            final settings = await CorplinkSgSettings.load();
+            if (await hasUsableCorplinkSession(settings)) {
+              final fallback = await globalState.getSetupParams(
+                pathConfig: clashConfig,
+                suppressCorplinkNode: true,
+              );
+              final retryResult = await clashLibHandler.quickStart(
+                InitParams(homeDir: homeDirPath, version: version),
+                fallback,
+                globalState.getCoreState(),
+              );
+              if (retryResult.message.isEmpty) {
+                commonPrint.log(
+                  '[CorpLinkSG] quick start continued without SG node',
+                );
+                message = '';
+              }
+            }
+          }
+          if (message.isNotEmpty) {
+            commonPrint.error('QuickStart failed with error: $message');
+            await vpn?.stop();
+            await globalState.setVpnRuntimeState(false);
+            return;
+          }
+          final latestRunIntent = await globalState.getVpnRunIntent(
+            reload: true,
+          );
+          if (!allowsAutomaticVpnRestart(latestRunIntent)) {
+            commonPrint.log(
+              'Background VPN start canceled by explicit user stop',
+            );
+            await vpn?.stop();
+            await globalState.setVpnRuntimeState(false);
+            return;
+          }
+          final accepted = await vpn?.start(
+            clashLibHandler.getAndroidVpnOptions(),
+            overrideSmartStop: overrideSmartStop,
+          );
+          if (accepted == false) return;
+          final intentAfterStart = await globalState.getVpnRunIntent(
+            reload: true,
+          );
+          if (!allowsAutomaticVpnRestart(intentAfterStart)) {
+            commonPrint.log(
+              'Background VPN start rolled back after explicit user stop',
+            );
+            await vpn?.stop();
+            await globalState.setVpnRuntimeState(false);
+            return;
+          }
+          Future.delayed(const Duration(seconds: 2), checkSmartAutoStop);
+
+          if (globalState.config.vpnProps.networkSpeedNotification) {
+            final profile = globalState.config.profiles
+                .where((e) => e.id == profileId)
+                .firstOrNull;
+            final profileName = profile?.label ?? 'Bettbox';
+            await vpn?.updateNotificationSpeed(profileName, '↑0B/s ↓0B/s');
+          }
+
+          clashLibHandler.startListener();
+          unawaited(maintainSgNodes());
+        } catch (e) {
+          commonPrint.error('Fatal error during service background start: $e');
+          await vpn?.stop();
+          await globalState.setVpnRuntimeState(false);
+        }
+      });
+    }
 
     tile?.addListener(
       _TileListenerWithService(
         onStart: () async {
-          await app.tip(appLocalizations.startVpn);
-          await globalState.handleStart();
+          await globalState.setVpnRunIntent(true);
+          await startCore(overrideSmartStop: true);
         },
         onStop: () async {
           networkHandoffRecovery.cancel();
@@ -424,8 +593,9 @@ Future<void> _service(List<String> flags) async {
         onDnsChanged: (String dns) {
           clashLibHandler.updateDns(dns);
         },
-        onNetworkChanged: () {
+        onNetworkChanged: (defaultChanged) {
           scheduleSmartAutoStopCheck();
+          if (defaultChanged) unawaited(vpn?.quickResponse());
           networkHandoffRecovery.networkChanged();
           unawaited(maintainSgNodes());
         },
@@ -451,93 +621,14 @@ Future<void> _service(List<String> flags) async {
     }
 
     commonPrint.log('Executing ${bootStart ? "boot" : "quick"} start sequence');
-    await ClashCore.initGeo();
-    app.tip(appLocalizations.startVpn);
-    final homeDirPath = await appPath.homeDirPath;
-    final version = await system.version;
-    final clashConfig = globalState.config.patchClashConfig.copyWith.tun(
-      enable: false,
-    );
-
-    Future(() async {
-      try {
-        final params = await globalState.getSetupParams(
-          pathConfig: clashConfig,
-        );
-        final profileId = globalState.config.currentProfileId;
-        if (profileId == null) {
-          return;
-        }
-        final setup = await clashLibHandler.quickStart(
-          InitParams(homeDir: homeDirPath, version: version),
-          params,
-          globalState.getCoreState(),
-        );
-        setupReportedExpired = corplinkAuthorizationError(setup.corplinkAuthorizationError) != null;
-        var message = setup.message;
-        if (message.isNotEmpty) {
-          final settings = await CorplinkSgSettings.load();
-          if (await hasUsableCorplinkSession(settings)) {
-            final fallback = await globalState.getSetupParams(
-              pathConfig: clashConfig,
-              suppressCorplinkNode: true,
-            );
-            final retryResult = await clashLibHandler.quickStart(
-              InitParams(homeDir: homeDirPath, version: version),
-              fallback,
-              globalState.getCoreState(),
-            );
-            if (retryResult.message.isEmpty) {
-              commonPrint.log('[CorpLinkSG] quick start continued without SG node');
-              message = '';
-            }
-          }
-        }
-        if (message.isNotEmpty) {
-          commonPrint.error('QuickStart failed with error: $message');
-          await vpn?.stop();
-          await globalState.setVpnRuntimeState(false);
-          return;
-        }
-        final latestRunIntent = await globalState.getVpnRunIntent(reload: true);
-        if (!allowsAutomaticVpnRestart(latestRunIntent)) {
-          commonPrint.log('Background VPN start canceled by explicit user stop');
-          await vpn?.stop();
-          await globalState.setVpnRuntimeState(false);
-          return;
-        }
-        await vpn?.start(clashLibHandler.getAndroidVpnOptions());
-        final intentAfterStart = await globalState.getVpnRunIntent(reload: true);
-        if (!allowsAutomaticVpnRestart(intentAfterStart)) {
-          commonPrint.log('Background VPN start rolled back after explicit user stop');
-          await vpn?.stop();
-          await globalState.setVpnRuntimeState(false);
-          return;
-        }
-        Future.delayed(const Duration(seconds: 2), checkSmartAutoStop);
-
-        if (globalState.config.vpnProps.networkSpeedNotification) {
-          final profile = globalState.config.profiles
-              .where((e) => e.id == profileId)
-              .firstOrNull;
-          final profileName = profile?.label ?? 'Bettbox';
-          await vpn?.updateNotificationSpeed(profileName, '↑0B/s ↓0B/s');
-        }
-
-        clashLibHandler.startListener();
-        unawaited(maintainSgNodes());
-      } catch (e) {
-        commonPrint.error('Fatal error during service background start: $e');
-        await vpn?.stop();
-        await globalState.setVpnRuntimeState(false);
-      }
-    });
+    await startCore();
   }
 }
 
 void _handleMainIpc(
   ClashLibHandler clashLibHandler,
-  Future<bool> Function(CorplinkAuthorizationRequest, void Function(Uri)) authorize,
+  Future<bool> Function(CorplinkAuthorizationRequest, void Function(Uri))
+  authorize,
 ) {
   final sendPort = IsolateNameServer.lookupPortByName(mainIsolate);
   if (sendPort == null) {
@@ -555,15 +646,22 @@ void _handleMainIpc(
     if (message is List && message.length == 2 && message.first is SendPort) {
       final reply = message.first as SendPort;
       try {
-        final request = CorplinkAuthorizationRequest.values.byName(message.last as String);
+        final request = CorplinkAuthorizationRequest.values.byName(
+          message.last as String,
+        );
         final ok = await authorize(
           request,
           (url) => reply.send(['loginUrl', url.toString()]),
         );
         reply.send([ok, corplinkSgLastErrorCode.value]);
       } catch (error) {
-        commonPrint.log('[CorpLinkSG] authorization request failed: ${error.runtimeType}');
-        reply.send([false, corplinkSgLastErrorCode.value ?? 'CORPLINK_AUTHORIZATION_FAILED']);
+        commonPrint.log(
+          '[CorpLinkSG] authorization request failed: ${error.runtimeType}',
+        );
+        reply.send([
+          false,
+          corplinkSgLastErrorCode.value ?? 'CORPLINK_AUTHORIZATION_FAILED',
+        ]);
       }
       return;
     }
@@ -578,7 +676,9 @@ void _handleMainIpc(
     _safeSend(sendPort, message);
   });
 
-  clashLibHandler.startListener();
+  if (clashLibHandler.getRunTime() != null) {
+    clashLibHandler.startListener();
+  }
 }
 
 void _safeSend(SendPort sendPort, dynamic message) {
@@ -622,12 +722,12 @@ class _TileListenerWithService with TileListener {
 @immutable
 class _VpnListenerWithService with VpnListener {
   final Function(String dns) _onDnsChanged;
-  final Function() _onNetworkChanged;
+  final Function(bool defaultChanged) _onNetworkChanged;
   final Function() _onSmartAutoStopCheck;
 
   const _VpnListenerWithService({
     required Function(String dns) onDnsChanged,
-    required Function() onNetworkChanged,
+    required Function(bool defaultChanged) onNetworkChanged,
     required Function() onSmartAutoStopCheck,
   }) : _onDnsChanged = onDnsChanged,
        _onNetworkChanged = onNetworkChanged,
@@ -643,8 +743,8 @@ class _VpnListenerWithService with VpnListener {
   }
 
   @override
-  void onNetworkChanged() {
-    super.onNetworkChanged();
-    _onNetworkChanged();
+  void onNetworkChanged(bool defaultChanged) {
+    super.onNetworkChanged(defaultChanged);
+    _onNetworkChanged(defaultChanged);
   }
 }

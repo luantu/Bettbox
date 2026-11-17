@@ -8,6 +8,7 @@ import (
 	bridge "core/dart-bridge"
 	"core/platform"
 	"core/state"
+	"core/toolbox"
 	t "core/tun"
 	"encoding/json"
 	"errors"
@@ -15,10 +16,13 @@ import (
 	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/component/process"
+	"github.com/metacubex/mihomo/component/resolver"
+	"github.com/metacubex/mihomo/config"
 	"github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/dns"
 	"github.com/metacubex/mihomo/listener/sing_tun"
 	"github.com/metacubex/mihomo/log"
+	"github.com/metacubex/mihomo/tunnel"
 	"golang.org/x/sync/semaphore"
 	"net"
 	"strconv"
@@ -165,6 +169,7 @@ func handleStopTun() {
 	if handler != nil {
 		handler.close()
 	}
+	toolbox.FlushTrafficStats()
 }
 
 func handlePauseTun() bool {
@@ -175,30 +180,37 @@ func handlePauseTun() bool {
 	return vpnAdmission.SetPaused(handler != nil && handler.pause())
 }
 
-func handleStartTun(fd int, callback unsafe.Pointer) bool {
+func handleStartTun(fd int, callback unsafe.Pointer) (started bool) {
 	if fd > 0 {
 		// Tighten admission before teardown, including a stale proxy-only mode.
-		// This does not publish readiness; the new TUN must still finish startup.
 		vpnAdmission.SetMode(true)
 	}
 	handleStopTun()
+	if fd < 0 {
+		if callback != nil {
+			releaseObject(callback)
+		}
+		return false
+	}
+
+	var general *config.General
+	if fd > 0 {
+		runLock.Lock()
+		if currentConfig != nil && currentConfig.General != nil {
+			snapshot := *currentConfig.General
+			general = &snapshot
+		}
+		runLock.Unlock()
+	}
 	tunLock.Lock()
 	defer tunLock.Unlock()
-	now := time.Now()
-	runTime = &now
-	if fd != 0 {
-		if callback == nil {
-			runTime = nil
-			_ = syscall.Close(fd)
-			return false
-		}
-		if currentConfig == nil {
-			log.Warnln("[APP] handleStartTun called before setupConfig")
-			runTime = nil
+	if fd > 0 {
+		if general == nil || callback == nil {
 			_ = syscall.Close(fd)
 			if callback != nil {
 				releaseObject(callback)
 			}
+			log.Warnln("[APP] Android TUN start without configuration or socket protection")
 			return false
 		}
 		handler := &TunHandler{
@@ -206,27 +218,27 @@ func handleStartTun(fd int, callback unsafe.Pointer) bool {
 			limit:    semaphore.NewWeighted(4),
 		}
 		tunHandler.Store(handler)
-		initTunHook()
-		tunListener, err := t.Start(fd, currentConfig.General.Tun.Device, currentConfig.General.Tun.Stack, currentConfig.General.Tun.DisableICMPForwarding, uint32(currentConfig.General.Tun.MTU), currentConfig.General.IPv6, currentConfig.General.Tun.CongestionController)
-		if err == nil && tunListener != nil {
-			log.Infoln("TUN address: %v", tunListener.Address())
-			handler.listener = tunListener
-		} else {
-			if tunListener != nil {
-				_ = tunListener.Close()
+		defer func() {
+			if !started {
+				tunHandler.Store(nil)
+				handler.close()
 			}
-			tunHandler.Store(nil)
-			handler.close()
-			runTime = nil
+		}()
+		initTunHook()
+		tun := general.Tun
+		listener, err := t.Start(fd, tun.Device, tun.Stack, tun.DisableICMPForwarding, uint32(tun.MTU), general.IPv6, tun.CongestionController)
+		handler.listener = listener
+		if err != nil || listener == nil {
 			log.Warnln("[APP] Android TUN initialization failed")
 			return false
 		}
+		log.Infoln("TUN address: %v", listener.Address())
 	} else if callback != nil {
 		// Proxy-only mode has no TUN handler to own the JNI reference.
 		releaseObject(callback)
 	}
-	// fd is authoritative for this successful native start. Publish only after
-	// the protection callback/listener (or proxy-only cleanup) is installed.
+	now := time.Now()
+	runTime = &now
 	vpnAdmission.SetStarted(fd > 0)
 	return true
 }
@@ -307,6 +319,9 @@ func handleGetAndroidVpnOptions() string {
 
 func handleUpdateDns(value string) {
 	go func() {
+		defer func() {
+			_ = recover()
+		}()
 		log.Infoln("[DNS] updateDns %s", value)
 		dns.UpdateSystemDNS(strings.Split(value, ","))
 		dns.FlushCacheWithDefaultResolver()
@@ -350,6 +365,11 @@ func quickStart(initParamsChar *C.char, paramsChar *C.char, stateParamsChar *C.c
 	bytes := []byte(C.GoString(paramsChar))
 	stateParams := C.GoString(stateParamsChar)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				bridge.SendToPort(i, fmt.Sprintf("panic: %v", r))
+			}
+		}()
 		res := handleInitClash(paramsString)
 		if res == false {
 			bridge.SendToPort(i, "init error")
@@ -362,14 +382,24 @@ func quickStart(initParamsChar *C.char, paramsChar *C.char, stateParamsChar *C.c
 }
 
 //export startTUN
-func startTUN(fd C.int, callback unsafe.Pointer) bool {
+func startTUN(fd C.int, callback unsafe.Pointer) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("[APP] startTUN panic: %v", r)
+		}
+	}()
 	nativeTunLifecycle.Lock()
 	defer nativeTunLifecycle.Unlock()
-	ready := handleStartTun(int(fd), callback)
-	if ready {
+	ok = handleStartTun(int(fd), callback)
+	if ok {
 		setCorplinkNativeActive(true)
+		// Connection teardown can wait for a socket worker. handleStartTun
+		// has released tunLock, which CorpLink socket protection requires.
+		if fd > 0 {
+			resetNativeNetworkConnections()
+		}
 	}
-	return ready
+	return ok
 }
 
 // Serializes explicit stop peer teardown with a subsequent native start.
@@ -385,6 +415,9 @@ func getRunTime() *C.char {
 func stopTun() {
 	nativeTunLifecycle.Lock()
 	defer nativeTunLifecycle.Unlock()
+	defer func() {
+		_ = recover()
+	}()
 	handleStopTun()
 	setCorplinkNativeActive(false)
 }
@@ -429,8 +462,16 @@ func getAndroidVpnOptions() *C.char {
 	return C.CString(handleGetAndroidVpnOptions())
 }
 
+//export setScreenState
+func setScreenState(on C.int) {
+	toolbox.SetTrafficScreenOn(on != 0)
+}
+
 //export setState
 func setState(s *C.char) {
+	defer func() {
+		_ = recover()
+	}()
 	paramsString := C.GoString(s)
 	handleSetState(paramsString)
 }
@@ -439,4 +480,28 @@ func setState(s *C.char) {
 func updateDns(s *C.char) {
 	dnsList := C.GoString(s)
 	handleUpdateDns(dnsList)
+}
+
+//export networkChanged
+func networkChanged() {
+	defer func() {
+		_ = recover()
+	}()
+	handleNetworkChanged()
+}
+
+func handleNetworkChanged() {
+	if !isInit || !state.CurrentState.VpnProps.QuickResponse {
+		return
+	}
+	log.Infoln("[APP] Network changed, resetting connections")
+	resetNativeNetworkConnections()
+}
+
+func resetNativeNetworkConnections() {
+	runLock.Lock()
+	defer runLock.Unlock()
+	closeConnections()
+	closeIdleOutbounds(tunnel.Proxies(), tunnel.Providers())
+	resolver.ResetConnection()
 }

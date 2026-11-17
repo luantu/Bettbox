@@ -28,6 +28,7 @@ import com.appshub.bettbox.extensions.getActionIntent
 import com.appshub.bettbox.models.Package
 import com.appshub.bettbox.RunState
 import com.appshub.bettbox.services.CompatibilityAppManager
+import com.appshub.bettbox.widget.HomeWidgets
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -64,6 +65,7 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     private var activityRef: WeakReference<Activity>? = null
     private var cachedTaskId: Int? = null
     private lateinit var channel: MethodChannel
+    private var homeWidgetReady = false
     private lateinit var scope: CoroutineScope
     private var vpnCallBack: (() -> Unit)? = null
     private var activityBinding: ActivityPluginBinding? = null
@@ -204,6 +206,7 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        homeWidgetReady = false
         smartWifiPermissionRequest.complete(false)
         detachActivityListeners()
         activityRef = null
@@ -218,14 +221,41 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
         }
     }
 
+    fun invokeHomeWidget(method: String, argument: Any): Boolean {
+        if (!homeWidgetReady) return false
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            runCatching { channel.invokeMethod(method, argument) }
+        }
+        return true
+    }
+
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
+            "updateHomeWidget" -> {
+                val data = call.arguments as? String
+                if (data != null) HomeWidgets.save(BettboxApplication.getAppContext(), data)
+                result.success(null)
+            }
+
+            "hasHomeWidgets" -> {
+                result.success(HomeWidgets.hasWidgets(BettboxApplication.getAppContext()))
+            }
+
+            "consumeHomeWidgetAction" -> {
+                homeWidgetReady = true
+                result.success(HomeWidgets.consumePendingAction())
+            }
+
             "moveTaskToBack" -> {
                 activityRef?.get()?.moveTaskToBack(true)
                 result.success(true)
             }
             "getNativeLibraryDir" -> {
                 result.success(BettboxApplication.getAppContext().applicationInfo.nativeLibraryDir)
+            }
+            "notifyLowMemory" -> {
+                GlobalState.notifyLowMemory()
+                result.success(true)
             }
             "updateExcludeFromRecents" -> {
                 updateExcludeFromRecents(call.argument<Boolean>("value"))
@@ -490,21 +520,32 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     }
 
     fun requestVpnPermission(callBack: () -> Unit) {
-        vpnCallBack = callBack
-        val intent = runCatching { VpnService.prepare(BettboxApplication.getAppContext()) }.getOrNull()
-        if (intent != null) {
-            val activity = activityRef?.get()
-            if (activity != null) {
-                runCatching {
-                    activity.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
-                }.onFailure { e ->
-                    android.util.Log.e("AppPlugin", "startActivityForResult for VPN permission failed: ${e.message}")
-                    vpnCallBack?.invoke()
-                }
+        val intent = runCatching { VpnService.prepare(BettboxApplication.getAppContext()) }
+            .getOrElse {
+                notifyVpnPermissionFailure()
                 return
             }
+        if (intent == null) {
+            callBack()
+            return
         }
-        vpnCallBack?.invoke()
+        val activity = activityRef?.get()?.takeUnless { it.isFinishing || it.isDestroyed }
+        if (activity == null) {
+            notifyVpnPermissionFailure()
+            return
+        }
+        vpnCallBack = callBack
+        runCatching { activity.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE) }
+            .onFailure { e ->
+                android.util.Log.e("AppPlugin", "VPN permission request failed: ${e.message}")
+                vpnCallBack = null
+                notifyVpnPermissionFailure()
+            }
+    }
+
+    private fun notifyVpnPermissionFailure() {
+        GlobalState.runLock.withLock { GlobalState.updateRunState(RunState.STOP) }
+        ServicePlugin.notifyVpnStartFailed()
     }
 
     fun requestNotificationsPermission() {
@@ -639,8 +680,7 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
                 GlobalState.initServiceEngine()
                 callback?.invoke()
             } else {
-                GlobalState.runLock.withLock { GlobalState.updateRunState(RunState.STOP) }
-                ServicePlugin.notifyVpnStartFailed()
+                notifyVpnPermissionFailure()
             }
         }
         return true

@@ -11,7 +11,7 @@ abstract mixin class VpnListener {
 
   void onScreenStateChanged(bool isOn) {}
 
-  void onNetworkChanged() {}
+  void onNetworkChanged(bool defaultChanged) {}
 
   void onSmartAutoStopCheck() {}
 }
@@ -24,7 +24,7 @@ class Vpn {
     methodChannel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'gc':
-          clashCore.requestGc(forceFreeOSMemory: true);
+          await clashLibHandler?.freeOSMemory();
           break;
         case 'closeConnections':
           clashCore.closeConnections();
@@ -44,8 +44,9 @@ class Vpn {
           }
           break;
         case 'networkChanged':
+          final defaultChanged = call.arguments == true;
           for (final listener in _listeners) {
-            listener.onNetworkChanged();
+            listener.onNetworkChanged(defaultChanged);
           }
           break;
         case 'checkSmartAutoStop':
@@ -62,9 +63,13 @@ class Vpn {
 
   final ObserverList<VpnListener> _listeners = ObserverList<VpnListener>();
 
-  Future<bool?> start(AndroidVpnOptions options) async {
+  Future<bool?> start(
+    AndroidVpnOptions options, {
+    bool overrideSmartStop = false,
+  }) async {
     return await methodChannel.invokeMethod<bool>('start', {
       'data': jsonEncode(options),
+      if (overrideSmartStop) 'overrideSmartStop': true,
     });
   }
 
@@ -78,7 +83,10 @@ class Vpn {
   }
 
   Future<Map<String, dynamic>> getSmartNetworkSnapshot() async =>
-      await methodChannel.invokeMapMethod<String, dynamic>('getSmartNetworkSnapshot') ?? const {};
+      await methodChannel.invokeMapMethod<String, dynamic>(
+        'getSmartNetworkSnapshot',
+      ) ??
+      const {};
 
   Future<List<String>> resolveUnderlyingHost(String host) async {
     return await methodChannel.invokeListMethod<String>(
@@ -89,15 +97,20 @@ class Vpn {
   }
 
   Future<List<String>> getLocalGateways() async {
-    return await methodChannel.invokeListMethod<String>(
-          'getLocalGateways',
-        ) ??
+    return await methodChannel.invokeListMethod<String>('getLocalGateways') ??
         const [];
   }
 
   Future<String?> getCurrentDns() =>
       methodChannel.invokeMethod<String>('getCurrentDns');
 
+  Future<bool> hasPhysicalNetwork() async {
+    return await methodChannel.invokeMethod<bool>('hasPhysicalNetwork') ??
+        false;
+  }
+
+  Future<bool?> quickResponse() =>
+      methodChannel.invokeMethod<bool>('quickResponse');
 
   Future<void> setSmartStopped(bool value) async {
     await methodChannel.invokeMethod<bool>('setSmartStopped', {'value': value});
@@ -113,6 +126,14 @@ class Vpn {
   Future<bool> isCompatibilityPaused() async =>
       await methodChannel.invokeMethod<bool>('isCompatibilityPaused') ?? false;
 
+  Future<bool> isSmartStopOverride() async {
+    return await methodChannel.invokeMethod<bool>('isSmartStopOverride') ??
+        false;
+  }
+
+  Future<bool?> clearSmartStopOverride() =>
+      methodChannel.invokeMethod<bool>('clearSmartStopOverride');
+
   Future<bool?> smartStop() => methodChannel.invokeMethod<bool>('smartStop');
 
   Future<bool?> smartResume(AndroidVpnOptions options) async {
@@ -126,10 +147,9 @@ class Vpn {
   }
 
   Future<bool> endControlPlaneBypass(int token) async {
-    return await methodChannel.invokeMethod<bool>(
-          'endControlPlaneBypass',
-          {'token': token},
-        ) ??
+    return await methodChannel.invokeMethod<bool>('endControlPlaneBypass', {
+          'token': token,
+        }) ??
         false;
   }
 

@@ -7,6 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"os"
+	"runtime/debug"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/metacubex/mihomo/adapter"
 	"github.com/metacubex/mihomo/adapter/inbound"
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
@@ -26,12 +35,6 @@ import (
 	"github.com/metacubex/mihomo/log"
 	rp "github.com/metacubex/mihomo/rules/provider"
 	"github.com/metacubex/mihomo/tunnel"
-	"os"
-	"runtime"
-	"runtime/debug"
-	"strings"
-	"sync"
-	"time"
 )
 
 var (
@@ -43,12 +46,6 @@ var (
 	mBatch, _        = batch.New[bool](context.Background(), batch.WithConcurrencyNum[bool](50))
 )
 
-type ExternalProviders []ExternalProvider
-
-func (a ExternalProviders) Len() int           { return len(a) }
-func (a ExternalProviders) Less(i, j int) bool { return a[i].Name < a[j].Name }
-func (a ExternalProviders) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-
 func getExternalProvidersRaw() map[string]cp.Provider {
 	eps := make(map[string]cp.Provider)
 	for n, p := range tunnel.Providers() {
@@ -58,6 +55,17 @@ func getExternalProvidersRaw() map[string]cp.Provider {
 		eps[n] = p
 	}
 	return eps
+}
+
+func externalProviderProxies(p cp.ProxyProvider) *[]constant.Proxy {
+	if compactActionResults.Load() {
+		return nil
+	}
+	var proxies []constant.Proxy
+	if p != nil {
+		proxies = p.Proxies()
+	}
+	return &proxies
 }
 
 func toExternalProvider(p cp.Provider) (*ExternalProvider, error) {
@@ -71,7 +79,7 @@ func toExternalProvider(p cp.Provider) (*ExternalProvider, error) {
 			UpdateAt:         p.UpdatedAt(),
 			Path:             p.Vehicle().Path(),
 			SubscriptionInfo: p.GetSubscriptionInfo(),
-			Proxies:          p.Proxies(),
+			Proxies:          externalProviderProxies(p),
 		}, nil
 	case *provider.InlineProvider:
 		return &ExternalProvider{
@@ -82,7 +90,7 @@ func toExternalProvider(p cp.Provider) (*ExternalProvider, error) {
 			UpdateAt:         time.Now(),
 			Path:             "",
 			SubscriptionInfo: nil,
-			Proxies:          p.Proxies(),
+			Proxies:          externalProviderProxies(p),
 		}, nil
 	case *rp.RuleSetProvider:
 		return &ExternalProvider{
@@ -92,6 +100,7 @@ func toExternalProvider(p cp.Provider) (*ExternalProvider, error) {
 			Count:       p.Count(),
 			UpdateAt:    p.UpdatedAt(),
 			Path:        p.Vehicle().Path(),
+			Proxies:     externalProviderProxies(nil),
 		}, nil
 	default:
 		return nil, errors.New("not external provider")
@@ -174,7 +183,12 @@ func defaultSetupParams() *SetupParams {
 }
 
 func readFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
+	file, err := openInputFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
 }
 
 func updateConfig(params *UpdateParams) {
@@ -263,6 +277,9 @@ func updateConfig(params *UpdateParams) {
 		}
 		if params.Tun.StrictRoute != nil {
 			general.Tun.StrictRoute = *params.Tun.StrictRoute
+		}
+		if params.Tun.DNSMode != nil {
+			general.Tun.DNSMode = *params.Tun.DNSMode
 		}
 		general.Tun.DNSHijack = *params.Tun.DNSHijack
 		general.Tun.Stack = *params.Tun.Stack
@@ -372,6 +389,16 @@ func tryUnloadGeoData() {
 	}
 }
 
+func residentRawConfig(raw *config.RawConfig) *config.RawConfig {
+	if raw == nil {
+		return nil
+	}
+	resident := *raw
+	resident.Proxy = nil
+	resident.ProxyGroup = nil
+	return &resident
+}
+
 type preparedSetup struct {
 	key    string
 	rawCfg *config.RawConfig
@@ -384,7 +411,8 @@ type preparedSetup struct {
 var (
 	preparedSetupLock  sync.Mutex
 	lastPreparedSetup  *preparedSetup
-	preparedSetupLimit = time.Minute
+	preparedSetupTimer *time.Timer
+	preparedSetupLimit = 10 * time.Second
 )
 
 func storePreparedSetup(prepared *preparedSetup) {
@@ -393,8 +421,24 @@ func storePreparedSetup(prepared *preparedSetup) {
 	}
 	prepared.expire = time.Now().Add(preparedSetupLimit)
 	preparedSetupLock.Lock()
+	defer preparedSetupLock.Unlock()
 	lastPreparedSetup = prepared
-	preparedSetupLock.Unlock()
+	if preparedSetupTimer != nil {
+		preparedSetupTimer.Stop()
+	}
+	preparedSetupTimer = time.AfterFunc(preparedSetupLimit, func() {
+		preparedSetupLock.Lock()
+		matched := lastPreparedSetup == prepared
+		if matched {
+			lastPreparedSetup = nil
+			preparedSetupTimer = nil
+		}
+		preparedSetupLock.Unlock()
+		if matched {
+			tryUnloadGeoData()
+			debug.FreeOSMemory()
+		}
+	})
 }
 
 func takePreparedSetup(key string) *preparedSetup {
@@ -402,6 +446,10 @@ func takePreparedSetup(key string) *preparedSetup {
 	defer preparedSetupLock.Unlock()
 	prepared := lastPreparedSetup
 	lastPreparedSetup = nil
+	if preparedSetupTimer != nil {
+		preparedSetupTimer.Stop()
+		preparedSetupTimer = nil
+	}
 	if prepared == nil || prepared.key != key || time.Now().After(prepared.expire) {
 		return nil
 	}
@@ -474,12 +522,20 @@ func prepareSetup(params *SetupParams) (*preparedSetup, error) {
 	if err != nil {
 		return nil, err
 	}
+	ensureTunInet6(cfg)
 	return &preparedSetup{key: key, rawCfg: rawCfg, cfg: cfg, global: global}, nil
 }
 
-func setupConfig(params *SetupParams) (string, error) {
+func setupConfig(params *SetupParams) (global string, err error) {
 	runLock.Lock()
 	defer runLock.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("[APP] setupConfig panic: %v", r)
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	cancelDelayBatches()
 
 	constant.DefaultTestURL = params.TestURL
 
@@ -490,22 +546,22 @@ func setupConfig(params *SetupParams) (string, error) {
 	}
 	preloadBundledRuleSets(prepared.rawCfg)
 	applyStart := time.Now()
+	oldProxies, oldProviders := tunnel.Proxies(), tunnel.Providers()
 	currentConfig = prepared.cfg
-	currentRawConfig = prepared.rawCfg
+	currentRawConfig = residentRawConfig(prepared.rawCfg)
 	hub.ApplyConfig(currentConfig)
+	closeIdleOutbounds(oldProxies, oldProviders)
 	resetGroupShapes()
+	resetDelayState()
 	selectedMap := params.SelectedMap
 	if prepared.global != "" {
 		selectedMap = make(map[string]string, len(params.SelectedMap)+1)
-		for name, proxy := range params.SelectedMap {
-			selectedMap[name] = proxy
-		}
+		maps.Copy(selectedMap, params.SelectedMap)
 		selectedMap["GLOBAL"] = prepared.global
 	}
 	patchSelectGroup(selectedMap)
 	updateListeners()
 	tryUnloadGeoData()
-	runtime.GC()
 	debug.FreeOSMemory()
 	schedulePermissionSync()
 	log.Infoln(

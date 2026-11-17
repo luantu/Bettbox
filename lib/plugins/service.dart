@@ -7,7 +7,8 @@ import 'package:flutter/services.dart';
 
 import '../clash/lib.dart';
 
-typedef NativeEventCallback = Future<void> Function(String method, dynamic arguments);
+typedef NativeEventCallback =
+    Future<void> Function(String method, dynamic arguments);
 
 class Service {
   static final Service _instance = Service._internal();
@@ -36,7 +37,9 @@ class Service {
     } else if (call.method == 'vpnStartFailed') {
       await globalState.setVpnRuntimeState(false);
     }
-    for (final callback in List<NativeEventCallback>.of(_nativeEventCallbacks)) {
+    for (final callback in List<NativeEventCallback>.of(
+      _nativeEventCallbacks,
+    )) {
       await callback(call.method, call.arguments);
     }
   }
@@ -53,10 +56,11 @@ class Service {
 
   Future<bool?> destroy() => methodChannel.invokeMethod<bool>('destroy');
 
-  Future<bool?> startVpn() async {
+  Future<bool?> startVpn({bool overrideSmartStop = false}) async {
     final options = await clashLib?.getAndroidVpnOptions();
     return await methodChannel.invokeMethod<bool>('startVpn', {
       'data': json.encode(options),
+      if (overrideSmartStop) 'overrideSmartStop': true,
     });
   }
 
@@ -64,12 +68,17 @@ class Service {
 
   Future<bool?> smartStop() => methodChannel.invokeMethod<bool>('smartStop');
 
+  Future<void> requestSmartAutoStopCheck() => checkSmartAutoStop();
+
   Future<void> checkSmartAutoStop() async {
     await methodChannel.invokeMethod<bool>('checkSmartAutoStop');
   }
 
   Future<Map<String, dynamic>> getSmartNetworkSnapshot() async =>
-      await methodChannel.invokeMapMethod<String, dynamic>('getSmartNetworkSnapshot') ?? const {};
+      await methodChannel.invokeMapMethod<String, dynamic>(
+        'getSmartNetworkSnapshot',
+      ) ??
+      const {};
 
   Future<bool?> smartResume() async {
     final options = await clashLib?.getAndroidVpnOptions();
@@ -97,48 +106,54 @@ class Service {
   }
 
   Future<List<String>> getLocalGateways() async {
-    return await methodChannel.invokeListMethod<String>(
-          'getLocalGateways',
-        ) ??
+    return await methodChannel.invokeListMethod<String>('getLocalGateways') ??
         const [];
   }
 
   Future<String?> getCurrentDns() =>
       methodChannel.invokeMethod<String>('getCurrentDns');
 
-
-  Future<bool?> setQuickResponse(bool enabled) async {
-    return await methodChannel.invokeMethod<bool>('setQuickResponse', {
-      'enabled': enabled,
-    });
-  }
-
   Future<bool> isServiceEngineRunning() async {
-    return await methodChannel.invokeMethod<bool>('isServiceEngineRunning') ?? false;
+    return await methodChannel.invokeMethod<bool>('isServiceEngineRunning') ??
+        false;
   }
 
   Future<bool> getStatus() async {
     return await methodChannel.invokeMethod<bool>('status') ?? false;
   }
 
-  Future<void> updateNotificationSpeed(String profileName, String speedInfo) async {
+  String? _speedNotificationProfile;
+
+  bool needsSpeedNotificationSync(String profileName) =>
+      _speedNotificationProfile != profileName;
+
+  Future<void> updateNotificationSpeed(
+    String profileName,
+    String speedInfo,
+  ) async {
     await methodChannel.invokeMethod<void>('updateNotificationSpeed', {
       'profileName': profileName,
       'speedInfo': speedInfo,
     });
+    _speedNotificationProfile = profileName;
   }
 
   Future<void> restoreNotification() async {
+    _speedNotificationProfile = null;
     await methodChannel.invokeMethod<void>('restoreNotification');
   }
 
   Future<bool?> setHighPriorityNotification(bool enabled) async {
-    return await methodChannel.invokeMethod<bool>('setHighPriorityNotification', {
-      'enabled': enabled,
-    });
+    return await methodChannel.invokeMethod<bool>(
+      'setHighPriorityNotification',
+      {'enabled': enabled},
+    );
   }
 
-  Future<bool?> reconnectIpc() => methodChannel.invokeMethod<bool>('reconnectIpc');
+  Future<bool?> resumeCore() => methodChannel.invokeMethod<bool>('resumeCore');
+
+  Future<bool?> reconnectIpc() =>
+      methodChannel.invokeMethod<bool>('reconnectIpc');
 }
 
 Service? get service =>

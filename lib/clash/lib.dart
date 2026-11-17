@@ -41,8 +41,8 @@ class ClashLib extends ClashHandlerInterface with AndroidClashInterface {
           if (!_canSendCompleter.isCompleted) {
             _canSendCompleter.complete(true);
           }
-        } else {
-          handleResult(ActionResult.fromJson(json.decode(message)));
+        } else if (message is String) {
+          handleResultMessage(message);
         }
       });
     }
@@ -130,10 +130,12 @@ class ClashLib extends ClashHandlerInterface with AndroidClashInterface {
     required Future<void> Function(Uri) openLoginUrl,
   }) async {
     final connected = await _canSendCompleter.future.timeout(
-      const Duration(seconds: 5), onTimeout: () => false,
+      const Duration(seconds: 5),
+      onTimeout: () => false,
     );
     final target = sendPort;
-    if (!connected || target == null) throw StateError('CORPLINK_SERVICE_UNAVAILABLE');
+    if (!connected || target == null)
+      throw StateError('CORPLINK_SERVICE_UNAVAILABLE');
     final replies = ReceivePort();
     try {
       target.send([replies.sendPort, request]);
@@ -144,7 +146,8 @@ class ClashLib extends ClashHandlerInterface with AndroidClashInterface {
             if (url != null) await openLoginUrl(url);
             continue;
           }
-          if (reply.first is bool) return (reply.first as bool, reply.last as String?);
+          if (reply.first is bool)
+            return (reply.first as bool, reply.last as String?);
         }
         throw StateError('CORPLINK_SERVICE_REPLY_INVALID');
       }
@@ -227,50 +230,71 @@ class ClashLibHandler {
     } finally {
       malloc.free(actionParamsChar);
     }
-    final result = timeout == null ? completer.future : completer.future.timeout(timeout);
+    final result = timeout == null
+        ? completer.future
+        : completer.future.timeout(timeout);
     return result.whenComplete(receiver.close);
   }
 
   Future<bool> reconnectTunnels() async {
     final id = 'reconnectTunnels-${DateTime.now().microsecondsSinceEpoch}';
-    final response = await invokeAction('{"id":"$id","method":"reconnectTunnels"}');
-    final result = ActionResult.fromJson(json.decode(response));
-    return result.code == ResultType.success && result.data == true;
+    final response = await invokeAction(
+      '{"id":"$id","method":"reconnectTunnels"}',
+    );
+    final result = decodeActionResult(response);
+    return result?.code == ResultType.success && result?.data == true;
   }
 
   Future<bool> getAndroidVpnReady() async {
     final response = await invokeAction(
-      '{"method":"getAndroidVpnReady"}', timeout: const Duration(seconds: 2),
+      '{"method":"getAndroidVpnReady"}',
+      timeout: const Duration(seconds: 2),
     );
-    final result = ActionResult.fromJson(json.decode(response));
-    return result.code == ResultType.success && result.data == true;
+    final result = decodeActionResult(response);
+    return result?.code == ResultType.success && result?.data == true;
   }
 
   Future<SetupResult> setupConfig(SetupParams params) async {
-    final response = await invokeAction(jsonEncode({
-      'method': 'setupConfig',
-      'data': jsonEncode(params),
-    }), timeout: const Duration(seconds: 55));
-    final result = ActionResult.fromJson(json.decode(response));
-    if (result.code != ResultType.success) throw StateError('CORPLINK_SETUP_FAILED');
+    final response = await invokeAction(
+      jsonEncode({'method': 'setupConfig', 'data': jsonEncode(params)}),
+      timeout: const Duration(seconds: 55),
+    );
+    final result = decodeActionResult(response);
+    if (result == null || result.code != ResultType.success) {
+      throw StateError('CORPLINK_SETUP_FAILED');
+    }
     return SetupResult.fromData(result.data);
   }
 
   Future<bool?> corplinkSgReady() async {
     final id = 'sgStatus-${DateTime.now().microsecondsSinceEpoch}';
-    final response = await invokeAction('{"id":"$id","method":"getCorplinkSgStatus"}');
-    final result = ActionResult.fromJson(json.decode(response));
-    final data = result.data;
-    if (result.code != ResultType.success || data is! Map || data['present'] != true) {
+    final response = await invokeAction(
+      '{"id":"$id","method":"getCorplinkSgStatus"}',
+    );
+    final result = decodeActionResult(response);
+    final data = result?.data;
+    if (result?.code != ResultType.success ||
+        data is! Map ||
+        data['present'] != true) {
       return null;
     }
     return data['ready'] == true;
+  }
+
+  Future<void> freeOSMemory() async {
+    final action = Action(
+      id: '${ActionMethod.forceGc.name}#${utils.id}',
+      method: ActionMethod.forceGc,
+      data: 'true',
+    );
+    await invokeAction(json.encode(action));
   }
 
   Future<void> exportConfig(
     String id,
     String output, {
     String? ageSecretKey,
+    String? providersPath,
   }) async {
     final action = Action(
       id: '${ActionMethod.exportConfig.name}#${utils.id}',
@@ -279,11 +303,16 @@ class ClashLibHandler {
         'path': await appPath.getProfilePath(id),
         'age-secret-key': ageSecretKey ?? '',
         'output': output,
+        'expand-providers': providersPath != null,
+        'providers-path': providersPath ?? '',
       }),
     );
-    final result = ActionResult.fromJson(
-      json.decode(await invokeAction(json.encode(action))),
-    ).toResult;
+    final result = decodeActionResult(
+      await invokeAction(json.encode(action)),
+    )?.toResult;
+    if (result == null) {
+      throw 'Invalid core result';
+    }
     if (result.isError) {
       throw result.message;
     }
@@ -359,12 +388,14 @@ class ClashLibHandler {
     String id, {
     String? ageSecretKey,
     List<String> disabledGroups = const [],
+    bool snippet = false,
   }) async {
     final path = await appPath.getProfilePath(id);
     final params = {
       'path': path,
       'age-secret-key': ageSecretKey ?? '',
       'disabled-groups': disabledGroups,
+      'snippet': snippet,
     };
     return using((arena) {
       final pathChar = json

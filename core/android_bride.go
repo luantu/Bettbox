@@ -3,7 +3,25 @@
 package main
 
 /*
+#cgo LDFLAGS: -ldl
+#include <dlfcn.h>
+#include <malloc.h>
 #include <stdlib.h>
+
+#ifndef M_PURGE
+#define M_PURGE (-101)
+#endif
+#ifndef M_PURGE_ALL
+#define M_PURGE_ALL (-104)
+#endif
+
+static void purge_memory(void) {
+    // The app's minimum Android API predates mallopt.
+    int (*set_malloc_option)(int, int) = (int (*)(int, int))dlsym(RTLD_DEFAULT, "mallopt");
+    if (set_malloc_option && set_malloc_option(M_PURGE_ALL, 0) != 1) {
+        set_malloc_option(M_PURGE, 0);
+    }
+}
 
 typedef void (*release_object_func)(void *obj);
 
@@ -43,6 +61,10 @@ var (
 		resolveProcessFunc C.resolve_process_func
 	}
 )
+
+func purgeNativeMemory() {
+	C.purge_memory()
+}
 
 func Protect(callback unsafe.Pointer, fd int) bool {
 	if globalCallbacks.protectFunc != nil {

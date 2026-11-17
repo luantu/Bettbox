@@ -10,6 +10,10 @@ object Core {
 
     private external fun startTun(fd: Int, cb: TunInterface): Boolean
     private external fun suspend(suspended: Int)
+    private external fun setScreenState(on: Int)
+    private external fun networkChanged()
+    private external fun getTraffic(): String
+    private external fun purgeMemory(all: Boolean)
     external fun stopTun()
     external fun pauseTun(): Boolean
     external fun androidTransportReady(): Boolean
@@ -71,6 +75,16 @@ object Core {
         })
     }
 
+    fun trafficJson(): String? = runCatching { getTraffic() }.getOrNull()
+
+    fun purge(all: Boolean = false) {
+        runCatching {
+            purgeMemory(all)
+        }.onFailure {
+            Log.e("Core", "Error calling purgeMemory: ${it.message}", it)
+        }
+    }
+
     fun suspended(value: Boolean) {
         runCatching {
             Log.d("Core", "suspended called with value: $value")
@@ -78,6 +92,22 @@ object Core {
             Log.d("Core", "suspend JNI call completed")
         }.onFailure {
             Log.e("Core", "Error calling suspend: ${it.message}", it)
+        }
+    }
+
+    fun screenStateChanged(isOn: Boolean) {
+        runCatching {
+            setScreenState(if (isOn) 1 else 0)
+        }.onFailure {
+            Log.e("Core", "Error calling setScreenState: ${it.message}", it)
+        }
+    }
+
+    fun onNetworkChanged() {
+        runCatching {
+            networkChanged()
+        }.onFailure {
+            Log.e("Core", "Error calling networkChanged: ${it.message}", it)
         }
     }
 

@@ -52,3 +52,13 @@ func TestGlobalDelayOverrideDoesNotTrustSimilarUnmanagedGroup(t *testing.T) {
 		t.Fatalf("unmanaged WireGuard group bypassed global URL: %v", got)
 	}
 }
+
+func TestPreparedSetupCacheSeparatesGroupOverride(t *testing.T) {
+	profile := []byte("rules: [MATCH,DIRECT]")
+	params := defaultSetupParams()
+	withoutOverride := setupKey(params, profile)
+	params.OverrideTestUrl = true
+	if withOverride := setupKey(params, profile); withOverride == withoutOverride {
+		t.Fatal("group override reused the cache key for a non-overridden profile")
+	}
+}

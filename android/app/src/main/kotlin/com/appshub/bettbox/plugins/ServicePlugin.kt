@@ -36,6 +36,7 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fun notifySmartNetworkChanged() = notify("networkChanged", mapOf("smartNetworkOnly" to true))
         fun notifyQuickResponse() = notify("quickResponse")
         fun notifyVpnStartFailed() = notify("vpnStartFailed")
+        fun notifyScreenStateChanged(isOn: Boolean) = notify("screenStateChanged", isOn)
         fun notifyRunStateChanged(state: RunState) {
             mainHandler.post {
                 activeChannels.forEach { ch ->
@@ -87,7 +88,10 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "getLocalGateways" -> result.success(VpnPlugin.getLocalGateways())
             "getNetworkInfo" -> result.success(VpnPlugin.getNetworkInfo())
             "getSmartNetworkSnapshot" -> result.success(VpnPlugin.getSmartNetworkSnapshot())
-            "checkSmartAutoStop" -> {
+            "resumeCore" -> {
+                VpnPlugin.resumeCore { result.success(true) }
+            }
+            "checkSmartAutoStop", "requestSmartAutoStopCheck" -> {
                 VpnPlugin.requestSmartAutoStopCheck()
                 result.success(true)
             }
@@ -140,8 +144,9 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         runCatching { gson.fromJson(data, VpnOptions::class.java) }
             .onSuccess { options ->
-                VpnPlugin.handleStart(options)
-                result.success(true)
+                result.success(VpnPlugin.handleStart(
+                    options, call.argument<Boolean>("overrideSmartStop") == true,
+                ))
             }
             .onFailure { result.error("PARSE_ERROR", it.message, null) }
     }

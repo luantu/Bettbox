@@ -27,17 +27,22 @@ type GetConfigParams struct {
 	Path           string   `json:"path"`
 	AgeSecretKey   string   `json:"age-secret-key"`
 	DisabledGroups []string `json:"disabled-groups"`
+	Snippet        bool     `json:"snippet"`
 }
 
 type ExportConfigParams struct {
-	Path         string `json:"path"`
-	AgeSecretKey string `json:"age-secret-key"`
-	Output       string `json:"output"`
+	Path            string `json:"path"`
+	AgeSecretKey    string `json:"age-secret-key"`
+	Output          string `json:"output"`
+	ExpandProviders bool   `json:"expand-providers"`
+	ProvidersPath   string `json:"providers-path"`
+	Refresh         bool   `json:"refresh"`
 }
 
 type InitParams struct {
-	HomeDir string `json:"home-dir"`
-	Version int    `json:"version"`
+	HomeDir             string `json:"home-dir"`
+	Version             int    `json:"version"`
+	ActionResultVersion int    `json:"action-result-version"`
 }
 
 type SetupParams struct {
@@ -75,6 +80,7 @@ type tunSchema struct {
 	Enable                bool               `yaml:"enable" json:"enable"`
 	Device                *string            `yaml:"device" json:"device"`
 	Stack                 *constant.TUNStack `yaml:"stack" json:"stack"`
+	DNSMode               *string            `yaml:"dns-mode" json:"dns-mode,omitempty"`
 	DNSHijack             *[]string          `yaml:"dns-hijack" json:"dns-hijack"`
 	AutoRoute             *bool              `yaml:"auto-route" json:"auto-route"`
 	AutoRedirect          *bool              `yaml:"auto-redirect" json:"auto-redirect,omitempty"`
@@ -104,7 +110,7 @@ type ExternalProvider struct {
 	Path             string                     `json:"path"`
 	UpdateAt         time.Time                  `json:"update-at"`
 	SubscriptionInfo *provider.SubscriptionInfo `json:"subscription-info"`
-	Proxies          []constant.Proxy           `json:"proxies"`
+	Proxies          *[]constant.Proxy          `json:"proxies,omitempty"`
 }
 
 const (
@@ -114,18 +120,24 @@ const (
 	forceGcMethod                        Method = "forceGc"
 	shutdownMethod                       Method = "shutdown"
 	validateConfigMethod                 Method = "validateConfig"
+	importProfileMethod                  Method = "importProfile"
 	decryptAgeConfigMethod               Method = "decryptAgeConfig"
 	updateConfigMethod                   Method = "updateConfig"
 	getProxiesMethod                     Method = "getProxies"
 	changeProxyMethod                    Method = "changeProxy"
 	getTrafficMethod                     Method = "getTraffic"
 	getTotalTrafficMethod                Method = "getTotalTraffic"
+	getTrafficSnapshotMethod             Method = "getTrafficSnapshot"
 	resetTrafficMethod                   Method = "resetTraffic"
 	asyncTestDelayMethod                 Method = "asyncTestDelay"
+	asyncTestDelaysMethod                Method = "asyncTestDelays"
+	setForegroundMethod                  Method = "setForeground"
 	getConnectionsMethod                 Method = "getConnections"
+	getConnectionsSummaryMethod          Method = "getConnectionsSummary"
 	closeConnectionsMethod               Method = "closeConnections"
 	resetConnectionsMethod               Method = "resetConnectionsMethod"
 	closeConnectionMethod                Method = "closeConnection"
+	closeGroupConnectionsMethod          Method = "closeGroupConnections"
 	getExternalProvidersMethod           Method = "getExternalProviders"
 	getExternalProviderMethod            Method = "getExternalProvider"
 	getCountryCodeMethod                 Method = "getCountryCode"
@@ -148,6 +160,7 @@ const (
 	getConfigMethod                      Method = "getConfig"
 	getRuntimeConfigMethod               Method = "getRuntimeConfig"
 	exportConfigMethod                   Method = "exportConfig"
+	mergeProfilesMethod                  Method = "mergeProfiles"
 	flushFakeIPMethod                    Method = "flushFakeIP"
 	flushDnsCacheMethod                  Method = "flushDnsCache"
 	reconnectTunnelsMethod               Method = "reconnectTunnels"
@@ -169,6 +182,33 @@ const (
 	clearRequestsMethod                  Method = "clearRequests"
 	getLogsMethod                        Method = "getLogs"
 	clearLogsMethod                      Method = "clearLogs"
+	startSpeedTestMethod                 Method = "startSpeedTest"
+	cancelSpeedTestMethod                Method = "cancelSpeedTest"
+	probeSpeedTestMethod                 Method = "probeSpeedTest"
+	getSpeedTestServersMethod            Method = "getSpeedTestServers"
+	startStunTestMethod                  Method = "startStunTest"
+	cancelStunTestMethod                 Method = "cancelStunTest"
+	startIperfServerMethod               Method = "startIperfServer"
+	stopIperfServerMethod                Method = "stopIperfServer"
+	startIperfClientMethod               Method = "startIperfClient"
+	cancelIperfClientMethod              Method = "cancelIperfClient"
+	startLocalPingMethod                 Method = "startLocalPing"
+	cancelLocalPingMethod                Method = "cancelLocalPing"
+	routeTraceMethod                     Method = "routeTrace"
+	dnsQueryMethod                       Method = "dnsQuery"
+	mrsPrepareMethod                     Method = "mrsPrepare"
+	mrsLookupMethod                      Method = "mrsLookup"
+	mrsDumpMethod                        Method = "mrsDump"
+	getTrafficStatsMethod                Method = "getTrafficStats"
+	clearTrafficStatsMethod              Method = "clearTrafficStats"
+	storeGetMethod                       Method = "storeGet"
+	storeSetMethod                       Method = "storeSet"
+	storeListMethod                      Method = "storeList"
+	storeClearMethod                     Method = "storeClear"
+	cancelMrsLookupMethod                Method = "cancelMrsLookup"
+	startToolProxyMethod                 Method = "startToolProxy"
+	stopToolProxyMethod                  Method = "stopToolProxy"
+	ageCryptMethod                       Method = "ageCrypt"
 )
 
 type Method string
@@ -187,10 +227,11 @@ type Message struct {
 }
 
 const (
-	LogMessage     MessageType = "log"
-	DelayMessage   MessageType = "delay"
-	RequestMessage MessageType = "request"
-	LoadedMessage  MessageType = "loaded"
+	LogMessage           MessageType = "log"
+	DelayMessage         MessageType = "delay"
+	DelaysMessage        MessageType = "delays"
+	GroupsChangedMessage MessageType = "groupsChanged"
+	RequestMessage       MessageType = "request"
 )
 
 func (message *Message) Json() (string, error) {
