@@ -76,12 +76,8 @@ function main(config) {
   const owned = previous && previous.version === 1 ? previous.groups || [] : [];
   const proxies = Array.isArray(config.proxies) ? config.proxies : [];
   const groups = Array.isArray(config['proxy-groups']) ? config['proxy-groups'] : [];
-  for (const item of [...proxies, ...groups]) {
-    if (names.includes(item.name) && !owned.includes(item.name)) {
-      throw new Error('SERVICE_GROUP_NAME_COLLISION: ' + item.name);
-    }
-  }
   const existingGroups = groups.filter(g => !owned.includes(g.name));
+  const existingNames = new Set([...proxies, ...existingGroups].map(item => item.name));
   // 仅认可实际存在、由应用生成的单 WG 成员组，不能将订阅同名组当成飞连。
   function managedGroup(pattern) {
     return existingGroups.find(g => pattern.test(g.name) &&
@@ -144,12 +140,11 @@ function main(config) {
     (region === 'KR' ? korean : others).push(p.name);
   }
   const providers = Object.keys(config['proxy-providers'] || {});
-  if (!intl && supported.length === 0 && providers.length === 0) {
-    throw new Error('NO_SUPPORTED_SERVICE_NODE: 请勾选 INT 节点或提供可识别支持地区的订阅节点');
-  }
+  const hasServiceRoute = Boolean(intl || supported.length || providers.length);
   const unique = values => [...new Set(values)];
   const added = [];
   function fallback(name, members, url, status, extra) {
+    if (existingNames.has(name)) throw new Error('SERVICE_GROUP_NAME_COLLISION: ' + name);
     const g = Object.assign({ name, type: 'fallback', proxies: unique(members),
       url, 'expected-status': status, interval: 60, timeout: 5000, lazy: false,
       'max-failed-times': 1, 'empty-fallback': 'REJECT' }, extra || {});
@@ -190,8 +185,10 @@ function main(config) {
     openaiMembers = [...(intl ? [intl.name] : []), openaiTier];
     googleMembers = [koreanTier, otherTier, ...(intl ? [intl.name] : [])];
   }
-  fallback(names[0], openaiMembers, openaiProbe, '200');
-  fallback(names[1], googleMembers, googleProbe, '204');
+  if (hasServiceRoute) {
+    fallback(names[0], openaiMembers, openaiProbe, '200');
+    fallback(names[1], googleMembers, googleProbe, '204');
+  }
 
   const rules = [];
   const ruleProviders = Object.assign({}, config['rule-providers'] || {});
@@ -223,10 +220,10 @@ function main(config) {
   }
   for (const raw of local.bypass || []) rules.push(route(raw, 'DIRECT'));
   if (corporate) for (const raw of local.corporate || []) rules.push(route(raw, corporate.name));
-  remote('openai', 'padavan_openai_domains', names[0], false);
+  remote('openai', 'padavan_openai_domains', hasServiceRoute ? names[0] : 'REJECT', false);
   // Mihomo skips a matched rule when the selected outbound cannot carry UDP.
-  rules.push('AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT');
-  remote('google', 'google_proxy_domains', names[1], false);
+  if (hasServiceRoute) rules.push('AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT');
+  remote('google', 'google_proxy_domains', hasServiceRoute ? names[1] : 'REJECT', false);
   if (intl) remote('overseas', 'sg-node-overseas-no-google', intl.name, false);
   const ownedRule = rule => typeof rule === 'string' &&
     previous && Array.isArray(previous.rules) && previous.rules.includes(rule);
@@ -239,15 +236,21 @@ function main(config) {
   config['proxy-groups'] = [...existingGroups, ...added];
   const dns = Object.assign({}, config.dns || {});
   dns.enable = true;
+  const openaiDoh = 'https://1.1.1.1/dns-query#' + names[0];
+  const googleDoh = 'https://1.1.1.1/dns-query#' + names[1];
   dns['nameserver-policy'] = Object.assign({
-    'rule-set:bettbox-openai': ['https://1.1.1.1/dns-query#' + names[0]],
-    'rule-set:bettbox-google': ['https://1.1.1.1/dns-query#' + names[1]],
-  }, dns['nameserver-policy'] || {});
-  // 幂等时以本脚本的服务绑定为准，其他 DNS 策略保留。
-  dns['nameserver-policy']['rule-set:bettbox-openai'] = ['https://1.1.1.1/dns-query#' + names[0]];
-  dns['nameserver-policy']['rule-set:bettbox-google'] = ['https://1.1.1.1/dns-query#' + names[1]];
+    'rule-set:bettbox-openai': [],
+    'rule-set:bettbox-google': [],
+  }, dns['nameserver-policy']);
+  dns['nameserver-policy']['rule-set:bettbox-openai'] = [hasServiceRoute ? openaiDoh : 'rcode://refused'];
+  dns['nameserver-policy']['rule-set:bettbox-google'] = [hasServiceRoute ? googleDoh : 'rcode://refused'];
   if (!Array.isArray(dns.nameserver) || !dns.nameserver.length) {
-    dns.nameserver = ['https://1.1.1.1/dns-query#' + names[1]];
+    if (hasServiceRoute) dns.nameserver = [googleDoh];
+    else delete dns.nameserver;
+  } else if (!hasServiceRoute && owned.includes(names[1]) &&
+      dns.nameserver.length === 1 && dns.nameserver[0] === googleDoh) {
+    // 只有脚本原先填入的默认值指向已删除的服务组，交回 Mihomo 默认解析。
+    delete dns.nameserver;
   }
   if (!Array.isArray(dns['proxy-server-nameserver']) || !dns['proxy-server-nameserver'].length) {
     // 代理服务器本身的域名引导不能再次依赖同一代理组。

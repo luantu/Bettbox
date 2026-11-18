@@ -171,10 +171,50 @@ test('同名用户组不静默覆盖', () => {
   assert.throws(() => apply(c), /SERVICE_GROUP_NAME_COLLISION/);
 });
 
-test('没有 INT 时支持订阅仍可生成服务组；没有任何候选时明确失败', () => {
+test('没有 INT 时支持订阅仍可生成服务组', () => {
   const c = { proxies: [{ name: '韩国01', type: 'ss' }], 'proxy-groups': [] };
   assert.deepEqual(group(apply(c), 'OpenAI 服务').proxies, ['韩国01']);
-  assert.throws(() => apply({}), /NO_SUPPORTED_SERVICE_NODE/);
+});
+
+test('只有福州组时仍启用内网分流和规则下载，缺少出口的服务匹配规则拒绝请求', () => {
+  const c = base();
+  c.proxies = c.proxies.slice(1);
+  c['proxy-groups'] = c['proxy-groups'].slice(1);
+  c.rules.unshift('DOMAIN,keep.example,DIRECT');
+  c.dns = { nameserver: ['https://dns.example/dns-query'], 'nameserver-policy': { '+.ruijie.work': 'system' } };
+  const out = apply(c);
+  assert.deepEqual(out['proxy-groups'], c['proxy-groups']);
+  assert.equal(out.rules[0], 'IP-CIDR,172.18.34.110/32,Fuzhou-Node-1,no-resolve');
+  assert.ok(out.rules.includes('DOMAIN-SUFFIX,ruijie.work,Fuzhou-Node-1'));
+  assert.deepEqual(out.rules.slice(-2), c.rules);
+  assert.deepEqual(Object.keys(out['rule-providers']), ['bettbox-openai', 'bettbox-google']);
+  for (const service of ['openai', 'google']) {
+    const name = 'bettbox-' + service;
+    assert.equal(out['rule-providers'][name].proxy, 'Fuzhou-Node-1');
+    assert.ok(out.rules.includes('RULE-SET,' + name + ',REJECT'));
+    assert.deepEqual(out.dns['nameserver-policy']['rule-set:' + name], ['rcode://refused']);
+  }
+  assert.deepEqual(out.dns.nameserver, c.dns.nameserver);
+  assert.equal(out.dns['nameserver-policy']['+.ruijie.work'], 'system');
+  assert.deepEqual(apply(out), out);
+});
+
+test('没有节点也能应用；删除 INT 后清除旧服务组和指向该组的默认 DNS', () => {
+  const empty = apply({});
+  assert.deepEqual(empty['proxy-groups'], []);
+  assert.equal(empty.rules[0], 'IP-CIDR,172.18.34.110/32,REJECT,no-resolve');
+  assert.equal(empty.dns.nameserver, undefined);
+  assert.deepEqual(apply(empty), empty);
+
+  const withIntl = apply(base());
+  withIntl.proxies = withIntl.proxies.filter(p => p.name !== 'FZ-INT-Node-WG');
+  withIntl['proxy-groups'] = withIntl['proxy-groups'].filter(g => g.name !== 'FZ-INT-Node');
+  const withoutIntl = apply(withIntl);
+  assert.deepEqual(withoutIntl['proxy-groups'].map(g => g.name), ['Fuzhou-Node-1']);
+  assert.equal(withoutIntl.dns.nameserver, undefined);
+  assert.equal(withoutIntl['rule-providers']['bettbox-overseas'], undefined);
+  assert.ok(!withoutIntl.rules.some(rule => rule.includes('bettbox-overseas')));
+  assert.deepEqual(apply(withoutIntl), withoutIntl);
 });
 
 test('未勾选福州时不创建企业组或企业引流，保留现有订阅规则', () => {
