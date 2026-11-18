@@ -121,9 +121,8 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
     'DOMAIN-SUFFIX,ruijie.work,Fuzhou-Node-1',
   ]);
-  assert.deepEqual(c.rules.slice(-5), [
+  assert.deepEqual(c.rules.slice(-4), [
     'RULE-SET,bettbox-openai,OpenAI 服务',
-    'AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT',
     'RULE-SET,bettbox-google,Google 服务',
     'RULE-SET,bettbox-overseas,FZ-INT-Node',
     'MATCH,DIRECT',
@@ -138,18 +137,19 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
   assert.equal(c['rule-providers']['bettbox-overseas'].url, 'http://172.18.34.110:44468/sg-node-overseas-no-google.yaml');
 });
 
-test('QUIC 规则精确匹配 OpenClash 的域名和端口，优先于服务组及上游规则', () => {
+test('服务 UDP 拒绝规则覆盖所有端口，优先于服务组及上游规则', () => {
   const c = base();
   c.rules.unshift('DOMAIN-SUFFIX,claude.ai,DIRECT');
   const out = apply(c);
-  const block = raw => 'AND,((NETWORK,UDP),(DST-PORT,443),(' + raw + ')),REJECT';
+  const block = raw => 'AND,((NETWORK,UDP),(' + raw + ')),REJECT';
   const rules = [
     ...['chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com',
       'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claudeusercontent.com', 'claudemcpcontent.com']
       .map(domain => block('DOMAIN-SUFFIX,' + domain)),
     block('DOMAIN,anthropic.gallerycdn.vsassets.io'),
     block('DOMAIN,servd-anthropic-website.b-cdn.net'),
-    'AND,((NETWORK,UDP),(DST-PORT,443),(RULE-SET,bettbox-google),(NOT,((RULE-SET,bettbox-openai)))),REJECT',
+    block('RULE-SET,bettbox-openai'),
+    block('RULE-SET,bettbox-google'),
   ];
   const firstService = out.rules.indexOf('RULE-SET,bettbox-openai,OpenAI 服务');
   assert.deepEqual(out.rules.slice(3, firstService), rules);

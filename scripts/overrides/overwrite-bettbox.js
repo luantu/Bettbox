@@ -220,21 +220,19 @@ function main(config) {
   }
   for (const raw of local.bypass || []) rules.push(route(raw, 'DIRECT'));
   if (corporate) for (const raw of local.corporate || []) rules.push(route(raw, corporate.name));
-  // 与 OpenClash 一致，先拒绝指定服务的 UDP/443，再应用常规代理规则。
-  const quic = 'AND,((NETWORK,UDP),(DST-PORT,443),';
+  // 先拒绝这些服务所有端口的 UDP，避免被代理组接收或落到 DIRECT。
+  const rejectUdp = rule => 'AND,((NETWORK,UDP),(' + rule + ')),REJECT';
   for (const domain of [
     'chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com',
     'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claudeusercontent.com', 'claudemcpcontent.com',
   ]) {
-    rules.push(quic + '(DOMAIN-SUFFIX,' + domain + ')),REJECT');
+    rules.push(rejectUdp('DOMAIN-SUFFIX,' + domain));
   }
   for (const domain of ['anthropic.gallerycdn.vsassets.io', 'servd-anthropic-website.b-cdn.net']) {
-    rules.push(quic + '(DOMAIN,' + domain + ')),REJECT');
+    rules.push(rejectUdp('DOMAIN,' + domain));
   }
-  rules.push(quic + '(RULE-SET,bettbox-google),(NOT,((RULE-SET,bettbox-openai)))),REJECT');
+  rules.push(rejectUdp('RULE-SET,bettbox-openai'), rejectUdp('RULE-SET,bettbox-google'));
   remote('openai', 'padavan_openai_domains', hasServiceRoute ? names[0] : 'REJECT', false);
-  // Mihomo skips a matched rule when the selected outbound cannot carry UDP.
-  if (hasServiceRoute) rules.push('AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT');
   remote('google', 'google_proxy_domains', hasServiceRoute ? names[1] : 'REJECT', false);
   if (intl) remote('overseas', 'sg-node-overseas-no-google', intl.name, false);
   const ownedRule = rule => typeof rule === 'string' &&
