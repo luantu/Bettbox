@@ -222,6 +222,8 @@ function main(config) {
   for (const raw of local.bypass || []) rules.push(route(raw, 'DIRECT'));
   if (corporate) for (const raw of local.corporate || []) rules.push(route(raw, corporate.name));
   remote('openai', 'padavan_openai_domains', names[0], false);
+  // Mihomo skips a matched rule when the selected outbound cannot carry UDP.
+  rules.push('AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT');
   remote('google', 'google_proxy_domains', names[1], false);
   if (intl) remote('overseas', 'sg-node-overseas-no-google', intl.name, false);
   const ownedRule = rule => typeof rule === 'string' &&

@@ -116,11 +116,12 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
   assert.deepEqual(group(c, 'OpenAI 服务')?.proxies, ['FZ-INT-Node']);
   assert.deepEqual(group(c, 'Google 服务')?.proxies, ['FZ-INT-Node']);
   assert.equal(group(c, 'OpenAI 服务').type, 'fallback');
-  assert.deepEqual(c.rules.slice(0, 6), [
+  assert.deepEqual(c.rules.slice(0, 7), [
     'IP-CIDR,172.18.34.110/32,DIRECT,no-resolve',
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
     'DOMAIN-SUFFIX,ruijie.work,Fuzhou-Node-1',
     'RULE-SET,bettbox-openai,OpenAI 服务',
+    'AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT',
     'RULE-SET,bettbox-google,Google 服务',
     'RULE-SET,bettbox-overseas,FZ-INT-Node',
   ]);
