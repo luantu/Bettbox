@@ -116,14 +116,17 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
   assert.deepEqual(group(c, 'OpenAI 服务')?.proxies, ['FZ-INT-Node']);
   assert.deepEqual(group(c, 'Google 服务')?.proxies, ['FZ-INT-Node']);
   assert.equal(group(c, 'OpenAI 服务').type, 'fallback');
-  assert.deepEqual(c.rules.slice(0, 7), [
+  assert.deepEqual(c.rules.slice(0, 3), [
     'IP-CIDR,172.18.34.110/32,Fuzhou-Node-1,no-resolve',
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
     'DOMAIN-SUFFIX,ruijie.work,Fuzhou-Node-1',
+  ]);
+  assert.deepEqual(c.rules.slice(-5), [
     'RULE-SET,bettbox-openai,OpenAI 服务',
     'AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT',
     'RULE-SET,bettbox-google,Google 服务',
     'RULE-SET,bettbox-overseas,FZ-INT-Node',
+    'MATCH,DIRECT',
   ]);
   for (const p of Object.values(c['rule-providers'])) {
     assert.match(p.url, /^http:\/\/172\.18\.34\.110:44468\//);
@@ -133,6 +136,40 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
   assert.equal(c['rule-providers']['bettbox-openai'].url, 'http://172.18.34.110:44468/padavan_openai_domains.yaml');
   assert.equal(c['rule-providers']['bettbox-google'].url, 'http://172.18.34.110:44468/google_proxy_domains.yaml');
   assert.equal(c['rule-providers']['bettbox-overseas'].url, 'http://172.18.34.110:44468/sg-node-overseas-no-google.yaml');
+});
+
+test('QUIC 规则精确匹配 OpenClash 的域名和端口，优先于服务组及上游规则', () => {
+  const c = base();
+  c.rules.unshift('DOMAIN-SUFFIX,claude.ai,DIRECT');
+  const out = apply(c);
+  const block = raw => 'AND,((NETWORK,UDP),(DST-PORT,443),(' + raw + ')),REJECT';
+  const rules = [
+    ...['chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com',
+      'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claudeusercontent.com', 'claudemcpcontent.com']
+      .map(domain => block('DOMAIN-SUFFIX,' + domain)),
+    block('DOMAIN,anthropic.gallerycdn.vsassets.io'),
+    block('DOMAIN,servd-anthropic-website.b-cdn.net'),
+    'AND,((NETWORK,UDP),(DST-PORT,443),(RULE-SET,bettbox-google),(NOT,((RULE-SET,bettbox-openai)))),REJECT',
+  ];
+  const firstService = out.rules.indexOf('RULE-SET,bettbox-openai,OpenAI 服务');
+  assert.deepEqual(out.rules.slice(3, firstService), rules);
+  assert.ok(out.rules.indexOf(c.rules[0]) > firstService);
+  assert.deepEqual(apply(out), out);
+});
+
+test('启用 QUIC 443 嗅探，保留原有端口、协议与跳过项', () => {
+  const c = base();
+  c.sniffer = { enable: false, 'skip-domain': ['+.keep.example'],
+    sniff: { quic: { ports: [8443], 'override-destination': true }, TLS: { ports: ['8443'] } } };
+  const out = apply(c);
+  assert.deepEqual(out.sniffer, { enable: true, 'skip-domain': ['+.keep.example'],
+    sniff: { quic: { ports: ['8443', '443'], 'override-destination': true }, TLS: { ports: ['8443'] } } });
+  assert.deepEqual(apply(out), out);
+  const empty = apply({});
+  assert.deepEqual(empty.sniffer, { enable: true, sniff: { QUIC: { ports: ['443'], 'override-destination': false } } });
+  const legacy = apply({ sniffer: { sniffing: ['TLS'], 'port-whitelist': ['8443'] } });
+  assert.deepEqual(legacy.sniffer.sniff.TLS, { ports: ['8443'] });
+  assert.deepEqual(legacy.sniffer.sniff.QUIC.ports, ['443']);
 });
 
 test('订阅：韩国优先，其他支持地区随后，OpenAI 的 INT 最前，Google 的 INT 最后', () => {

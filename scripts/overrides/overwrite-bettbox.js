@@ -220,6 +220,18 @@ function main(config) {
   }
   for (const raw of local.bypass || []) rules.push(route(raw, 'DIRECT'));
   if (corporate) for (const raw of local.corporate || []) rules.push(route(raw, corporate.name));
+  // 与 OpenClash 一致，先拒绝指定服务的 UDP/443，再应用常规代理规则。
+  const quic = 'AND,((NETWORK,UDP),(DST-PORT,443),';
+  for (const domain of [
+    'chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com',
+    'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claudeusercontent.com', 'claudemcpcontent.com',
+  ]) {
+    rules.push(quic + '(DOMAIN-SUFFIX,' + domain + ')),REJECT');
+  }
+  for (const domain of ['anthropic.gallerycdn.vsassets.io', 'servd-anthropic-website.b-cdn.net']) {
+    rules.push(quic + '(DOMAIN,' + domain + ')),REJECT');
+  }
+  rules.push(quic + '(RULE-SET,bettbox-google),(NOT,((RULE-SET,bettbox-openai)))),REJECT');
   remote('openai', 'padavan_openai_domains', hasServiceRoute ? names[0] : 'REJECT', false);
   // Mihomo skips a matched rule when the selected outbound cannot carry UDP.
   if (hasServiceRoute) rules.push('AND,((NETWORK,UDP),(RULE-SET,bettbox-openai)),REJECT');
@@ -234,6 +246,24 @@ function main(config) {
   delete config.rule;
   config['rule-providers'] = ruleProviders;
   config['proxy-groups'] = [...existingGroups, ...added];
+
+  // 从发往 IP 的 QUIC 首包取得域名供规则匹配；新增嗅探保留原目标地址。
+  const sniffer = Object.assign({}, config.sniffer, { enable: true });
+  const protocols = Object.assign({}, sniffer.sniff);
+  if (!Object.keys(protocols).length && Array.isArray(sniffer.sniffing)) {
+    for (const protocol of sniffer.sniffing) {
+      protocols[protocol] = { ports: sniffer['port-whitelist'] || [] };
+    }
+  }
+  const quicKey = Object.keys(protocols).find(protocol => protocol.toUpperCase() === 'QUIC') || 'QUIC';
+  const quicSniffer = Object.assign({}, protocols[quicKey] || { ports: ['443'], 'override-destination': false });
+  // 内核将空端口列表解释为所有端口，保留已有的全端口嗅探。
+  if (quicSniffer.ports && quicSniffer.ports.length) {
+    quicSniffer.ports = unique([...quicSniffer.ports.map(String), '443']);
+  }
+  protocols[quicKey] = quicSniffer;
+  config.sniffer = Object.assign(sniffer, { sniff: protocols });
+
   const dns = Object.assign({}, config.dns || {});
   dns.enable = true;
   const openaiDoh = 'https://1.1.1.1/dns-query#' + names[0];
