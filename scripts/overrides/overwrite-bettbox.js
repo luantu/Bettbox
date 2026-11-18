@@ -67,7 +67,8 @@ function main(config) {
       return parts.join(',');
     });
   }
-  const base = 'http://172.18.34.110:44468';
+  const ruleServerAddress = '172.18.34.110';
+  const base = 'http://' + ruleServerAddress + ':44468';
   const names = ['OpenAI 服务', 'Google 服务', 'OpenAI 服务 · 订阅',
     'Google 服务 · 韩国', 'Google 服务 · 其他'];
   const marker = 'bettbox-service-routing';
@@ -89,6 +90,7 @@ function main(config) {
   }
   const intl = managedGroup(/^(?:FZ-INT-Node|FUZHOU_INTL_node|INTL[-_]node)$/i);
   const corporate = managedGroup(/^Fuzhou-Node-1$/i);
+  const ruleServerProxy = corporate ? corporate.name : 'REJECT';
 
   // 保守地区白名单：两服务官方支持清单的常用交集，2026-10-30 核验。
   // 国家码必须独立或后跟节点编号；不把 BUSINESS / AUSome 识别为 US。
@@ -203,7 +205,7 @@ function main(config) {
     }
     ruleProviders[name] = { type: 'http', behavior: 'classical', format: 'yaml',
       url: base + '/' + file + '.yaml',
-      path: './rule-providers/' + name + '.yaml', interval: 86400, proxy: 'DIRECT' };
+      path: './rule-providers/' + name + '.yaml', interval: 86400, proxy: ruleServerProxy };
     // 发布器从同份远程规则生成快照，仅在无下载缓存时保护首启分流。
     // 正常更新始终使用 HTTP 文件；不在代码中维护另一份域名清单。
     if (typeof BETTBOX_RULE_SNAPSHOT !== 'undefined' && BETTBOX_RULE_SNAPSHOT[key]) {
@@ -212,7 +214,7 @@ function main(config) {
     providerNames.push(name);
     rules.push('RULE-SET,' + name + ',' + target + (noResolve ? ',no-resolve' : ''));
   }
-  rules.push('IP-CIDR,172.18.34.110/32,DIRECT,no-resolve');
+  rules.push('IP-CIDR,' + ruleServerAddress + '/32,' + ruleServerProxy + ',no-resolve');
   // 保留旧脚本的设备绕过和企业路由，随远程脚本分发；不新建服务端规则文件。
   const local = typeof BETTBOX_LOCAL_ROUTING !== 'undefined' ? BETTBOX_LOCAL_ROUTING : {};
   function route(raw, target) {

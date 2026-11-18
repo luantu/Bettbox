@@ -117,7 +117,7 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
   assert.deepEqual(group(c, 'Google 服务')?.proxies, ['FZ-INT-Node']);
   assert.equal(group(c, 'OpenAI 服务').type, 'fallback');
   assert.deepEqual(c.rules.slice(0, 7), [
-    'IP-CIDR,172.18.34.110/32,DIRECT,no-resolve',
+    'IP-CIDR,172.18.34.110/32,Fuzhou-Node-1,no-resolve',
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
     'DOMAIN-SUFFIX,ruijie.work,Fuzhou-Node-1',
     'RULE-SET,bettbox-openai,OpenAI 服务',
@@ -128,7 +128,7 @@ test('无订阅：两服务仅使用 INT，规则来自不同 HTTP providers', (
   for (const p of Object.values(c['rule-providers'])) {
     assert.match(p.url, /^http:\/\/172\.18\.34\.110:44468\//);
     assert.equal(p.type, 'http');
-    assert.equal(p.proxy, 'DIRECT');
+    assert.equal(p.proxy, 'Fuzhou-Node-1');
   }
   assert.equal(c['rule-providers']['bettbox-openai'].url, 'http://172.18.34.110:44468/padavan_openai_domains.yaml');
   assert.equal(c['rule-providers']['bettbox-google'].url, 'http://172.18.34.110:44468/google_proxy_domains.yaml');
@@ -183,6 +183,10 @@ test('未勾选福州时不创建企业组或企业引流，保留现有订阅�
   const out = apply(c);
   assert.equal(out.rules.some(r => r.includes(',Fuzhou-Node-1')), false);
   assert.equal(out['rule-providers']['bettbox-corporate'], undefined);
+  assert.equal(out.rules[0], 'IP-CIDR,172.18.34.110/32,REJECT,no-resolve');
+  for (const p of Object.values(out['rule-providers'])) {
+    assert.equal(p.proxy, 'REJECT');
+  }
 });
 
 test('DoH 显式绑定服务组，数字 IP 不触发自身域名引导循环', () => {
