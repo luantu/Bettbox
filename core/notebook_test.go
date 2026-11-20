@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"os/exec"
 	"reflect"
 	"sync/atomic"
@@ -347,5 +348,32 @@ process.stdout.write(JSON.stringify(ctx.main(fixture)));`
 	}
 	if fallback := root.member(root.current); fallback == nil || fallback.identity.Type != "Fallback" {
 		t.Fatal("default Google fallback was changed")
+	}
+}
+
+func TestNotebookObservedRedirectHosts(t *testing.T) {
+	parse := func(value string) *url.URL {
+		u, err := url.Parse(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	for _, host := range []string{"notebook.google.com", "notebooklm.google", "notebook.google", "accounts.google.com"} {
+		if !notebookRedirectAllowed(parse("https://" + host)) {
+			t.Fatalf("expected redirect host %s to be allowed", host)
+		}
+	}
+	for _, target := range []string{"http://notebook.google", "https://notebook.google:444", "https://notebook.google.example.org"} {
+		if notebookRedirectAllowed(parse(target)) {
+			t.Fatalf("unexpected redirect target allowed: %s", target)
+		}
+	}
+	page := parse("https://notebook.google/?location=unsupported")
+	if notebookFinalUnsupported(page, 301) || !notebookFinalUnsupported(page, 200) {
+		t.Fatal("only the final response with the unsupported marker counts")
+	}
+	if notebookFinalUnsupported(parse("https://notebook.google/"), 200) {
+		t.Fatal("a 200 response without the marker should leave business status unknown")
 	}
 }

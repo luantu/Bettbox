@@ -138,7 +138,7 @@ func probeNotebook(ctx context.Context, proxy C.Proxy, identity notebookIdentity
 				return sample, request.Err() == nil && notebookProxyIdentity(proxy) == identity
 			}, time.Now)
 		})
-		if result.Verdict == notebookAvailable && ctx.Err() == nil {
+		if result.Verdict != notebookUnknown && ctx.Err() == nil {
 			result.Unsupported = notebookBusinessUnsupported(ctx, proxy)
 		}
 	}
@@ -188,12 +188,17 @@ func notebookBusinessUnsupported(ctx context.Context, proxy C.Proxy) bool {
 		return false
 	}
 	response.Body.Close()
-	return (response.StatusCode < 300 || response.StatusCode >= 400) &&
-		slices.Contains(response.Request.URL.Query()["location"], "unsupported")
+	return notebookFinalUnsupported(response.Request.URL, response.StatusCode)
+}
+
+func notebookFinalUnsupported(location *url.URL, status int) bool {
+	return notebookRedirectAllowed(location) && (status < 300 || status >= 400) &&
+		slices.Contains(location.Query()["location"], "unsupported")
 }
 
 func notebookRedirectAllowed(target *url.URL) bool {
 	host := strings.ToLower(target.Hostname())
 	return target.Scheme == "https" && (target.Port() == "" || target.Port() == "443") &&
-		(host == "google.com" || strings.HasSuffix(host, ".google.com"))
+		(host == "google.com" || strings.HasSuffix(host, ".google.com") ||
+			host == "notebooklm.google" || host == "notebook.google")
 }
