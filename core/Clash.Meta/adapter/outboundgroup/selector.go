@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 
 	C "github.com/metacubex/mihomo/constant"
 	P "github.com/metacubex/mihomo/constant/provider"
@@ -16,7 +17,7 @@ type SelectorOption struct {
 type Selector struct {
 	*GroupBase
 	disableUDP bool
-	selected   string
+	selected   atomic.Pointer[string]
 	testUrl    string
 }
 
@@ -83,7 +84,7 @@ func (s *Selector) Now() string {
 func (s *Selector) Set(name string) error {
 	for _, proxy := range s.GetProxies(false) {
 		if proxy.Name() == name {
-			s.selected = name
+			s.selected.Store(&name)
 			return nil
 		}
 	}
@@ -92,7 +93,7 @@ func (s *Selector) Set(name string) error {
 }
 
 func (s *Selector) ForceSet(name string) {
-	s.selected = name
+	s.selected.Store(&name)
 }
 
 // Unwrap implements C.ProxyAdapter
@@ -102,8 +103,12 @@ func (s *Selector) Unwrap(metadata *C.Metadata, touch bool) C.Proxy {
 
 func (s *Selector) selectedProxy(touch bool) C.Proxy {
 	proxies := s.GetProxies(touch)
+	selected := s.selected.Load()
+	if selected == nil {
+		return proxies[0]
+	}
 	for _, proxy := range proxies {
-		if proxy.Name() == s.selected {
+		if proxy.Name() == *selected {
 			return proxy
 		}
 	}
@@ -120,7 +125,7 @@ func (s *Selector) Proxies() []C.Proxy {
 }
 
 func NewSelector(option GroupCommonOption, selectorOption SelectorOption, emptyFallback C.Proxy, providers []P.ProxyProvider) (*Selector, error) {
-	return &Selector{
+	selector := &Selector{
 		GroupBase: NewGroupBase(GroupBaseOption{
 			Name:           option.Name,
 			Type:           C.Selector,
@@ -134,8 +139,9 @@ func NewSelector(option GroupCommonOption, selectorOption SelectorOption, emptyF
 			EmptyFallback:  emptyFallback,
 			Providers:      providers,
 		}),
-		selected:   selectorOption.DefaultSelected,
 		disableUDP: option.DisableUDP,
 		testUrl:    option.URL,
-	}, nil
+	}
+	selector.ForceSet(selectorOption.DefaultSelected)
+	return selector, nil
 }

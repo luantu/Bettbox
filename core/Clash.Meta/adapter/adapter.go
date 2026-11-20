@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/metacubex/mihomo/common/atomic"
@@ -23,6 +24,7 @@ var UnifiedDelay = atomic.NewBool(false)
 
 const (
 	defaultHistoriesNum = 10
+	NotebookProbeURL    = "https://notebook.google.com/?mihomostatus=notebook"
 )
 
 type internalProxyState struct {
@@ -32,9 +34,10 @@ type internalProxyState struct {
 
 type Proxy struct {
 	C.ProxyAdapter
-	alive   atomic.Bool
-	history *queue.Queue[C.DelayHistory]
-	extra   proxyStates
+	alive          atomic.Bool
+	history        *queue.Queue[C.DelayHistory]
+	extra          proxyStates
+	notebookTestMu sync.Mutex
 }
 
 // Adapter implements C.Proxy
@@ -162,7 +165,25 @@ func (p *Proxy) MarshalJSON() ([]byte, error) {
 
 // URLTest get the delay for the specified URL
 // implements C.Proxy
-func (p *Proxy) URLTest(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (t uint16, err error) {
+func (p *Proxy) URLTest(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (uint16, error) {
+	if url == NotebookProbeURL {
+		p.notebookTestMu.Lock()
+		defer p.notebookTestMu.Unlock()
+	}
+	return p.urlTest(ctx, url, expectedStatus)
+}
+
+// WithNotebookTests serializes the negative control and observations with every
+// other test of this proxy and URL. The callback must finish all tests before returning.
+func (p *Proxy) WithNotebookTests(run func(func(context.Context, utils.IntRanges[uint16]) (uint16, error))) {
+	p.notebookTestMu.Lock()
+	defer p.notebookTestMu.Unlock()
+	run(func(ctx context.Context, expected utils.IntRanges[uint16]) (uint16, error) {
+		return p.urlTest(ctx, NotebookProbeURL, expected)
+	})
+}
+
+func (p *Proxy) urlTest(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (t uint16, err error) {
 	var satisfied bool
 
 	defer func() {

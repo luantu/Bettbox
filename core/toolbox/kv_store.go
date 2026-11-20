@@ -27,6 +27,7 @@ var kvSpaces = map[string]kvSpace{
 	"ip":        {file: "ip_cache.dat", ttl: 30 * 24 * time.Hour, limit: 1024},
 	"speedTest": {file: "speed_test.dat", ttl: 14 * 24 * time.Hour, limit: 200},
 	"toolbox":   {file: "toolbox.dat", limit: 256},
+	"notebook":  {file: "notebook.dat", limit: 1024},
 }
 
 type kvEntry struct {

@@ -159,6 +159,21 @@ func handleAction(action *Action, result ActionResult) {
 	case getModeMethod:
 		result.success(handleGetMode())
 		return
+	case getNotebookMethod:
+		runLock.Lock()
+		notebook.kickLocked()
+		view := notebook.viewLocked()
+		runLock.Unlock()
+		result.success(view)
+		return
+	case setNotebookMethod:
+		view, err := applyNotebookRequest(action.Data.(string))
+		if err != nil {
+			result.error(err)
+		} else {
+			result.success(view)
+		}
+		return
 	case getProxiesMethod:
 		result.success(handleGetProxies())
 		return

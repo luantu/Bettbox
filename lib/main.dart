@@ -18,6 +18,7 @@ import 'package:synchronized/synchronized.dart';
 import 'application.dart';
 import 'clash/core.dart';
 import 'clash/lib.dart';
+import 'clash/interface.dart' show decodeActionResult;
 import 'common/common.dart';
 import 'common/external_control.dart';
 import 'common/smart_network_policy.dart';
@@ -32,6 +33,7 @@ import 'services/vpn_run_intent.dart';
 
 ReceivePort? _serviceReceiverPort;
 ReceivePort? _messageReceiverPort;
+SendPort? _mainEventSendPort;
 
 Future<void> main(List<String> args) async {
   globalState.isService = false;
@@ -122,6 +124,7 @@ Future<void> _service(List<String> flags) async {
     final quickStart = flags.contains('quick') || automaticQuickStart;
     final bootStart = flags.contains('boot');
     final clashLibHandler = ClashLibHandler();
+    _attachServiceMessagePort(clashLibHandler);
     final nativeSgNodes = CorplinkNativeNodes(
       (message, timeout) =>
           clashLibHandler.invokeAction(message, timeout: timeout),
@@ -595,7 +598,16 @@ Future<void> _service(List<String> flags) async {
         },
         onNetworkChanged: (defaultChanged) {
           scheduleSmartAutoStopCheck();
-          if (defaultChanged) unawaited(vpn?.quickResponse());
+          if (defaultChanged) {
+            unawaited(vpn?.quickResponse());
+            unawaited(
+              clashLibHandler.notebookNetworkChanged().catchError(
+                (Object error) => commonPrint.warn(
+                  'Notebook network change: ${error.runtimeType}',
+                ),
+              ),
+            );
+          }
           networkHandoffRecovery.networkChanged();
           unawaited(maintainSgNodes());
         },
@@ -638,8 +650,8 @@ void _handleMainIpc(
     return;
   }
 
+  _mainEventSendPort = sendPort;
   _serviceReceiverPort?.close();
-  _messageReceiverPort?.close();
 
   _serviceReceiverPort = ReceivePort();
   _serviceReceiverPort!.listen((message) async {
@@ -670,14 +682,38 @@ void _handleMainIpc(
   });
   _safeSend(sendPort, _serviceReceiverPort!.sendPort);
 
-  _messageReceiverPort = ReceivePort();
-  clashLibHandler.attachMessagePort(_messageReceiverPort!.sendPort.nativePort);
-  _messageReceiverPort!.listen((message) {
-    _safeSend(sendPort, message);
-  });
-
   if (clashLibHandler.getRunTime() != null) {
     clashLibHandler.startListener();
+  }
+}
+
+void _attachServiceMessagePort(ClashLibHandler core) {
+  _messageReceiverPort?.close();
+  final port = ReceivePort();
+  _messageReceiverPort = port;
+  core.attachMessagePort(port.sendPort.nativePort);
+  port.listen((message) {
+    final target = _mainEventSendPort;
+    if (target != null) _safeSend(target, message);
+    if (message is String && message.contains('"notebookSwitch"')) {
+      unawaited(_showNotebookSwitchNotification(message));
+    }
+  });
+}
+
+Future<void> _showNotebookSwitchNotification(String message) async {
+  try {
+    final result = decodeActionResult(message);
+    final event = result?.data;
+    if (event is! Map || event['type'] != 'notebookSwitch') return;
+    final data = event['data'];
+    if (data is! Map || data['notify'] != true) return;
+    await Service().methodChannel.invokeMethod<bool>('notifyNotebookSwitch', {
+      'group': data['group'],
+      'selected': data['selected'],
+    });
+  } catch (error) {
+    commonPrint.warn('Notebook notification: ${error.runtimeType}');
   }
 }
 

@@ -236,6 +236,19 @@ class ClashLibHandler {
     return result.whenComplete(receiver.close);
   }
 
+  Future<void> notebookNetworkChanged() async {
+    await invokeAction(
+      json.encode(
+        Action(
+          id: 'notebookNetwork-${utils.id}',
+          method: ActionMethod.setNotebook,
+          data: '{"network":true}',
+        ),
+      ),
+      timeout: const Duration(seconds: 5),
+    );
+  }
+
   Future<bool> reconnectTunnels() async {
     final id = 'reconnectTunnels-${DateTime.now().microsecondsSinceEpoch}';
     final response = await invokeAction(

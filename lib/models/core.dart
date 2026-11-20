@@ -14,6 +14,8 @@ abstract mixin class AppMessageListener {
 
   void onGroupsChanged() {}
 
+  void onNotebookSwitch(Map data) {}
+
   void onRequest(TrackerInfo connection) {}
 
   void onSpeedTest(SpeedTestState state) {}

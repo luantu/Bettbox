@@ -73,6 +73,15 @@ class ClashCore {
     return clashInterface.preload();
   }
 
+  Future<Map> getNotebook() =>
+      clashInterface.invoke<Map>(method: ActionMethod.getNotebook);
+
+  Future<Map> setNotebook(Map<String, Object?> request) =>
+      clashInterface.invoke<Map>(
+        method: ActionMethod.setNotebook,
+        data: json.encode(request),
+      );
+
   Future<Map> getCorplinkSgStatus() => clashInterface.getCorplinkSgStatus();
 
   Future<List<dynamic>> listCorplinkVpnNodes(Map<String, dynamic> request) =>

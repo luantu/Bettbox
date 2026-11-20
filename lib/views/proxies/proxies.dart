@@ -15,6 +15,7 @@ import '../profiles/managed_options.dart' show showManagedOptions;
 import '../profiles/scripts.dart'
     show showGroupSwitchOptions, showScriptCustomOptions;
 import 'advanced_settings.dart';
+import 'notebook.dart';
 import 'setting.dart';
 import 'tab.dart';
 
@@ -110,6 +111,20 @@ class _ProxiesViewState extends ConsumerState<ProxiesView> {
                   );
                 },
               ),
+            PopupMenuItemData(
+              icon: Icons.fact_check_outlined,
+              label: NotebookView.title(context),
+              onPressed: () {
+                showExtend(
+                  context,
+                  builder: (_, type) => AdaptiveSheetScaffold(
+                    type: type,
+                    body: const NotebookView(),
+                    title: NotebookView.title(context),
+                  ),
+                );
+              },
+            ),
             PopupMenuItemData(
               icon: Icons.settings_suggest,
               label: appLocalizations.advancedSettings,

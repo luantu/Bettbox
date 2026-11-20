@@ -5,9 +5,10 @@ const vm = require('node:vm');
 const path = require('node:path');
 const script = path.join(__dirname, '../../scripts/overrides/overwrite-bettbox.js');
 
-function apply(input, keywords, servers, strictMode) {
+function apply(input, keywords, servers, strictMode, notebookSelector = false) {
   let source = fs.existsSync(script) ? fs.readFileSync(script, 'utf8') : 'function main(c) { return c; }';
   if (strictMode !== undefined) source = source.replace('const SERVER_STRICT_MODE = true;', 'const SERVER_STRICT_MODE = ' + strictMode + ';');
+  if (notebookSelector) source = source.replace('const GOOGLE_NOTEBOOK_SELECTOR = false;', 'const GOOGLE_NOTEBOOK_SELECTOR = true;');
   const ctx = vm.createContext({ BETTBOX_LOCAL_ROUTING: {
     bypass: ['IP-CIDR,127.0.0.0/8,no-resolve'], corporate: ['DOMAIN-SUFFIX,ruijie.work'],
   } });
@@ -296,6 +297,25 @@ test('proxy-provider 的韩国层和其他层分别过滤，无匹配时明确�
     assert.equal(filter.test(good) && !excluded.test(good), true);
     assert.equal(filter.test(bad) && !excluded.test(bad), false);
   }
+});
+
+test('显式启用 Google Notebook Selector，保留默认 Fallback 和原规则目标', () => {
+  const c = base();
+  c.proxies.push({ name: 'KR01', type: 'ss' });
+  c['proxy-providers'] = { airport: { type: 'inline', payload: [{ name: 'JP01', type: 'ss' }] } };
+  const out = apply(c, undefined, undefined, undefined, true);
+  const google = group(out, 'Google 服务');
+  assert.equal(google.type, 'select');
+  assert.deepEqual(google.proxies, ['Google 服务 · 自动', 'KR01', 'FZ-INT-Node']);
+  assert.equal(google['default-selected'], 'Google 服务 · 自动');
+  assert.deepEqual(google.use, ['airport']);
+  assert.equal(group(out, 'Google 服务 · 自动').type, 'fallback');
+  assert.deepEqual(group(out, 'Google 服务 · 自动').proxies, group(apply(c), 'Google 服务').proxies);
+  assert.ok(out.rules.includes('RULE-SET,bettbox-google,Google 服务'));
+  assert.ok(out.dns['nameserver-policy']['rule-set:bettbox-google'][0].endsWith('#Google 服务'));
+  assert.deepEqual(apply(out, undefined, undefined, undefined, true), out);
+  assert.equal(group(apply(out), 'Google 服务').type, 'fallback');
+  assert.equal(group(apply(out), 'Google 服务 · 自动'), undefined);
 });
 
 test('服务探针分开，不允许 403 被当成健康', () => {

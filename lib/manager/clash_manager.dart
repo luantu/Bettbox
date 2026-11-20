@@ -133,6 +133,15 @@ class _ClashContainerState extends ConsumerState<ClashManager>
   }
 
   @override
+  void onNotebookSwitch(Map data) {
+    if (!system.isAndroid && data['notify'] == true) {
+      globalState.showNotifier(
+        "Notebook · ${data['group']} → ${data['selected']}",
+      );
+    }
+  }
+
+  @override
   void onLog(Log log) {
     globalState.appController.addLog(log);
     // Mirror core logs to logcat so the WireGuard/CorpLink tunnel data plane

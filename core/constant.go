@@ -174,6 +174,8 @@ const (
 	generateAgeKeyPairMethod             Method = "generateAgeKeyPair"
 	convertAgeSecretKeyToPublicKeyMethod Method = "convertAgeSecretKeyToPublicKey"
 	getModeMethod                        Method = "getMode"
+	getNotebookMethod                    Method = "getNotebook"
+	setNotebookMethod                    Method = "setNotebook"
 	parseExternalProviderContentMethod   Method = "parseExternalProviderContent"
 	getCoreStatusMethod                  Method = "getCoreStatus"
 	getRequestsMethod                    Method = "getRequests"
@@ -227,11 +229,12 @@ type Message struct {
 }
 
 const (
-	LogMessage           MessageType = "log"
-	DelayMessage         MessageType = "delay"
-	DelaysMessage        MessageType = "delays"
-	GroupsChangedMessage MessageType = "groupsChanged"
-	RequestMessage       MessageType = "request"
+	LogMessage            MessageType = "log"
+	DelayMessage          MessageType = "delay"
+	DelaysMessage         MessageType = "delays"
+	GroupsChangedMessage  MessageType = "groupsChanged"
+	NotebookSwitchMessage MessageType = "notebookSwitch"
+	RequestMessage        MessageType = "request"
 )
 
 func (message *Message) Json() (string, error) {

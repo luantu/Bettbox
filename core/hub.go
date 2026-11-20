@@ -102,6 +102,7 @@ func handleStartListener() bool {
 	defer runLock.Unlock()
 	isRunning = true
 	updateListeners()
+	notebook.syncPollLocked()
 	resolver.ResetConnection()
 	return true
 }
@@ -110,6 +111,7 @@ func handleStopListener() bool {
 	runLock.Lock()
 	defer runLock.Unlock()
 	isRunning = false
+	notebook.stopLocked()
 	listener.StopListener()
 	toolbox.FlushTrafficStats()
 	return true
@@ -135,6 +137,10 @@ func handleForceGc(forceFreeOSMemory, purge bool) {
 }
 
 func handleShutdown() bool {
+	runLock.Lock()
+	notebook.stopLocked()
+	notebook.profile = ""
+	runLock.Unlock()
 	toolbox.FlushTrafficStats()
 	toolbox.FlushKvStore()
 	stopListeners()
@@ -417,6 +423,10 @@ func handleChangeProxy(data string, fn func(string string)) {
 			fn(err.Error())
 			return
 		}
+		if params.GroupName == nil || params.ProxyName == nil {
+			fn("Group or proxy missing")
+			return
+		}
 		groupName := *params.GroupName
 		proxyName := *params.ProxyName
 		group, ok := tunnel.Proxies()[groupName]
@@ -430,6 +440,7 @@ func handleChangeProxy(data string, fn func(string string)) {
 			fn("Group is not selectable")
 			return
 		}
+		notebook.manualLocked(groupName)
 		if proxyName == "" {
 			selector.ForceSet(proxyName)
 		} else {

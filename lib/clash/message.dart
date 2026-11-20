@@ -20,6 +20,8 @@ class ClashMessage {
             listener.onDelays(delays ??= _decodeDelays(m.data));
           case AppMessageType.groupsChanged:
             listener.onGroupsChanged();
+          case AppMessageType.notebookSwitch:
+            if (m.data is Map) listener.onNotebookSwitch(m.data as Map);
           case AppMessageType.request:
             listener.onRequest(TrackerInfo.fromJson(m.data));
           case AppMessageType.speedTest:

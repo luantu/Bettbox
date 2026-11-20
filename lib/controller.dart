@@ -134,6 +134,7 @@ class AppController {
   }
 
   void changeProxyDebounce(String groupName, String proxyName) {
+    unawaited(_invalidateNotebookSelection(groupName));
     debouncer.call(FunctionTag.changeProxy, (
       String groupName,
       String proxyName,
@@ -142,6 +143,14 @@ class AppController {
       await updateGroups();
       addCheckIp();
     }, args: [groupName, proxyName]);
+  }
+
+  Future<void> _invalidateNotebookSelection(String group) async {
+    try {
+      await clashCore.setNotebook({'group': group, 'manual': true});
+    } catch (error) {
+      commonPrint.warn('Notebook selection invalidation: ${error.runtimeType}');
+    }
   }
 
   void _invalidateCoreReads() {

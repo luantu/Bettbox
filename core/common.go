@@ -536,6 +536,7 @@ func setupConfig(params *SetupParams) (global string, err error) {
 		}
 	}()
 	cancelDelayBatches()
+	notebook.invalidateLocked()
 
 	constant.DefaultTestURL = params.TestURL
 
@@ -560,6 +561,7 @@ func setupConfig(params *SetupParams) (global string, err error) {
 		selectedMap["GLOBAL"] = prepared.global
 	}
 	patchSelectGroup(selectedMap)
+	notebook.resetLocked(params.ProfilePath)
 	updateListeners()
 	tryUnloadGeoData()
 	debug.FreeOSMemory()

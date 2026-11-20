@@ -9,6 +9,9 @@ const SERVER_STRICT_MODE = true;
 // 按字面子串匹配，不是正则表达式。飞连管理的 WG 节点不参与过滤。
 const DELETED_NAME_KEYWORDS = ['IPV6专用', '剩余', '到期'];
 
+// 由用户显式启用。保留原 Fallback 为 Google 服务的默认项。
+const GOOGLE_NOTEBOOK_SELECTOR = false;
+
 function main(config) {
   'use strict';
   // 先过滤，再从剩余节点生成服务组；provider 更新时由内核继续过滤。
@@ -70,7 +73,7 @@ function main(config) {
   const ruleServerAddress = '172.18.34.110';
   const base = 'http://' + ruleServerAddress + ':44468';
   const names = ['OpenAI 服务', 'Google 服务', 'OpenAI 服务 · 订阅',
-    'Google 服务 · 韩国', 'Google 服务 · 其他'];
+    'Google 服务 · 韩国', 'Google 服务 · 其他', 'Google 服务 · 自动'];
   const marker = 'bettbox-service-routing';
   const previous = config[marker];
   const owned = previous && previous.version === 1 ? previous.groups || [] : [];
@@ -164,7 +167,9 @@ function main(config) {
   const openaiProbe = isolatedProbe('https://chatgpt.com/cdn-cgi/trace', 'openai');
   const googleProbe = isolatedProbe('https://www.google.com/generate_204', 'google');
   let openaiMembers = [...(intl ? [intl.name] : []), ...supported];
-  let googleMembers = [...korean, ...others, ...(intl ? [intl.name] : [])];
+  const googleCandidates = [...korean, ...others, ...(intl ? [intl.name] : [])];
+  let googleMembers = googleCandidates;
+  let googleProviders;
   if (providers.length) {
     // proxy-provider 内容在运行期才加载，以单独层级保证韩国优先和 INT 最后。
     // 多地区冲突名称在运行期通过 exclude-filter 排除。表达式兼容 Mihomo regexp2。
@@ -176,6 +181,7 @@ function main(config) {
     ).join('|');
     const exclude = '(?i)' + rejected + '|' + conflicts;
     const excludedTypes = 'Direct|Reject|RejectDrop|Compatible|Pass|PassRule|Dns';
+    googleProviders = { use: providers, filter: '(?i)' + all, 'exclude-filter': exclude, 'exclude-type': excludedTypes };
     const openaiTier = fallback(names[2], supported, openaiProbe, '200',
       { use: providers, filter: '(?i)' + all, 'exclude-filter': exclude, 'exclude-type': excludedTypes, hidden: true });
     const koreanTier = fallback(names[3], korean, googleProbe, '204',
@@ -187,7 +193,15 @@ function main(config) {
   }
   if (hasServiceRoute) {
     fallback(names[0], openaiMembers, openaiProbe, '200');
-    fallback(names[1], googleMembers, googleProbe, '204');
+    if (GOOGLE_NOTEBOOK_SELECTOR) {
+      const automatic = fallback(names[5], googleMembers, googleProbe, '204', { hidden: true });
+      if (existingNames.has(names[1])) throw new Error('SERVICE_GROUP_NAME_COLLISION: ' + names[1]);
+      added.push(Object.assign({ name: names[1], type: 'select',
+        proxies: unique([automatic, ...googleCandidates]), 'default-selected': automatic,
+        'empty-fallback': 'REJECT' }, googleProviders));
+    } else {
+      fallback(names[1], googleMembers, googleProbe, '204');
+    }
   }
 
   const rules = [];

@@ -1,8 +1,14 @@
 package com.appshub.bettbox.plugins
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.appshub.bettbox.BettboxApplication
 import com.appshub.bettbox.GlobalState
 import com.appshub.bettbox.RunState
 import com.appshub.bettbox.models.VpnOptions
@@ -45,6 +51,29 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             }
         }
+    }
+
+    private fun notifyNotebookSwitch(group: String?, selected: String?): Boolean {
+        if (group.isNullOrBlank() || selected.isNullOrBlank()) return false
+        val context = BettboxApplication.getAppContext()
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return false
+        val channelId = "notebook_switch"
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(
+                    NotificationChannel(channelId, "Notebook", NotificationManager.IMPORTANCE_DEFAULT),
+                )
+            }
+            val notification = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setContentTitle("Notebook · $group")
+                .setContentText(selected)
+                .setAutoCancel(true)
+                .build()
+            manager.notify("notebook:$group", 1, notification)
+            true
+        }.getOrDefault(false)
     }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -96,6 +125,9 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
             "getCurrentDns" -> result.success(VpnPlugin.getCurrentDns())
+            "notifyNotebookSwitch" -> result.success(
+                notifyNotebookSwitch(call.argument<String>("group"), call.argument<String>("selected")),
+            )
             "setQuickResponse" -> {
                 VpnPlugin.setQuickResponse(call.argument<Boolean>("enabled") ?: false)
                 result.success(true)
