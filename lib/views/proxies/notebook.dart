@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:bett_box/clash/core.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class NotebookView extends StatefulWidget {
   const NotebookView({super.key, this.readState, this.updateState});
